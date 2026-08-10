@@ -62,7 +62,7 @@ export class BootScene extends Phaser.Scene {
     this.createLimboTexture();
     this.createPlinkoTexture();
 
-    this.scene.start("StartMenuScene");
+    this.scene.start("LoginScene");
   }
 
   /** A simple drawn door - replaces the earlier placeholder "sign" look. */

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { BootScene } from "./scenes/BootScene";
+import { LoginScene } from "./scenes/LoginScene";
 import { StartMenuScene } from "./scenes/StartMenuScene";
 import { OverworldScene } from "./scenes/OverworldScene";
 import { SlotsScene } from "./scenes/SlotsScene";
@@ -34,6 +35,7 @@ const config: Phaser.Types.Core.GameConfig = {
   },
   scene: [
     BootScene,
+    LoginScene,
     StartMenuScene,
     OverworldScene,
     SlotsScene,
@@ -48,4 +50,7 @@ const config: Phaser.Types.Core.GameConfig = {
   ]
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+// Debug handle only - lets the browser console inspect the running game
+// (e.g. `__game.scene.getScene("LoginScene")`). Harmless to leave in.
+(window as unknown as { __game: Phaser.Game }).__game = game;

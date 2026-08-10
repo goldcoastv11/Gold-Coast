@@ -1,18 +1,23 @@
 # Casino POC
 
-A minimal, runnable proof of concept: a Pokémon-style pixel-art casino floor
-you walk around, with an NPC to claim a daily Gold Coin bonus and a table you
-can sit down at to play a slot machine.
+A minimal, runnable proof of concept: log in with a username/password, then
+walk around a Pokémon-style pixel-art casino floor with nine playable games,
+an NPC to claim a Gold Coin bonus, and a skin shop.
 
 Built with **Phaser 3** + **TypeScript** + **Vite**.
 
 ## What's here
 
-- `src/main.ts` — Phaser game config, registers the three scenes
+- `src/main.ts` — Phaser game config, registers every scene
 - `src/scenes/BootScene.ts` — generates placeholder pixel-art textures on the
   fly (no downloaded art needed to run this today)
-- `src/scenes/StartMenuScene.ts` — simple title screen with an "Enter Casino"
-  button, shown before the overworld loads
+- `src/scenes/LoginScene.ts` — the first screen after boot: username/password
+  fields you click to focus, then type on the keyboard (Tab/Enter to move
+  between fields, Enter on password to submit). An unrecognized username
+  creates a fresh profile; an existing one checks the password. See
+  "Login is NOT real security" below before relying on this for anything.
+- `src/scenes/StartMenuScene.ts` — title screen showing who's logged in, an
+  "Enter Casino" button, and a "Log Out" button (back to `LoginScene`)
 - `src/scenes/OverworldScene.ts` — a large casino floor (80x56 tiles, roughly
   60% bigger than before) that the camera only shows a portion of at a time,
   so you have to walk around to see the whole room. Chip attendant sits in
@@ -56,7 +61,9 @@ Built with **Phaser 3** + **TypeScript** + **Vite**.
 - `src/GameState.ts` — placeholder client-side Gold Coin / Stake Coin
   balances (see the warning in that file — this is NOT how a real build
   should handle money or RNG). Also holds the skin catalog: 17 purchasable
-  skins plus the free "Classic" default, each with a random price.
+  skins plus the free "Classic" default, each with a random price. Every
+  balance/skin change auto-saves to `localStorage` under the logged-in
+  username, so progress survives a page reload or closing the tab.
 - **Skin Attendant** (center-top of the map) — browse and buy skins you
   don't own yet, now with a small preview sprite next to each entry so you
   can see the outfit before buying
@@ -122,20 +129,31 @@ pixel-art casino and sitting down at a table to play feel good.
   `dice_table`, `limbo_machine`, `plinko_board`) are simple shapes drawn
   with Phaser Graphics in `BootScene.ts` (same technique as the exit door),
   not real tileset art — swap for real sprites once art is sourced
-- `GameState.ts` stores balances client-side with no persistence and no
-  server authority (see below)
+- **Login is NOT real security.** `LoginScene`/`GameState.login()` check a
+  password against a hash stored in this browser's own `localStorage` —
+  there is no server, no real password hashing (just a non-cryptographic
+  checksum so it isn't literal plain text), and no protection against
+  someone opening devtools and reading or editing any profile, including
+  the "password" they'd need. It exists only so 2-3 people sharing a
+  device/link don't stomp on each other's coins and skins. It also means
+  progress lives in one specific browser on one specific device — clearing
+  site data, using a different browser, or using incognito loses it, and
+  it never syncs between devices. Fine for showing friends; do not build on
+  top of this for anything real.
+- Balances/skins persist to `localStorage`, but the values themselves are
+  still entirely client-controlled — nothing stops a player from editing
+  their own `localStorage` to give themselves coins. In a real build,
+  **all currency balances and RNG outcomes must be computed server-side**
+  — never trust the client. This matters even more here than in a typical
+  game, since real regulatory scrutiny applies to how fairly/verifiably
+  outcomes are generated.
 - The bonus coin claim currently has no cooldown or limit — intentional
   for this POC stage, but a real version needs one
 - **The dealer's "dealing" motion is the walk-cycle animation looping in
   place**, not a real dealing animation - there are no dedicated dealing
   frames yet, so this is a stand-in for "some idle motion" rather than an
   authentic gesture.
-- `GameState.ts` stores balances client-side with no persistence and no
-  server authority. In a real build, **all currency balances and RNG
-  outcomes must be computed server-side** — never trust the client. This
-  matters even more here than in a typical game, since real regulatory
-  scrutiny applies to how fairly/verifiably outcomes are generated.
-- No accounts/auth, no backend, no database
+- No real backend, no database — everything lives in this one browser
 
 ## Next steps (once the core loop feels good)
 
