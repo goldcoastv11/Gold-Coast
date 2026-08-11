@@ -238,6 +238,20 @@ const GAME_STATIONS: FurnitureStationDef[] = [
     label: "Baccarat",
     prompt: "Press E to play Baccarat",
     sceneKey: "BaccaratScene"
+  },
+
+  // Video Poker cabinet - bottom of the right corridor, below Hi-Lo (floor pre-approved)
+  {
+    col: 67,
+    row: 48,
+    textureKey: "video_poker_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Video Poker",
+    prompt: "Press E to play Video Poker",
+    sceneKey: "VideoPokerScene"
   }
 ];
 

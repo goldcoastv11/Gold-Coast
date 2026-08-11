@@ -16,6 +16,7 @@ import { KenoScene } from "./scenes/KenoScene";
 import { WheelScene } from "./scenes/WheelScene";
 import { HiLoScene } from "./scenes/HiLoScene";
 import { BaccaratScene } from "./scenes/BaccaratScene";
+import { VideoPokerScene } from "./scenes/VideoPokerScene";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -54,7 +55,8 @@ const config: Phaser.Types.Core.GameConfig = {
     KenoScene,
     WheelScene,
     HiLoScene,
-    BaccaratScene
+    BaccaratScene,
+    VideoPokerScene
   ]
 };
 

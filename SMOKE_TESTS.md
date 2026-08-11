@@ -165,6 +165,43 @@ case.
       a loss; blackjack (natural 21) pays the stated bonus odds.
 - [ ] **Dragon Tower** — cashing out at a given level pays that level's
       multiplier; picking the wrong tile ends the round and forfeits the bet.
+- [x] **Video Poker** (#15) — 9/6 Jacks-or-Better. Games' write-up (known-hand
+      tests + 500k-hand Monte Carlo + live play) requested and reviewed, but
+      QA verified independently rather than trusting it: wrote a from-scratch
+      reference hand evaluator (not reused from VideoPokerScene.ts) and ran
+      it against 15 forced hands - one per paytable tier plus the trickiest
+      edge cases (a *suited* A-2-3-4-5 wheel correctly resolves to Straight
+      Flush 50x, not misfired as Royal; a *mixed-suit* wheel correctly
+      resolves to plain Straight 4x; a pair of 10s correctly pays 0x, not
+      Jacks-or-Better's 1x, since 10 < J; a gapped run 2-3-4-5-7 correctly
+      pays 0x) - each forced through the real deal()→draw() pipeline (dealt
+      normally, then hand overwritten with all 5 held so draw() evaluates
+      exactly the crafted hand) so payout arithmetic was checked too, not
+      just classification. All 15/15 matched exactly, including Royal Flush
+      250x (+6250 on a 25 GC bet). Separately ran one real (non-forced)
+      hand through the actual click-handler-equivalent path
+      (deal→toggleHold(0)→toggleHold(2)→draw): deck went 47→44 (5 dealt,
+      3 of the 5 replaced), and the two held cards were confirmed unchanged
+      by reference after draw - held-card persistence and deck accounting
+      both correct. Across the full test run (63 ledger transactions between
+      this and the Baccarat pass), exactly 1 was ever SC (the original
+      signup bonus) - GC-only confirmed empirically, not just by reading the
+      source (which also shows `stakeCoins` is read-only there, same as
+      Baccarat).
+- [x] **Baccarat** (#14) — driven live 2026-08-10, ~20 rounds across all three
+      bet types (Player/Banker/Tie), explicitly confirming GC-only (games'
+      completion report didn't state this outright, so QA verified directly
+      rather than assuming): read BaccaratScene.ts end-to-end - the only
+      `stakeCoins` reference in the file is the read-only HUD string, and
+      since #16 removed GameState's `stakeCoins` setter, any attempt to write
+      it here would now be a `tsc` compile error, which this file doesn't
+      hit. Live-verified every payout path: Player win pays 2.0x (+50 GC on a
+      25 GC bet), Banker win pays 1.95x (+49 GC on 25 GC, correctly
+      commission-adjusted), Tie win pays 9.0x (+225 GC on 25 GC), a tie
+      result while betting Player/Banker pushes (bet returned, net GC delta
+      0), and plain losses debit exactly the bet. SC balance (checked every
+      round) never moved once across the whole run regardless of bet type or
+      outcome.
 - [x] **Keno** — driven live 2026-08-10 (quick-picked 10/10, played through the
       160ms-per-number reveal timer, resolved 2/10 matched → correctly "not
       enough to win" since minPayHits(10)=4; bet deducted before the reveal

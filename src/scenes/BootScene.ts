@@ -65,6 +65,7 @@ export class BootScene extends Phaser.Scene {
     this.createWheelTexture();
     this.createHiLoTexture();
     this.createBaccaratTexture();
+    this.createVideoPokerTexture();
     this.createComingSoonTexture();
 
     this.scene.start("LoginScene");
@@ -380,6 +381,48 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("baccarat_table", w, h);
+    g.destroy();
+  }
+
+  /** A small drawn video poker cabinet - a mini screen showing a 5-card hand, cabinet-scale like the others. */
+  private createVideoPokerTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a2f3a, 1);
+    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+    g.lineStyle(2, 0x0e1015, 1);
+    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+
+    // screen
+    g.fillStyle(0x0b0d12, 1);
+    g.fillRoundedRect(9, 15, w - 18, 24, 4);
+
+    // five tiny cards on the screen
+    const cardW = 4;
+    const cardH = 10;
+    const cardGap = 1.5;
+    const totalW = 5 * cardW + 4 * cardGap;
+    const startX = w / 2 - totalW / 2;
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle(0xf5f2ea, 1);
+      g.fillRoundedRect(startX + i * (cardW + cardGap), 20, cardW, cardH, 1);
+    }
+
+    // control buttons row
+    const btnColors = [0xff5252, 0x00e676, 0x00e676, 0x00e676, 0xffd54f];
+    const btnW = 4;
+    const btnGap = 1.5;
+    const btnTotal = 5 * btnW + 4 * btnGap;
+    const btnStartX = w / 2 - btnTotal / 2;
+    btnColors.forEach((color, i) => {
+      g.fillStyle(color, 1);
+      g.fillRoundedRect(btnStartX + i * (btnW + btnGap), 42, btnW, 4, 1);
+    });
+
+    g.fillStyle(0x1a1d24, 1);
+    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    g.generateTexture("video_poker_machine", w, h);
     g.destroy();
   }
 
