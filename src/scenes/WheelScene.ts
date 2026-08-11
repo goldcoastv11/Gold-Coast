@@ -1,0 +1,323 @@
+import Phaser from "phaser";
+import { gameState } from "../GameState";
+import { Theme } from "../ui/Theme";
+import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+
+const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
+const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
+
+const WHEEL_CENTER_X = 400;
+const WHEEL_CENTER_Y = 292;
+const WHEEL_RADIUS = 108;
+
+type RiskKey = "low" | "medium" | "high";
+
+interface WheelTier {
+  count: number; // how many of the 20 segments pay this tier
+  weight?: number; // relative payout emphasis; defaults to 1/count (rarer tier pays more)
+}
+
+interface RiskConfig {
+  key: RiskKey;
+  label: string;
+  zeroCount: number; // losing segments (always pay 0)
+  tiers: WheelTier[];
+}
+
+/**
+ * Three risk levels, each spending the same 20 segments differently:
+ * - low: no losing segments, small spread around ~1x
+ * - medium: some losing segments, moderate spread
+ * - high: mostly losing segments, one rare segment with a big multiplier
+ *   (custom weights instead of the 1/count default so the single rarest
+ *   segment gets a disproportionate jackpot instead of just "1/count" more)
+ * Segment counts were hand-picked (like Plinko's slot layout); the
+ * multiplier for each tier is *derived*, not picked - see tierMultipliers.
+ */
+const RISK_CONFIGS: Record<RiskKey, RiskConfig> = {
+  low: { key: "low", label: "Low", zeroCount: 2, tiers: [{ count: 12 }, { count: 6 }] },
+  medium: {
+    key: "medium",
+    label: "Medium",
+    zeroCount: 6,
+    tiers: [{ count: 8 }, { count: 4 }, { count: 2 }]
+  },
+  high: {
+    key: "high",
+    label: "High",
+    zeroCount: 16,
+    tiers: [
+      { count: 2, weight: 3 },
+      { count: 1, weight: 8 },
+      { count: 1, weight: 40 }
+    ]
+  }
+};
+
+/**
+ * Each risk config assigns `count` (out of SEGMENT_COUNT) segments to pay
+ * out at some multiplier. If a tier's multiplier were priced independently
+ * as (1-edge)/probability - the same style Dice/Mines use for their single
+ * winning outcome - multiple simultaneous paying tiers would each
+ * contribute ~(1-edge) to the expected value and the sum would blow way
+ * past 1 (see the equivalent bug caught and fixed in KenoScene). Instead,
+ * every tier's multiplier is `K * weight`, with K solved so that summing
+ * (probability * multiplier) across every paying tier - the actual
+ * expected value of a spin - lands on exactly (1-HOUSE_EDGE):
+ *
+ *   sum(count_i/N * K * weight_i) = 1 - HOUSE_EDGE
+ *   K = (1-HOUSE_EDGE) * N / sum(count_i * weight_i)
+ *
+ * Default weight = 1/count, so a tier's own multiplier is inversely
+ * proportional to how common it is (rarer pays more) - "high" overrides
+ * this on its rarest segment for a proper jackpot feel.
+ */
+function tierMultipliers(cfg: RiskConfig): number[] {
+  const weights = cfg.tiers.map((t) => t.weight ?? 1 / t.count);
+  const weightedSum = cfg.tiers.reduce((sum, t, i) => sum + t.count * weights[i], 0);
+  if (weightedSum <= 0) return cfg.tiers.map(() => 0);
+  const k = ((1 - HOUSE_EDGE) * SEGMENT_COUNT) / weightedSum;
+  return cfg.tiers.map((t, i) => Math.round(k * weights[i] * 100) / 100);
+}
+
+/** Builds the 20 physical segment values, interleaved so zeros/tiers alternate around the wheel instead of clumping. */
+function buildSegmentValues(cfg: RiskConfig): number[] {
+  const mults = tierMultipliers(cfg);
+  const groups: number[][] = [Array(cfg.zeroCount).fill(0)];
+  cfg.tiers.forEach((t, i) => groups.push(Array(t.count).fill(mults[i])));
+
+  const maxLen = Math.max(...groups.map((g) => g.length));
+  const result: number[] = [];
+  for (let i = 0; i < maxLen; i++) {
+    for (const g of groups) {
+      if (i < g.length) result.push(g[i]);
+    }
+  }
+  return result;
+}
+
+function colorForMultiplier(m: number): number {
+  if (m <= 0) return Theme.danger;
+  if (m >= 8) return Theme.gold;
+  if (m >= 2) return Theme.accent;
+  return 0xffffff;
+}
+
+export class WheelScene extends Phaser.Scene {
+  private risk: RiskKey = "low";
+  private segments: number[] = [];
+  private spinning = false;
+  private wheelContainer!: Phaser.GameObjects.Container;
+  private riskButtons: Partial<Record<RiskKey, UIButton>> = {};
+
+  private balanceText!: Phaser.GameObjects.Text;
+  private legendText!: Phaser.GameObjects.Text;
+  private messageText!: Phaser.GameObjects.Text;
+  private spinBtn?: UIButton;
+  private betControl?: BetControl;
+
+  constructor() {
+    super("WheelScene");
+  }
+
+  create() {
+    this.risk = "low";
+    this.spinning = false;
+    this.riskButtons = {};
+    this.cameras.main.setBackgroundColor(Theme.bgDark);
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.tweens.killTweensOf(this.wheelContainer);
+    });
+
+    makePanel(this, 400, 300, 480, 560);
+
+    this.add
+      .text(400, 42, "WHEEL", {
+        fontSize: "26px",
+        color: Theme.textAccent,
+        fontStyle: "bold"
+      })
+      .setOrigin(0.5);
+
+    makeInset(this, 400, 74, 380, 28, 14);
+    this.balanceText = this.add
+      .text(400, 74, "", { fontSize: "13px", color: Theme.textPrimary })
+      .setOrigin(0.5);
+
+    this.betControl = makeBetControl(this, 400, 104, () => {});
+
+    this.renderRiskButtons();
+
+    // Wheel visual: a rotating container of pie slices, plus a fixed pointer at the top
+    this.wheelContainer = this.add.container(WHEEL_CENTER_X, WHEEL_CENTER_Y);
+    this.add
+      .triangle(
+        WHEEL_CENTER_X,
+        WHEEL_CENTER_Y - WHEEL_RADIUS - 14,
+        -9,
+        -12,
+        9,
+        -12,
+        0,
+        6,
+        0xffffff
+      )
+      .setDepth(10);
+
+    this.legendText = this.add
+      .text(400, 428, "", { fontSize: "11px", color: Theme.textGold, align: "center" })
+      .setOrigin(0.5);
+
+    this.messageText = this.add
+      .text(400, 450, "Pick a risk level and spin", { fontSize: "13px", color: Theme.textMuted })
+      .setOrigin(0.5);
+
+    this.spinBtn = makeButton(this, 400, 490, 200, 48, "SPIN", Theme.accent, Theme.accentHover, () =>
+      this.spin()
+    );
+
+    makeButton(this, 400, 542, 200, 32, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
+      this.scene.start("OverworldScene")
+    );
+
+    this.rebuildWheel();
+    this.updateBalance();
+  }
+
+  private renderRiskButtons() {
+    Object.values(this.riskButtons).forEach((b) => b?.destroy());
+    this.riskButtons = {};
+
+    const xs: Record<RiskKey, number> = { low: 280, medium: 400, high: 520 };
+    (Object.keys(RISK_CONFIGS) as RiskKey[]).forEach((key) => {
+      const cfg = RISK_CONFIGS[key];
+      const selected = key === this.risk;
+      this.riskButtons[key] = makeButton(
+        this,
+        xs[key],
+        134,
+        110,
+        30,
+        cfg.label,
+        selected ? Theme.accent : Theme.neutral,
+        selected ? Theme.accentHover : Theme.neutralHover,
+        () => {
+          if (this.spinning || this.risk === key) return;
+          this.risk = key;
+          this.renderRiskButtons();
+          this.rebuildWheel();
+        }
+      );
+    });
+  }
+
+  /** Rebuilds the segment values/visual/legend for the current risk level (called on create and on risk change). */
+  private rebuildWheel() {
+    this.segments = buildSegmentValues(RISK_CONFIGS[this.risk]);
+    this.drawWheel();
+    this.updateLegend();
+  }
+
+  private drawWheel() {
+    this.wheelContainer.removeAll(true);
+    this.wheelContainer.setAngle(0);
+
+    const anglePer = 360 / SEGMENT_COUNT;
+    const g = this.add.graphics();
+    for (let i = 0; i < this.segments.length; i++) {
+      const startDeg = -90 + i * anglePer;
+      const endDeg = startDeg + anglePer;
+      const startRad = Phaser.Math.DegToRad(startDeg);
+      const endRad = Phaser.Math.DegToRad(endDeg);
+      const color = colorForMultiplier(this.segments[i]);
+
+      g.fillStyle(color, 1);
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
+      g.closePath();
+      g.fillPath();
+      g.lineStyle(1, 0x0e1015, 1);
+      g.beginPath();
+      g.moveTo(0, 0);
+      g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
+      g.closePath();
+      g.strokePath();
+    }
+    g.lineStyle(3, Theme.panelBorder, 1);
+    g.strokeCircle(0, 0, WHEEL_RADIUS);
+    this.wheelContainer.add(g);
+
+    const hub = this.add.circle(0, 0, 14, 0x171a22).setStrokeStyle(2, Theme.panelBorder);
+    this.wheelContainer.add(hub);
+  }
+
+  private updateLegend() {
+    const cfg = RISK_CONFIGS[this.risk];
+    const mults = tierMultipliers(cfg);
+    const parts = [`0x×${cfg.zeroCount}`];
+    cfg.tiers.forEach((t, i) => parts.push(`${mults[i]}x×${t.count}`));
+    this.legendText.setText(parts.join("   "));
+  }
+
+  private spin() {
+    if (this.spinning) return;
+
+    if (gameState.goldCoins < gameState.betAmount) {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      return;
+    }
+
+    const bet = gameState.betAmount;
+    this.spinning = true;
+    this.spinBtn?.setEnabled(false);
+    this.betControl?.setEnabled(false);
+    Object.values(this.riskButtons).forEach((b) => b?.setEnabled(false));
+    gameState.goldCoins -= bet;
+    this.updateBalance();
+    this.messageText.setText("Spinning...").setColor(Theme.textMuted);
+
+    // Every physical segment is equally likely (1/SEGMENT_COUNT) - matches
+    // the probability model tierMultipliers was solved against.
+    const landingIndex = Phaser.Math.Between(0, SEGMENT_COUNT - 1);
+    const anglePer = 360 / SEGMENT_COUNT;
+    const segmentCenterDeg = -90 + (landingIndex + 0.5) * anglePer;
+    const extraSpins = 6;
+    // Rotate so segmentCenterDeg ends up at the pointer (-90deg / top).
+    const targetAngle = extraSpins * 360 - 90 - segmentCenterDeg;
+
+    this.tweens.add({
+      targets: this.wheelContainer,
+      angle: targetAngle,
+      duration: 2600,
+      ease: "Cubic.Out",
+      onComplete: () => this.resolveSpin(bet, landingIndex)
+    });
+  }
+
+  private resolveSpin(bet: number, landingIndex: number) {
+    const multiplier = this.segments[landingIndex];
+    const payout = Math.round(bet * multiplier);
+
+    if (payout > 0) {
+      gameState.goldCoins += payout;
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} GC`).setColor(Theme.textAccent);
+      popIn(this, this.legendText);
+    } else {
+      this.messageText.setText("Landed on 0x - you lose").setColor(Theme.textDanger);
+    }
+
+    this.updateBalance();
+    this.spinning = false;
+    this.spinBtn?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+    Object.values(this.riskButtons).forEach((b) => b?.setEnabled(true));
+  }
+
+  private updateBalance() {
+    this.balanceText.setText(
+      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+    );
+  }
+}

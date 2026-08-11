@@ -12,6 +12,10 @@ import { MinesScene } from "./scenes/MinesScene";
 import { DiceScene } from "./scenes/DiceScene";
 import { LimboScene } from "./scenes/LimboScene";
 import { PlinkoScene } from "./scenes/PlinkoScene";
+import { KenoScene } from "./scenes/KenoScene";
+import { WheelScene } from "./scenes/WheelScene";
+import { HiLoScene } from "./scenes/HiLoScene";
+import { BaccaratScene } from "./scenes/BaccaratScene";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -46,7 +50,11 @@ const config: Phaser.Types.Core.GameConfig = {
     MinesScene,
     DiceScene,
     LimboScene,
-    PlinkoScene
+    PlinkoScene,
+    KenoScene,
+    WheelScene,
+    HiLoScene,
+    BaccaratScene
   ]
 };
 

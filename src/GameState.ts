@@ -13,7 +13,42 @@
  * profile. It exists purely so coins/skins survive a page reload and so
  * a couple of people sharing one device don't stomp on each other's
  * progress. Do not reuse this pattern for anything that matters.
+ *
+ * Economy note: GC and SC balances live behind the transaction ledger in
+ * src/economy/ledger.ts - see that module and repo-root CLAUDE.md for the
+ * rules (SC never sold directly, 1x playthrough before redemption, skins
+ * are GC-only, ad rewards are GC-only, etc). GameState is the persistence
+ * + convenience layer on top; it should never assign to a balance number
+ * directly - everything routes through applyTransaction (or the
+ * dedicated economy/*.ts helpers that call it).
  */
+
+import {
+  LedgerState,
+  Transaction,
+  applyTransaction,
+  createLedger,
+  getBalance
+} from "./economy/ledger";
+import {
+  PlaythroughState,
+  createPlaythroughState,
+  isPlaythroughCleared,
+  playthroughProgressFraction,
+  recordScWager,
+  remainingPlaythrough
+} from "./economy/playthrough";
+import { grantSignupBonus } from "./economy/signupBonus";
+import {
+  PackagePurchaseOutcome,
+  purchasePackage as purchasePackageInternal
+} from "./economy/packages";
+import { claimAdRewardGc } from "./economy/adRewards";
+import {
+  PurchaseSkinOutcome,
+  purchaseSkin as purchaseSkinInternal
+} from "./economy/skinShop";
+import { RedemptionOutcome, redeemSc as redeemScInternal } from "./economy/redemption";
 
 export interface SkinDef {
   id: string; // also used as the animation prefix, e.g. "skin_000"
@@ -53,6 +88,16 @@ const PROFILES_KEY = "casinoPocProfiles";
 
 interface StoredProfile {
   passwordHash: string;
+  ledger: LedgerState;
+  playthrough: PlaythroughState;
+  betAmount: number;
+  currentSkin: string;
+  unlockedSkins: string[];
+}
+
+/** Shape of profiles written before the ledger existed (flat goldCoins/stakeCoins numbers). */
+interface LegacyStoredProfile {
+  passwordHash: string;
   goldCoins: number;
   stakeCoins: number;
   betAmount: number;
@@ -60,7 +105,28 @@ interface StoredProfile {
   unlockedSkins: string[];
 }
 
-type ProfileStore = Record<string, StoredProfile>;
+type ProfileStore = Record<string, StoredProfile | LegacyStoredProfile>;
+
+function isLegacyProfile(p: StoredProfile | LegacyStoredProfile): p is LegacyStoredProfile {
+  return typeof (p as LegacyStoredProfile).goldCoins === "number";
+}
+
+/**
+ * Migrates a pre-ledger profile (flat goldCoins/stakeCoins numbers) into
+ * the ledger shape. Existing SC is treated as already-cleared (no
+ * retroactive playthrough lock) since we have no record of how it was
+ * granted - only newly-granted SC from this point on is gated.
+ */
+function migrateLegacyProfile(legacy: LegacyStoredProfile): StoredProfile {
+  return {
+    passwordHash: legacy.passwordHash,
+    ledger: createLedger(legacy.goldCoins, legacy.stakeCoins),
+    playthrough: createPlaythroughState(),
+    betAmount: legacy.betAmount,
+    currentSkin: legacy.currentSkin,
+    unlockedSkins: legacy.unlockedSkins
+  };
+}
 
 /**
  * Trivial, non-cryptographic string hash (FNV-1a). This is NOT secure - it
@@ -99,8 +165,8 @@ export type LoginResult =
   | { ok: false; error: string };
 
 class GameState {
-  private _goldCoins = 1000;
-  private _stakeCoins = 25;
+  private _ledger: LedgerState = createLedger(0, 0);
+  private _playthrough: PlaythroughState = createPlaythroughState();
   private _currentSkin = "player";
   private _betAmount = 25;
 
@@ -111,19 +177,47 @@ class GameState {
   activeUsername: string | null = null;
 
   get goldCoins() {
-    return this._goldCoins;
+    return getBalance(this._ledger, "GC");
   }
+  /**
+   * Legacy-compatible setter used by existing game scenes
+   * (`gameState.goldCoins -= bet` / `+= payout`). Still routes through the
+   * ledger - computes the delta and applies it as an ADJUST_GC
+   * transaction - so "no direct balance mutation" holds even for call
+   * sites that haven't migrated to explicit WAGER_GC/PAYOUT_GC calls yet.
+   */
   set goldCoins(v: number) {
-    this._goldCoins = v;
+    const delta = v - this.goldCoins;
+    if (delta === 0) return;
+    try {
+      applyTransaction(this._ledger, "GC", "ADJUST_GC", delta);
+    } catch {
+      // Would have gone negative - clamp to 0 instead of throwing out of a
+      // scene's render loop. Scenes are expected to check affordability
+      // before deducting, so this is a defensive fallback only.
+      const remaining = -this.goldCoins;
+      if (remaining !== 0) applyTransaction(this._ledger, "GC", "ADJUST_GC", remaining);
+    }
     this.save();
   }
 
+  /**
+   * Read-only by design (economy rule: SC is NEVER sold/minted outside the
+   * signup bonus and package-bonus paths). Unlike goldCoins, there is
+   * intentionally NO legacy `set stakeCoins` bridge here - QA flagged that
+   * a generic delta-based setter would let a future `gameState.stakeCoins
+   * += X` silently mint SC with no ledger-level guard (ledger.ts now
+   * rejects a crediting ADJUST_SC too, as defense in depth, but the real
+   * fix is not exposing the footgun at all). No current call site ever
+   * assigned to this property (confirmed by grep across every scene), so
+   * removing it is a pure hardening, not a behavior change.
+   *
+   * To move SC, use the dedicated ledger-backed methods below:
+   * grant credits via `purchasePackage()` or the signup-bonus flow in
+   * `login()`; debit via `redeemSc()`; track wagering via `recordScWager()`.
+   */
   get stakeCoins() {
-    return this._stakeCoins;
-  }
-  set stakeCoins(v: number) {
-    this._stakeCoins = v;
-    this.save();
+    return getBalance(this._ledger, "SC");
   }
 
   get currentSkin() {
@@ -163,28 +257,78 @@ class GameState {
    */
   lastPlayerPosition: { x: number; y: number } | null = null;
 
-  /** Grants a Gold Coin bonus. No cooldown for this POC - always available. */
-  claimBonus(): number {
-    const amount = 1000;
-    this.goldCoins += amount;
-    return amount;
+  // ---- Economy: ledger-backed operations ----
+  // These delegate to src/economy/*.ts (pure, unit-testable) and persist
+  // afterwards. Prefer these over the legacy goldCoins/stakeCoins setters
+  // for any new call site.
+
+  /** Read-only view of every transaction recorded for the active profile. */
+  get transactions(): readonly Transaction[] {
+    return this._ledger.transactions;
+  }
+
+  get playthroughRequired() {
+    return this._playthrough.required;
+  }
+  get playthroughWagered() {
+    return this._playthrough.wagered;
+  }
+  get playthroughRemaining() {
+    return remainingPlaythrough(this._playthrough);
+  }
+  get playthroughProgress() {
+    return playthroughProgressFraction(this._playthrough);
+  }
+  get isScRedeemable() {
+    return isPlaythroughCleared(this._playthrough);
+  }
+
+  /** Records SC wagered in a game toward clearing the playthrough requirement. Call BEFORE deducting the wager. */
+  recordScWager(amount: number) {
+    recordScWager(this._playthrough, amount);
+    this.save();
+  }
+
+  /** Buys a GC package tier, granting its GC plus its non-linear SC bonus gift (see economy/packages.ts). */
+  purchasePackage(packageId: string): PackagePurchaseOutcome {
+    const result = purchasePackageInternal(this._ledger, this._playthrough, packageId);
+    if (result.ok) this.save();
+    return result;
+  }
+
+  /** GC-only ad-reward refill claim. */
+  claimAdReward(): Transaction {
+    const tx = claimAdRewardGc(this._ledger);
+    this.save();
+    return tx;
+  }
+
+  /** Attempts to redeem `amountSc` of Sweeps Coins (must be playthrough-cleared and >= MIN_SC_REDEMPTION). */
+  redeemSc(amountSc: number): RedemptionOutcome {
+    const outcome = redeemScInternal(this._ledger, this._playthrough, amountSc);
+    if (outcome.ok) this.save();
+    return outcome;
   }
 
   ownsSkin(id: string): boolean {
     return this.unlockedSkins.includes(id);
   }
 
-  /** Attempts to purchase a skin. Returns false if already owned or can't afford it. */
+  /** Attempts to purchase a skin with GC. Returns false if already owned or can't afford it (see economy/skinShop.ts for the detailed-reason version). */
   purchaseSkin(id: string): boolean {
-    const def = SKIN_CATALOG.find((s) => s.id === id);
-    if (!def) return false;
-    if (this.ownsSkin(id)) return false;
-    if (this.goldCoins < def.price) return false;
+    const outcome: PurchaseSkinOutcome = purchaseSkinInternal(
+      this._ledger,
+      this.unlockedSkins,
+      id
+    );
+    if (outcome.ok) this.save();
+    return outcome.ok;
+  }
 
-    this.goldCoins -= def.price;
-    this.unlockedSkins.push(id);
-    this.save();
-    return true;
+  /** Grants a Gold Coin bonus via the GC-only ad-reward path. No cooldown for this POC - always available. */
+  claimBonus(): number {
+    const tx = this.claimAdReward();
+    return tx.amount;
   }
 
   /**
@@ -198,34 +342,42 @@ class GameState {
     if (!password) return { ok: false, error: "Enter a password" };
 
     const profiles = loadProfiles();
-    const existing = profiles[username];
+    const existingRaw = profiles[username];
     const hash = weakHash(password);
 
-    if (existing) {
-      if (existing.passwordHash !== hash) {
+    if (existingRaw) {
+      if (existingRaw.passwordHash !== hash) {
         return { ok: false, error: "Wrong password for that username" };
       }
-      this._goldCoins = existing.goldCoins;
-      this._stakeCoins = existing.stakeCoins;
+      const existing = isLegacyProfile(existingRaw)
+        ? migrateLegacyProfile(existingRaw)
+        : existingRaw;
+
+      this._ledger = createLedger(existing.ledger.gc, existing.ledger.sc);
+      this._ledger.transactions = [...existing.ledger.transactions];
+      this._playthrough = { ...existing.playthrough };
       this._betAmount = existing.betAmount;
       this._currentSkin = existing.currentSkin;
       this.unlockedSkins = [...existing.unlockedSkins];
       this.activeUsername = username;
+      this.save(); // persist migration (if any) immediately
       return { ok: true, isNew: false };
     }
 
-    // New username - create a fresh profile with default starting state
-    this._goldCoins = 1000;
-    this._stakeCoins = 25;
+    // New username - create a fresh profile with default starting state,
+    // including the no-deposit SC signup bonus (with its playthrough lock).
+    this._ledger = createLedger(1000, 0);
+    this._playthrough = createPlaythroughState();
     this._betAmount = 25;
     this._currentSkin = "player";
     this.unlockedSkins = ["player"];
     this.activeUsername = username;
+    grantSignupBonus(this._ledger, this._playthrough);
 
     profiles[username] = {
       passwordHash: hash,
-      goldCoins: this._goldCoins,
-      stakeCoins: this._stakeCoins,
+      ledger: this._ledger,
+      playthrough: this._playthrough,
       betAmount: this._betAmount,
       currentSkin: this._currentSkin,
       unlockedSkins: this.unlockedSkins
@@ -244,11 +396,12 @@ class GameState {
   private save() {
     if (!this.activeUsername) return;
     const profiles = loadProfiles();
-    const existing = profiles[this.activeUsername];
+    const existingRaw = profiles[this.activeUsername];
+    const passwordHash = existingRaw?.passwordHash ?? weakHash("");
     profiles[this.activeUsername] = {
-      passwordHash: existing?.passwordHash ?? weakHash(""),
-      goldCoins: this._goldCoins,
-      stakeCoins: this._stakeCoins,
+      passwordHash,
+      ledger: this._ledger,
+      playthrough: this._playthrough,
       betAmount: this._betAmount,
       currentSkin: this._currentSkin,
       unlockedSkins: this.unlockedSkins

@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { gameState, SKIN_CATALOG, SkinDef } from "../GameState";
+import { gameState } from "../GameState";
+import { listSkins, SkinDef } from "../economy/skinShop";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset } from "../ui/uiHelpers";
 
@@ -15,6 +16,248 @@ interface Interactable {
   radius: number;
   onInteract: () => void;
 }
+
+/**
+ * One piece of walkable-up-to furniture that hands off to a game scene.
+ * Declarative so the floor's game count can grow by appending to
+ * GAME_STATIONS below instead of hand-editing scattered create() calls -
+ * keeps concurrent edits (e.g. "games" adding Keno/Wheel/Hi-Lo) from
+ * clobbering unrelated layout code. Coordinate placement via SendMessage
+ * before adding entries here so spacing stays verified/non-overlapping.
+ */
+interface FurnitureStationDef {
+  col: number;
+  row: number;
+  textureKey: string;
+  sizeFracW: number;
+  sizeFracH: number;
+  offsetFracX: number;
+  offsetFracY: number;
+  label: string;
+  prompt: string;
+  sceneKey: string;
+}
+
+/** Every playable game's floor furniture. Grouped by zone/comment for readability. */
+const GAME_STATIONS: FurnitureStationDef[] = [
+  // Slots - lined along the right wall, any of them opens the same game
+  ...([
+    [74, 8],
+    [74, 18],
+    [74, 28],
+    [74, 38],
+    [74, 48]
+  ] as Array<[number, number]>).map(([col, row]) => ({
+    col,
+    row,
+    textureKey: "slot_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Slots",
+    prompt: "Press E to play Slots",
+    sceneKey: "SlotsScene"
+  })),
+
+  // Blackjack tables - left side, spread top and bottom
+  ...([
+    [16, 14],
+    [16, 42]
+  ] as Array<[number, number]>).map(([col, row]) => ({
+    col,
+    row,
+    textureKey: "blackjack_table",
+    sizeFracW: 0.8,
+    sizeFracH: 0.4,
+    offsetFracX: 0.1,
+    offsetFracY: 0.55,
+    label: "Blackjack",
+    prompt: "Press E to play Blackjack",
+    sceneKey: "BlackjackScene"
+  })),
+
+  // Roulette tables - right-center, spread top and bottom
+  ...([
+    [60, 14],
+    [60, 42]
+  ] as Array<[number, number]>).map(([col, row]) => ({
+    col,
+    row,
+    textureKey: "roulette_table",
+    sizeFracW: 0.8,
+    sizeFracH: 0.5,
+    offsetFracX: 0.1,
+    offsetFracY: 0.4,
+    label: "Roulette",
+    prompt: "Press E to play Roulette",
+    sceneKey: "RouletteScene"
+  })),
+
+  // Coin Flip machines - far left and far right of the middle band
+  ...([
+    [20, 28],
+    [60, 28]
+  ] as Array<[number, number]>).map(([col, row]) => ({
+    col,
+    row,
+    textureKey: "coinflip_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Coin Flip",
+    prompt: "Press E to play Coin Flip",
+    sceneKey: "CoinFlipScene"
+  })),
+
+  // Dragon Tower pedestals - top-center, either side of the middle
+  ...([
+    [36, 10],
+    [44, 10]
+  ] as Array<[number, number]>).map(([col, row]) => ({
+    col,
+    row,
+    textureKey: "dragon_pedestal",
+    sizeFracW: 0.75,
+    sizeFracH: 0.5,
+    offsetFracX: 0.125,
+    offsetFracY: 0.4,
+    label: "Dragon Tower",
+    prompt: "Press E to play Dragon Tower",
+    sceneKey: "DragonTowerScene"
+  })),
+
+  // Mines cabinet - upper-left open gap
+  {
+    col: 28,
+    row: 20,
+    textureKey: "mines_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Mines",
+    prompt: "Press E to play Mines",
+    sceneKey: "MinesScene"
+  },
+
+  // Dice table - upper-right open gap
+  {
+    col: 52,
+    row: 20,
+    textureKey: "dice_table",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Dice",
+    prompt: "Press E to play Dice",
+    sceneKey: "DiceScene"
+  },
+
+  // Limbo cabinet - lower-left open gap
+  {
+    col: 28,
+    row: 36,
+    textureKey: "limbo_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Limbo",
+    prompt: "Press E to play Limbo",
+    sceneKey: "LimboScene"
+  },
+
+  // Plinko board - lower-right open gap
+  {
+    col: 52,
+    row: 36,
+    textureKey: "plinko_board",
+    sizeFracW: 0.75,
+    sizeFracH: 0.4,
+    offsetFracX: 0.125,
+    offsetFracY: 0.55,
+    label: "Plinko",
+    prompt: "Press E to play Plinko",
+    sceneKey: "PlinkoScene"
+  },
+
+  // Keno cabinet - left strip (was RESERVED_STATIONS, now claimed by "games")
+  {
+    col: 10,
+    row: 20,
+    textureKey: "keno_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Keno",
+    prompt: "Press E to play Keno",
+    sceneKey: "KenoScene"
+  },
+
+  // Wheel cabinet - left strip (was RESERVED_STATIONS, now claimed by "games")
+  {
+    col: 10,
+    row: 36,
+    textureKey: "wheel_machine",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Wheel",
+    prompt: "Press E to play Wheel",
+    sceneKey: "WheelScene"
+  },
+
+  // Hi-Lo table - right corridor midpoint (was RESERVED_STATIONS, now claimed by "games")
+  {
+    col: 67,
+    row: 28,
+    textureKey: "hilo_table",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Hi-Lo",
+    prompt: "Press E to play Hi-Lo",
+    sceneKey: "HiLoScene"
+  },
+
+  // Baccarat table - top of the left strip, above Keno (proposed to floor via SendMessage)
+  {
+    col: 10,
+    row: 8,
+    textureKey: "baccarat_table",
+    sizeFracW: 0.7,
+    sizeFracH: 0.5,
+    offsetFracX: 0.15,
+    offsetFracY: 0.45,
+    label: "Baccarat",
+    prompt: "Press E to play Baccarat",
+    sceneKey: "BaccaratScene"
+  }
+];
+
+/**
+ * Reserved spots for the next wave of Stake Originals ("games" teammate is
+ * adding Keno/Wheel/Hi-Lo). Positions verified against every entry in
+ * GAME_STATIONS so their interaction radii (see registerStation/
+ * INTERACT_PADDING) don't overlap. Each renders as a "coming soon"
+ * signpost (see addComingSoonStation) until "games" claims one - at that
+ * point replace the matching entry here with a real GAME_STATIONS entry
+ * (their real texture/label/sceneKey) rather than adding a brand new spot,
+ * so the verified spacing is preserved. Coordinate via SendMessage first.
+ */
+const RESERVED_STATIONS: Array<{ col: number; row: number; label: string }> = [
+  // Keno, Wheel, and Hi-Lo have all landed as real GAME_STATIONS entries
+  // now (see above) - nothing left reserved. Leaving this array (and the
+  // loop that consumes it in create()) in place rather than ripping it out,
+  // since it's a harmless no-op empty list and future games can reuse the
+  // same "reserve a spot, then claim it" pattern.
+];
 
 export class OverworldScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -71,159 +314,35 @@ export class OverworldScene extends Phaser.Scene {
       () => this.openSkinPanel("shop")
     );
 
-    // Slots - lined along the right wall, any of them opens the same game
-    for (const [col, row] of [
-      [74, 8],
-      [74, 18],
-      [74, 28],
-      [74, 38],
-      [74, 48]
-    ] as Array<[number, number]>) {
+    // Every playable game's furniture - declarative (see GAME_STATIONS
+    // above) so new entries can be appended there instead of adding more
+    // hand-written blocks here.
+    for (const station of GAME_STATIONS) {
       this.addFurnitureStation(
-        col,
-        row,
-        "slot_machine",
-        0.7,
-        0.5,
-        0.15,
-        0.45,
-        "Slots",
-        "Press E to play Slots",
-        "SlotsScene"
+        station.col,
+        station.row,
+        station.textureKey,
+        station.sizeFracW,
+        station.sizeFracH,
+        station.offsetFracX,
+        station.offsetFracY,
+        station.label,
+        station.prompt,
+        station.sceneKey
       );
     }
 
-    // Blackjack tables - left side, spread top and bottom
-    for (const [col, row] of [
-      [16, 14],
-      [16, 42]
-    ] as Array<[number, number]>) {
-      this.addFurnitureStation(
-        col,
-        row,
-        "blackjack_table",
-        0.8,
-        0.4,
-        0.1,
-        0.55,
-        "Blackjack",
-        "Press E to play Blackjack",
-        "BlackjackScene"
-      );
+    // Reserved spots for the next wave of games ("games" teammate is
+    // building Keno/Wheel/Hi-Lo) - see RESERVED_STATIONS above for the
+    // agreed coordinates. Shows a walkable-up-to "coming soon" signpost
+    // until each scene lands; replace the matching entry with a real
+    // GAME_STATIONS entry (real texture/sceneKey) once ready instead of
+    // picking a new spot, so the verified spacing holds.
+    for (const spot of RESERVED_STATIONS) {
+      this.addComingSoonStation(spot.col, spot.row, spot.label);
     }
 
-    // Roulette tables - right-center, spread top and bottom
-    for (const [col, row] of [
-      [60, 14],
-      [60, 42]
-    ] as Array<[number, number]>) {
-      this.addFurnitureStation(
-        col,
-        row,
-        "roulette_table",
-        0.8,
-        0.5,
-        0.1,
-        0.4,
-        "Roulette",
-        "Press E to play Roulette",
-        "RouletteScene"
-      );
-    }
-
-    // Coin Flip machines - far left and far right of the middle band
-    for (const [col, row] of [
-      [20, 28],
-      [60, 28]
-    ] as Array<[number, number]>) {
-      this.addFurnitureStation(
-        col,
-        row,
-        "coinflip_machine",
-        0.7,
-        0.5,
-        0.15,
-        0.45,
-        "Coin Flip",
-        "Press E to play Coin Flip",
-        "CoinFlipScene"
-      );
-    }
-
-    // Dragon Tower pedestals - top-center, either side of the middle
-    for (const [col, row] of [
-      [36, 10],
-      [44, 10]
-    ] as Array<[number, number]>) {
-      this.addFurnitureStation(
-        col,
-        row,
-        "dragon_pedestal",
-        0.75,
-        0.5,
-        0.125,
-        0.4,
-        "Dragon Tower",
-        "Press E to play Dragon Tower",
-        "DragonTowerScene"
-      );
-    }
-
-    // Mines cabinets - upper-left open gap
-    this.addFurnitureStation(
-      28,
-      20,
-      "mines_machine",
-      0.7,
-      0.5,
-      0.15,
-      0.45,
-      "Mines",
-      "Press E to play Mines",
-      "MinesScene"
-    );
-
-    // Dice tables - upper-right open gap
-    this.addFurnitureStation(
-      52,
-      20,
-      "dice_table",
-      0.7,
-      0.5,
-      0.15,
-      0.45,
-      "Dice",
-      "Press E to play Dice",
-      "DiceScene"
-    );
-
-    // Limbo cabinets - lower-left open gap
-    this.addFurnitureStation(
-      28,
-      36,
-      "limbo_machine",
-      0.7,
-      0.5,
-      0.15,
-      0.45,
-      "Limbo",
-      "Press E to play Limbo",
-      "LimboScene"
-    );
-
-    // Plinko board - lower-right open gap
-    this.addFurnitureStation(
-      52,
-      36,
-      "plinko_board",
-      0.75,
-      0.4,
-      0.125,
-      0.55,
-      "Plinko",
-      "Press E to play Plinko",
-      "PlinkoScene"
-    );
+    this.buildZoneSigns();
 
     this.buildWalls();
 
@@ -325,7 +444,8 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private getSkinDef(id: string): SkinDef {
-    return SKIN_CATALOG.find((s) => s.id === id) ?? SKIN_CATALOG[0];
+    const catalog = listSkins();
+    return catalog.find((s) => s.id === id) ?? catalog[0];
   }
 
   private handleProximity() {
@@ -414,6 +534,74 @@ export class OverworldScene extends Phaser.Scene {
   private goToGame(sceneKey: string) {
     gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
     this.scene.start(sceneKey);
+  }
+
+  /**
+   * Places a walkable-up-to "coming soon" signpost for a game whose scene
+   * doesn't exist yet (see RESERVED_STATIONS). Shows a small info panel on
+   * interact instead of transitioning anywhere.
+   */
+  private addComingSoonStation(col: number, row: number, label: string) {
+    const sprite = this.physics.add.staticSprite(col * TILE, row * TILE, "coming_soon_sign");
+    sprite.setSize(sprite.width * 0.6, sprite.height * 0.35);
+    sprite.setOffset(sprite.width * 0.2, sprite.height * 0.55);
+    sprite.refreshBody();
+    this.physics.add.collider(this.player, sprite);
+    this.registerStation(sprite, label, `${label} - coming soon!`, () =>
+      this.showComingSoonPanel(label)
+    );
+  }
+
+  private showComingSoonPanel(label: string) {
+    this.panelOpen = true;
+    const panel = makePanel(this, 400, 300, 380, 170, 200).setScrollFactor(0);
+    const title = this.add
+      .text(400, 275, `🚧 ${label}`, {
+        fontSize: "19px",
+        color: Theme.textGold,
+        fontStyle: "bold"
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(201);
+    const sub = this.add
+      .text(400, 305, "This game is on its way. Check back soon!", {
+        fontSize: "13px",
+        color: Theme.textMuted
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(201);
+    const okBtn = makeButton(this, 400, 350, 120, 40, "OK", Theme.neutral, Theme.neutralHover, () => {
+      panel.destroy();
+      title.destroy();
+      sub.destroy();
+      okBtn.destroy();
+      this.panelOpen = false;
+    });
+    okBtn.container.setScrollFactor(0).setDepth(201);
+  }
+
+  /**
+   * Small floating category banner(s) so the floor reads as organized
+   * zones rather than a flat list of stations as the game count grows.
+   * Placed beside a cluster (not above it) so it never stacks with the
+   * per-station name labels from registerStation.
+   */
+  private buildZoneSigns() {
+    this.addZoneSign(68 * TILE, 8 * TILE, "🎰 SLOTS");
+  }
+
+  private addZoneSign(x: number, y: number, text: string) {
+    this.add
+      .text(x, y, text, {
+        fontSize: "15px",
+        color: Theme.textGold,
+        fontStyle: "bold",
+        backgroundColor: "#000000aa",
+        padding: { x: 8, y: 4 }
+      })
+      .setOrigin(0.5);
   }
 
   private openChipPanel() {
@@ -526,6 +714,49 @@ export class OverworldScene extends Phaser.Scene {
     this.hudText.setText(`🪙 ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 
+  private activeSkinToast?: Phaser.GameObjects.Text;
+
+  /**
+   * Brief fading confirmation/error message for skin shop actions, so a
+   * purchase's owned/unowned state change is visibly confirmed rather than
+   * just silently updating the list.
+   */
+  private showSkinToast(message: string, color: string) {
+    this.activeSkinToast?.destroy();
+    const toast = this.add
+      .text(400, 145, message, {
+        fontSize: "13px",
+        color,
+        fontStyle: "bold",
+        backgroundColor: "#000000cc",
+        padding: { x: 10, y: 5 }
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(210)
+      .setAlpha(0);
+    this.activeSkinToast = toast;
+
+    this.tweens.add({
+      targets: toast,
+      alpha: 1,
+      duration: 120,
+      onComplete: () => {
+        this.time.delayedCall(900, () => {
+          this.tweens.add({
+            targets: toast,
+            alpha: 0,
+            duration: 300,
+            onComplete: () => {
+              if (this.activeSkinToast === toast) this.activeSkinToast = undefined;
+              toast.destroy();
+            }
+          });
+        });
+      }
+    });
+  }
+
   /**
    * Shared panel for both the Skin Attendant ("shop" - buy skins you don't
    * own) and the Clothes corner button ("wardrobe" - equip a skin you do
@@ -537,10 +768,13 @@ export class OverworldScene extends Phaser.Scene {
     const itemsPerPage = 4;
     let elements: Phaser.GameObjects.GameObject[] = [];
 
-    const getItems = (): SkinDef[] =>
+    // Catalog comes from the skin shop backend (economy/skinShop.ts), not
+    // GameState directly - owned/equipped state still comes from GameState
+    // since that's the player's live profile data, not catalog data.
+    const getItems = (): readonly SkinDef[] =>
       mode === "shop"
-        ? SKIN_CATALOG.filter((s) => !gameState.ownsSkin(s.id))
-        : SKIN_CATALOG.filter((s) => gameState.ownsSkin(s.id));
+        ? listSkins().filter((s) => !gameState.ownsSkin(s.id))
+        : listSkins().filter((s) => gameState.ownsSkin(s.id));
 
     const cleanup = () => {
       elements.forEach((e) => e.destroy());
@@ -644,8 +878,18 @@ export class OverworldScene extends Phaser.Scene {
             canAfford ? Theme.accent : Theme.neutral,
             canAfford ? Theme.accentHover : Theme.neutral,
             () => {
+              // GC-only purchase - gameState.purchaseSkin() routes through
+              // economy/skinShop.ts's purchaseSkin(), which debits GC via
+              // the ledger and never touches SC. The canAfford/ownership
+              // checks above already prevent the failure cases, so a false
+              // return here would mean a race (e.g. GC spent elsewhere
+              // while this panel was open) - surfaced rather than silent.
               if (gameState.purchaseSkin(def.id)) {
                 this.updateHud();
+                this.showSkinToast(`✓ Bought ${def.name}!`, Theme.textAccent);
+                render();
+              } else {
+                this.showSkinToast(`Couldn't buy ${def.name} - try again.`, Theme.textDanger);
                 render();
               }
             }
@@ -753,7 +997,11 @@ export class OverworldScene extends Phaser.Scene {
   private buildDecorations() {
     // A few plants scattered around for atmosphere, placed in open gaps
     // between the station layout
-    this.add.image(8 * TILE, 8 * TILE, "plant").setOrigin(0.5);
+    // Nudged from (8,8) to clear "games"' incoming Baccarat cabinet at
+    // (10,8) - the two 48x64 sprites were only 2 tiles apart and would
+    // have visually clipped into each other (no collider/interactable
+    // conflict, just overlapping art).
+    this.add.image(4 * TILE, 9 * TILE, "plant").setOrigin(0.5);
     this.add.image(8 * TILE, 48 * TILE, "plant").setOrigin(0.5);
     this.add.image(68 * TILE, 6 * TILE, "plant").setOrigin(0.5);
     this.add.image(28 * TILE, 46 * TILE, "plant").setOrigin(0.5);

@@ -61,6 +61,11 @@ export class BootScene extends Phaser.Scene {
     this.createDiceTexture();
     this.createLimboTexture();
     this.createPlinkoTexture();
+    this.createKenoTexture();
+    this.createWheelTexture();
+    this.createHiLoTexture();
+    this.createBaccaratTexture();
+    this.createComingSoonTexture();
 
     this.scene.start("LoginScene");
   }
@@ -233,6 +238,178 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(w / 2 - 10, h - 10, 20, 8, 3);
     g.generateTexture("plinko_board", w, h);
+    g.destroy();
+  }
+
+  /** A small drawn "board" of numbered squares on a cabinet - stands in for a real Keno terminal sprite. */
+  private createKenoTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a2f3a, 1);
+    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+    g.lineStyle(2, 0x0e1015, 1);
+    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+
+    g.fillStyle(0x0b0d12, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+
+    const cell = 5;
+    const gap = 1.5;
+    const cols = 4;
+    const rows = 4;
+    const gridW = cols * cell + (cols - 1) * gap;
+    const gridH = rows * cell + (rows - 1) * gap;
+    const startX = w / 2 - gridW / 2;
+    const startY = 20;
+    const highlighted = new Set([1, 3, 6, 9, 12, 14]);
+    let i = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        g.fillStyle(highlighted.has(i) ? 0xffd54f : 0x00e676, 1);
+        g.fillRoundedRect(startX + c * (cell + gap), startY + r * (cell + gap), cell, cell, 1);
+        i++;
+      }
+    }
+
+    g.fillStyle(0x1a1d24, 1);
+    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    g.generateTexture("keno_machine", w, h);
+    g.destroy();
+  }
+
+  /** A small drawn segmented-wheel cabinet, cabinet-scale like keno_machine/dice_table. */
+  private createWheelTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a2f3a, 1);
+    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+    g.lineStyle(2, 0x0e1015, 1);
+    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+
+    const cx = w / 2;
+    const cy = 30;
+    const radius = 14;
+    const colors = [0x00e676, 0xffd54f, 0xff5252, 0xffffff, 0x00e676, 0xffd54f, 0xff5252, 0xffffff];
+    const slice = (Math.PI * 2) / colors.length;
+    colors.forEach((color, i) => {
+      g.fillStyle(color, 1);
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.arc(cx, cy, radius, i * slice, (i + 1) * slice, false);
+      g.closePath();
+      g.fillPath();
+    });
+    g.lineStyle(1.5, 0x0e1015, 1);
+    g.strokeCircle(cx, cy, radius);
+    g.fillStyle(0xffffff, 1);
+    g.fillTriangle(cx - 3, cy - radius - 6, cx + 3, cy - radius - 6, cx, cy - radius + 1);
+
+    g.fillStyle(0x1a1d24, 1);
+    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    g.generateTexture("wheel_machine", w, h);
+    g.destroy();
+  }
+
+  /**
+   * A small drawn card-cabinet with an up/down arrow - cabinet-scale
+   * (48x64, matching keno_machine/dice_table) per floor's spacing note for
+   * the col67 corridor between CoinFlip and Slots.
+   */
+  private createHiLoTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a2f3a, 1);
+    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+    g.lineStyle(2, 0x0e1015, 1);
+    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+
+    g.fillStyle(0x0b0d12, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+
+    // two overlapping mini playing cards
+    g.fillStyle(0xf5f2ea, 1);
+    g.fillRoundedRect(14, 20, 14, 20, 2);
+    g.fillRoundedRect(21, 24, 14, 20, 2);
+    g.lineStyle(1, 0x0e1015, 1);
+    g.strokeRoundedRect(14, 20, 14, 20, 2);
+    g.strokeRoundedRect(21, 24, 14, 20, 2);
+
+    // up/down arrow between them
+    g.fillStyle(0x00e676, 1);
+    g.fillTriangle(40, 22, 36, 28, 44, 28);
+    g.fillStyle(0xff5252, 1);
+    g.fillTriangle(40, 44, 36, 38, 44, 38);
+
+    g.fillStyle(0x1a1d24, 1);
+    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    g.generateTexture("hilo_table", w, h);
+    g.destroy();
+  }
+
+  /** A small drawn baccarat table cabinet - two mini playing cards over a felt strip, cabinet-scale like the others. */
+  private createBaccaratTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a2f3a, 1);
+    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+    g.lineStyle(2, 0x0e1015, 1);
+    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+
+    // green felt playing surface
+    g.fillStyle(0x0f3d24, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    g.lineStyle(1, 0xffd54f, 0.6);
+    g.strokeRoundedRect(9, 16, w - 18, 30, 4);
+
+    // two mini cards (player/banker)
+    g.fillStyle(0xf5f2ea, 1);
+    g.fillRoundedRect(13, 22, 10, 15, 2);
+    g.fillRoundedRect(25, 22, 10, 15, 2);
+    g.lineStyle(1, 0x0e1015, 1);
+    g.strokeRoundedRect(13, 22, 10, 15, 2);
+    g.strokeRoundedRect(25, 22, 10, 15, 2);
+    g.fillStyle(0xc62828, 1);
+    g.fillCircle(18, 29, 1.6);
+    g.fillStyle(0x1a1a1a, 1);
+    g.fillCircle(30, 29, 1.6);
+
+    g.fillStyle(0x1a1d24, 1);
+    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    g.generateTexture("baccarat_table", w, h);
+    g.destroy();
+  }
+
+  /**
+   * A caution-sign placeholder for floor spots reserved for a game whose
+   * scene doesn't exist yet (see OverworldScene's RESERVED_STATIONS). Same
+   * 48x64 cabinet scale as Mines/Dice/Limbo/Keno so it doesn't disturb the
+   * verified spacing those reserved spots were placed with.
+   */
+  private createComingSoonTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+
+    // signpost
+    g.fillStyle(0x3a2418, 1);
+    g.fillRect(w / 2 - 4, 34, 8, 26);
+
+    // sign board
+    g.fillStyle(0xffd54f, 1);
+    g.fillRoundedRect(4, 6, w - 8, 32, 6);
+    g.lineStyle(2, 0x0e1015, 1);
+    g.strokeRoundedRect(4, 6, w - 8, 32, 6);
+
+    // exclamation mark
+    g.fillStyle(0x1a1d24, 1);
+    g.fillRoundedRect(w / 2 - 3, 12, 6, 15, 3);
+    g.fillCircle(w / 2, 32, 3.2);
+
+    g.generateTexture("coming_soon_sign", w, h);
     g.destroy();
   }
 
