@@ -85,7 +85,49 @@ blocking regression, not a nice-to-have:
       OverworldScene's shop panel - SC balance untouched.)*
 - [x] Ad-reward / "watch ad" refill buttons grant GC only, never SC.
       *(2026-08-10: read adRewards.ts - only ever calls applyTransaction with
-      currency "GC". OverworldScene's bonus-claim NPC uses this path.)*
+      currency "GC".)*
+      *(2026-08-10, UPDATED: repo-root CLAUDE.md now has a documented,
+      narrowly-scoped exception - "Temporary POC exception — attendant SC
+      test grant (user-approved 2026-08-10)". `src/economy/attendantClaim.ts`
+      (only that file) is explicitly allowed to grant 1 SC alongside its GC,
+      as a stand-in for the real GC-purchase bonus path until a payment
+      gateway exists. This does NOT apply to adRewards.ts or anything else -
+      QA independently read the CLAUDE.md diff before accepting this, did
+      not just take a peer's word for it. When #18/#19 land, re-verify: (a)
+      the SC grant is confined to attendantClaim.ts and nothing else calls
+      it, (b) exactly 1 SC per claim, no more, (c) the 30s cooldown is
+      actually enforced and persists across reload, (d) - important - the
+      exception text only excepts the "SC only via signup/GC-purchase
+      bonus" and "ad-reward is GC-only" rules specifically; it does NOT
+      except playthrough-gating or the redemption minimum, so this SC must
+      still register a normal 1x playthrough requirement and still be
+      unredeemable below MIN_SC_REDEMPTION like any other SC. Faucet-math
+      note kept for the record even though compliant: ~1 SC/30s of clicking
+      is a real, if intentional, design tradeoff - worth revisiting once the
+      real payment flow lands and this exception is supposed to be removed.)*
+      *(2026-08-10, #18/#19 VERIFIED LANDED - all checks (a)-(d) above pass:
+      wrote 5 new independent tests in economy.qa.test.ts (not reusing
+      economy's own attendantClaim.test.ts) confirming ATTENDANT_CLAIM_PACKAGE
+      is absent from GC_PACKAGES, scBonus is exactly 1, and - the two checks
+      that matter most since the exception doesn't cover them - playthrough
+      and the redemption minimum both still gate this SC exactly like any
+      other source (tested via the real accumulate-by-claiming path, not
+      pre-seeded balances). Also live-verified end-to-end through the actual
+      running UI (real button pointerdown event, not a direct function call):
+      claiming via the Chip Attendant grants exactly +1000 GC/+1 SC as
+      PACKAGE_GC/PACKAGE_BONUS_SC transactions (not AD_REWARD_GC -
+      adRewards.ts confirmed untouched and unaffected by this cooldown), the
+      button shows a live "Available in Ns" countdown and is genuinely
+      disabled during cooldown (second click while disabled is a no-op,
+      balance unchanged), and - tested twice, once after the cooldown had
+      naturally expired and once via an immediate reload while still
+      mid-cooldown - the 30s cooldown survives a real page reload (not just
+      logout/login in-session): timestamp persists unchanged in localStorage,
+      remaining time reflects true elapsed wall-clock time, and a claim
+      attempted immediately post-reload is still correctly blocked. Full
+      suite 74/74 (69 from economy + 5 new), `npm run build` clean. Also
+      confirmed #20 (betting.ts) is exactly what it claims - foundational
+      ledger-only, no scene file imports placeBet/resolveBet yet.)*
 - [x] Every balance change is traceable to a ledger transaction (no place in
       the UI where a balance changes without a corresponding entry).
       *(2026-08-10: GameState's legacy goldCoins/stakeCoins setters route

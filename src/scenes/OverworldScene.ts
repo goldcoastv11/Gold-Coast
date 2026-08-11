@@ -1,8 +1,9 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { listSkins, SkinDef } from "../economy/skinShop";
+import type { AttendantClaimOutcome } from "../economy/attendantClaim";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset } from "../ui/uiHelpers";
+import { makeButton, makePanel, makeInset, UIButton } from "../ui/uiHelpers";
 
 const TILE = 16; // real tileset is 16x16 pixels per tile
 const MAP_COLS = 80;
@@ -637,7 +638,7 @@ export class OverworldScene extends Phaser.Scene {
       .setDepth(201);
 
     const subtitle = this.add
-      .text(400, 288, "Claim 1000 Gold Coins?", {
+      .text(400, 288, "Claim 1000 Gold Coins + 1 Stake Coin?", {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -645,10 +646,9 @@ export class OverworldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
 
-    const yesBtn = makeButton(this, 340, 335, 120, 46, "Yes", Theme.accent, Theme.accentHover, () => {
+    const yesBtn = this.createAttendantClaimButton(340, 335, 120, 46, "Yes", (outcome) => {
       cleanup();
-      const amount = gameState.claimBonus();
-      this.showResultPanel(`+${amount} Gold Coins!`);
+      this.showClaimResult(outcome);
     });
     yesBtn.container.setScrollFactor(0).setDepth(201);
 
@@ -667,11 +667,71 @@ export class OverworldScene extends Phaser.Scene {
     };
   }
 
-  private showResultPanel(message: string) {
+  /**
+   * Creates a button wired to the attendant claim (#18/#19): calls
+   * gameState.claimAttendantBonus() on click and invokes `onClaimed` with
+   * the successful outcome (GC + SC transactions). While the 30s cooldown
+   * is active it auto-disables itself and shows a live "Available in Ns"
+   * countdown instead of `readyLabel`, ticking off a Phaser timer that's
+   * torn down when the button is destroyed - so cooldown state (persisted
+   * in GameState/localStorage, #19) is always reflected accurately even
+   * across a panel reopen or a reload.
+   */
+  private createAttendantClaimButton(
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    readyLabel: string,
+    onClaimed: (outcome: Extract<AttendantClaimOutcome, { ok: true }>) => void
+  ): UIButton {
+    const btn = makeButton(this, x, y, w, h, readyLabel, Theme.accent, Theme.accentHover, () => {
+      const outcome = gameState.claimAttendantBonus();
+      if (outcome.ok) onClaimed(outcome);
+      // If blocked (e.g. a race with the cooldown expiring mid-panel), the
+      // next tick below immediately reflects the accurate remaining time -
+      // no separate error state needed since the button was already
+      // showing the correct countdown a moment ago.
+    });
+
+    const refreshCooldownLabel = () => {
+      const remainingMs = gameState.attendantClaimCooldownRemainingMs;
+      if (remainingMs > 0) {
+        btn.setEnabled(false);
+        btn.setLabel(`Available in ${Math.ceil(remainingMs / 1000)}s`);
+      } else {
+        btn.setEnabled(true);
+        btn.setLabel(readyLabel);
+      }
+    };
+    refreshCooldownLabel();
+
+    const ticker = this.time.addEvent({ delay: 250, loop: true, callback: refreshCooldownLabel });
+    const baseDestroy = btn.destroy;
+    btn.destroy = () => {
+      ticker.remove(false);
+      baseDestroy();
+    };
+
+    return btn;
+  }
+
+  /** Shows the result panel for a successful attendant claim, formatting both the GC and SC granted. */
+  private showClaimResult(outcome: Extract<AttendantClaimOutcome, { ok: true }>) {
+    this.updateHud();
+    const gcGained = outcome.gcTransaction.amount;
+    const scGained = outcome.scBonusTransaction.amount;
+    this.showResultPanel(
+      `+${gcGained} Gold Coins!`,
+      scGained > 0 ? `+${scGained} Stake Coin${scGained === 1 ? "" : "s"}!` : undefined
+    );
+  }
+
+  private showResultPanel(message: string, subMessage?: string) {
     const panel = makePanel(this, 400, 300, 420, 220, 200).setScrollFactor(0);
 
     const title = this.add
-      .text(400, 255, message, {
+      .text(400, subMessage ? 245 : 255, message, {
         fontSize: "22px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -680,8 +740,20 @@ export class OverworldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
 
+    const subtitle = subMessage
+      ? this.add
+          .text(400, 270, subMessage, {
+            fontSize: "14px",
+            color: Theme.textGold,
+            fontStyle: "bold"
+          })
+          .setOrigin(0.5)
+          .setScrollFactor(0)
+          .setDepth(201)
+      : null;
+
     const balance = this.add
-      .text(400, 288, `GC: ${gameState.goldCoins}   |   SC: ${gameState.stakeCoins}`, {
+      .text(400, subMessage ? 296 : 288, `GC: ${gameState.goldCoins}   |   SC: ${gameState.stakeCoins}`, {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -692,28 +764,18 @@ export class OverworldScene extends Phaser.Scene {
     const cleanup = () => {
       panel.destroy();
       title.destroy();
+      subtitle?.destroy();
       balance.destroy();
       againBtn.destroy();
       doneBtn.destroy();
     };
 
-    // Claim again right from here - no need to close and re-open the panel
-    const againBtn = makeButton(
-      this,
-      340,
-      340,
-      140,
-      44,
-      "Claim Again",
-      Theme.accent,
-      Theme.accentHover,
-      () => {
-        cleanup();
-        const amount = gameState.claimBonus();
-        this.updateHud();
-        this.showResultPanel(`+${amount} Gold Coins!`);
-      }
-    );
+    // Claim again right from here - no need to close and re-open the panel.
+    // Same cooldown-aware button as the initial confirm panel.
+    const againBtn = this.createAttendantClaimButton(340, 340, 140, 44, "Claim Again", (outcome) => {
+      cleanup();
+      this.showClaimResult(outcome);
+    });
     againBtn.container.setScrollFactor(0).setDepth(201);
 
     const doneBtn = makeButton(this, 470, 340, 100, 44, "Done", Theme.neutral, Theme.neutralHover, () => {

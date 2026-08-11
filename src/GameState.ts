@@ -24,6 +24,7 @@
  */
 
 import {
+  Currency,
   LedgerState,
   Transaction,
   applyTransaction,
@@ -45,10 +46,23 @@ import {
 } from "./economy/packages";
 import { claimAdRewardGc } from "./economy/adRewards";
 import {
+  AttendantClaimOutcome,
+  attendantClaimCooldownRemaining,
+  claimAttendantBonus as claimAttendantBonusInternal
+} from "./economy/attendantClaim";
+import {
   PurchaseSkinOutcome,
   purchaseSkin as purchaseSkinInternal
 } from "./economy/skinShop";
 import { RedemptionOutcome, redeemSc as redeemScInternal } from "./economy/redemption";
+import {
+  PlaceBetOutcome,
+  ResolveBetOutcome,
+  placeBet as placeBetInternal,
+  resolveBet as resolveBetInternal
+} from "./economy/betting";
+
+export type { Currency };
 
 export interface SkinDef {
   id: string; // also used as the animation prefix, e.g. "skin_000"
@@ -93,6 +107,12 @@ interface StoredProfile {
   betAmount: number;
   currentSkin: string;
   unlockedSkins: string[];
+  /**
+   * ms-since-epoch of the last successful attendant-claim (#18/#19), or
+   * null/absent if never claimed. Optional because profiles saved before
+   * #19 shipped won't have this key - always read it via `?? null`.
+   */
+  attendantClaimedAt?: number | null;
 }
 
 /** Shape of profiles written before the ledger existed (flat goldCoins/stakeCoins numbers). */
@@ -115,7 +135,9 @@ function isLegacyProfile(p: StoredProfile | LegacyStoredProfile): p is LegacySto
  * Migrates a pre-ledger profile (flat goldCoins/stakeCoins numbers) into
  * the ledger shape. Existing SC is treated as already-cleared (no
  * retroactive playthrough lock) since we have no record of how it was
- * granted - only newly-granted SC from this point on is gated.
+ * granted - only newly-granted SC from this point on is gated. Never
+ * claimed the attendant bonus under this shape, so its cooldown starts
+ * fresh (null - available immediately).
  */
 function migrateLegacyProfile(legacy: LegacyStoredProfile): StoredProfile {
   return {
@@ -124,7 +146,8 @@ function migrateLegacyProfile(legacy: LegacyStoredProfile): StoredProfile {
     playthrough: createPlaythroughState(),
     betAmount: legacy.betAmount,
     currentSkin: legacy.currentSkin,
-    unlockedSkins: legacy.unlockedSkins
+    unlockedSkins: legacy.unlockedSkins,
+    attendantClaimedAt: null
   };
 }
 
@@ -169,6 +192,8 @@ class GameState {
   private _playthrough: PlaythroughState = createPlaythroughState();
   private _currentSkin = "player";
   private _betAmount = 25;
+  /** ms-since-epoch of the last successful attendant claim (#18/#19), or null if never claimed. */
+  private _attendantClaimedAt: number | null = null;
 
   /** Skin ids the player owns. "player" (Classic) is always owned/free. */
   unlockedSkins: string[] = ["player"];
@@ -289,6 +314,35 @@ class GameState {
     this.save();
   }
 
+  /**
+   * #20 - currency-aware bet lifecycle. Foundational ledger API for games
+   * to wager either GC or SC (previously GC-only via the legacy goldCoins
+   * setter). See src/economy/betting.ts for the full integration guide;
+   * short version:
+   *   const bet = gameState.placeBet(currency, amount);
+   *   if (!bet.ok) {/* show why, don't start the round *\/ }
+   *   // ...run the round...
+   *   gameState.resolveBet(currency, payoutAmount); // 0 payout = total loss, valid
+   *
+   * placeBet debits `currency` and, when `currency` is "SC", also counts
+   * `amount` toward clearing the playthrough requirement (recordScWager) -
+   * wagering SC is what clears it, regardless of win/lose. Not wired into
+   * any game scene yet - that integration (plus a GC/SC bet-toggle in the
+   * UI) is a follow-up for games/floor.
+   */
+  placeBet(currency: Currency, amount: number): PlaceBetOutcome {
+    const outcome = placeBetInternal(this._ledger, this._playthrough, currency, amount);
+    if (outcome.ok) this.save();
+    return outcome;
+  }
+
+  /** See `placeBet` above. Credits the round's gross payout (stake + winnings) in `currency`; pass 0 for a total loss. */
+  resolveBet(currency: Currency, payoutAmount: number): ResolveBetOutcome {
+    const outcome = resolveBetInternal(this._ledger, currency, payoutAmount);
+    if (outcome.transaction) this.save();
+    return outcome;
+  }
+
   /** Buys a GC package tier, granting its GC plus its non-linear SC bonus gift (see economy/packages.ts). */
   purchasePackage(packageId: string): PackagePurchaseOutcome {
     const result = purchasePackageInternal(this._ledger, this._playthrough, packageId);
@@ -325,10 +379,46 @@ class GameState {
     return outcome.ok;
   }
 
-  /** Grants a Gold Coin bonus via the GC-only ad-reward path. No cooldown for this POC - always available. */
+  /**
+   * Grants a Gold Coin bonus via the GC-only ad-reward path. No cooldown
+   * for this POC - always available. Kept for a future real "watch an ad"
+   * feature; the overworld Chip Attendant NPC no longer calls this (see
+   * `claimAttendantBonus` below, #18/#19).
+   */
   claimBonus(): number {
     const tx = this.claimAdReward();
     return tx.amount;
+  }
+
+  /** ms remaining before `claimAttendantBonus()` can succeed again. 0 = available now. */
+  get attendantClaimCooldownRemainingMs(): number {
+    return attendantClaimCooldownRemaining(this._attendantClaimedAt);
+  }
+
+  /**
+   * The overworld Chip Attendant's free GC claim (#18/#19). Routed through
+   * the purchase-bonus path (src/economy/attendantClaim.ts) rather than
+   * the ad-reward path: this claim is a placeholder stand-in for a future
+   * real GC purchase, so its SC bonus rides the "SC gifted alongside a GC
+   * purchase" rule, not "ad-reward refills are GC-only" (adRewards.ts is
+   * untouched and unrelated to this method). Gated by a persisted 30s
+   * cooldown - check `attendantClaimCooldownRemainingMs` before showing a
+   * claim button as enabled, or just call this and handle the `COOLDOWN`
+   * outcome.
+   */
+  claimAttendantBonus(): AttendantClaimOutcome {
+    const now = Date.now();
+    const outcome = claimAttendantBonusInternal(
+      this._ledger,
+      this._playthrough,
+      this._attendantClaimedAt,
+      now
+    );
+    if (outcome.ok) {
+      this._attendantClaimedAt = now;
+      this.save();
+    }
+    return outcome;
   }
 
   /**
@@ -359,6 +449,7 @@ class GameState {
       this._betAmount = existing.betAmount;
       this._currentSkin = existing.currentSkin;
       this.unlockedSkins = [...existing.unlockedSkins];
+      this._attendantClaimedAt = existing.attendantClaimedAt ?? null;
       this.activeUsername = username;
       this.save(); // persist migration (if any) immediately
       return { ok: true, isNew: false };
@@ -371,6 +462,7 @@ class GameState {
     this._betAmount = 25;
     this._currentSkin = "player";
     this.unlockedSkins = ["player"];
+    this._attendantClaimedAt = null;
     this.activeUsername = username;
     grantSignupBonus(this._ledger, this._playthrough);
 
@@ -380,7 +472,8 @@ class GameState {
       playthrough: this._playthrough,
       betAmount: this._betAmount,
       currentSkin: this._currentSkin,
-      unlockedSkins: this.unlockedSkins
+      unlockedSkins: this.unlockedSkins,
+      attendantClaimedAt: this._attendantClaimedAt
     };
     writeProfiles(profiles);
     return { ok: true, isNew: true };
@@ -404,7 +497,8 @@ class GameState {
       playthrough: this._playthrough,
       betAmount: this._betAmount,
       currentSkin: this._currentSkin,
-      unlockedSkins: this.unlockedSkins
+      unlockedSkins: this.unlockedSkins,
+      attendantClaimedAt: this._attendantClaimedAt
     };
     writeProfiles(profiles);
   }

@@ -72,12 +72,41 @@ export type PackagePurchaseOutcome =
   | { ok: false; reason: "UNKNOWN_PACKAGE" };
 
 /**
+ * Grants a GcPackage's GC + SC bonus and registers the SC bonus's 1x
+ * playthrough requirement. Exported (not just used internally by
+ * `purchasePackage`) so a caller with a package object that's
+ * *deliberately not* in GC_PACKAGES - e.g. an internal, non-catalog,
+ * $0 package - can still get the exact same purchase-bonus mechanics
+ * without it ever being resolvable by id through `getPackage`/
+ * `listPackages` (see src/economy/attendantClaim.ts for that use case).
+ * Real purchase flows should go through `purchasePackage` below instead,
+ * which only resolves ids from the real catalog.
+ */
+export function grantPackage(
+  ledger: LedgerState,
+  playthrough: PlaythroughState,
+  pkg: GcPackage
+): PackagePurchaseResult {
+  const gcTransaction = applyTransaction(ledger, "GC", "PACKAGE_GC", pkg.gcAmount, {
+    packageId: pkg.id
+  });
+  const scBonusTransaction = applyTransaction(ledger, "SC", "PACKAGE_BONUS_SC", pkg.scBonus, {
+    packageId: pkg.id
+  });
+  addPlaythroughRequirement(playthrough, pkg.scBonus);
+
+  return { pkg, gcTransaction, scBonusTransaction };
+}
+
+/**
  * "Purchases" a GC package (payment is assumed to have already succeeded -
  * this POC has no real payment gateway) and grants:
  *   1. the package's GC amount (PACKAGE_GC transaction)
  *   2. its SC bonus gift (PACKAGE_BONUS_SC transaction)
  * and registers a 1x playthrough requirement for that SC bonus so it can't
- * be redeemed until it's been wagered through once.
+ * be redeemed until it's been wagered through once. Only resolves ids from
+ * the real, purchasable GC_PACKAGES catalog - see `grantPackage` above for
+ * granting a non-catalog package.
  */
 export function purchasePackage(
   ledger: LedgerState,
@@ -87,13 +116,5 @@ export function purchasePackage(
   const pkg = getPackage(packageId);
   if (!pkg) return { ok: false, reason: "UNKNOWN_PACKAGE" };
 
-  const gcTransaction = applyTransaction(ledger, "GC", "PACKAGE_GC", pkg.gcAmount, {
-    packageId: pkg.id
-  });
-  const scBonusTransaction = applyTransaction(ledger, "SC", "PACKAGE_BONUS_SC", pkg.scBonus, {
-    packageId: pkg.id
-  });
-  addPlaythroughRequirement(playthrough, pkg.scBonus);
-
-  return { ok: true, pkg, gcTransaction, scBonusTransaction };
+  return { ok: true, ...grantPackage(ledger, playthrough, pkg) };
 }
