@@ -100,12 +100,23 @@ Output goes to `dist/`.
 ## Art credits
 
 The casino tileset (floor, walls, roulette table, slot machine, blackjack
-table, plant) and character spritesheets (player, chip attendant NPC) are
-from the **"2D Top-Down Pixel Art"** Casino tileset and matching character
-pack by Jephed, Game Between The Lines
+table, plant) and the 17 purchasable character skins (`SKIN_CATALOG` in
+`GameState.ts`) are from the **"2D Top-Down Pixel Art"** Casino tileset and
+matching character pack by Jephed, Game Between The Lines
 (https://gamebetweenthelines.com/), used under their free license. Per the
 license terms, keep this credit somewhere visible in the project (e.g. an
-in-game credits screen or your README) if you ship this publicly.
+in-game credits screen or your README) if you ship this publicly. (Task
+#24: the base player/chip-attendant-NPC/dealer sprites moved off this pack
+to Kenney's pack below as part of the "Bright Social-Hub" reskin — see
+`STYLE_GUIDE.md`'s scope note. The 17 skins have not been redrawn to match
+and still use this Jephed rig.)
+
+The base player, chip attendant NPC, and dealer character sprites are from
+the **"RPG Urban Pack"** by Kenney (https://kenney.nl/assets/rpg-urban-pack),
+CC0 1.0 Universal — no attribution required, credited here anyway to stay
+consistent with the project's other art credit. (Task #21/#24; see
+`STYLE_GUIDE.md` for the full pack details, including its environment
+tiles, which are a separate integration.)
 
 ## What's real vs. placeholder
 

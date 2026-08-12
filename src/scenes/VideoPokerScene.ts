@@ -222,13 +222,13 @@ export class VideoPokerScene extends Phaser.Scene {
       slot.holdLabel.setText("");
       return;
     }
-    slot.bg.fillStyle(0xf5f2ea, 1);
+    slot.bg.fillStyle(Theme.cardFace, 1);
     slot.bg.fillRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 8);
-    slot.bg.lineStyle(held ? 3 : 2, held ? Theme.accent : 0x0e1015, 1);
+    slot.bg.lineStyle(held ? 3 : 2, held ? Theme.accent : Theme.cardBorder, 1);
     slot.bg.strokeRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 8);
     slot.label
       .setText(`${card.label}${card.suit}`)
-      .setColor(card.isRed ? "#c62828" : "#1a1a1a")
+      .setColor(card.isRed ? Theme.cardTextRed : Theme.cardTextBlack)
       .setVisible(true);
     slot.holdLabel.setText(held ? "HELD" : "");
   }

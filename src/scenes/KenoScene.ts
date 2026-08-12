@@ -226,26 +226,29 @@ export class KenoScene extends Phaser.Scene {
   }
 
   private paintCellVisual(cell: CellVisual, state: CellState) {
+    // Pale, high-key tint fills per state (STYLE_GUIDE: light/warm, no dark
+    // near-black cell backgrounds) - border/text stay tied to Theme tokens
+    // so they keep tracking the shared palette.
     const colors: Record<CellState, number> = {
       empty: Theme.inset,
-      picked: 0x1e2530,
-      hit: 0x1b5e3a,
-      miss: 0x3a1f24,
-      drawn: 0x2a3a55
+      picked: 0xbee8f5, // deeper pale sky-blue - "selected, not drawn yet"
+      hit: Theme.winZone, // pale mint - matched number
+      miss: Theme.loseZone, // pale coral - drawn, not picked
+      drawn: 0xfce8c7 // pale warm gold - drawn, not picked, informational
     };
     const border: Record<CellState, number> = {
       empty: Theme.panelBorder,
-      picked: Theme.accent,
+      picked: Theme.secondary,
       hit: Theme.accent,
       miss: Theme.danger,
-      drawn: 0x5c8dff
+      drawn: Theme.gold
     };
     const textColor: Record<CellState, string> = {
       empty: Theme.textMuted,
       picked: Theme.textPrimary,
       hit: Theme.textAccent,
       miss: Theme.textDanger,
-      drawn: "#9fc0ff"
+      drawn: Theme.textGold
     };
 
     cell.bg.clear();

@@ -91,7 +91,7 @@ export class DragonTowerScene extends Phaser.Scene {
       46,
       "CASH OUT",
       Theme.gold,
-      0xffe082,
+      Theme.goldHover,
       () => this.cashOut()
     );
     this.cashOutBtn.setEnabled(false);
@@ -145,9 +145,9 @@ export class DragonTowerScene extends Phaser.Scene {
     bg.clear();
     const colors = {
       locked: Theme.inset,
-      active: 0x1e2530,
-      safe: 0x1b5e3a,
-      bad: 0x7a1f1f
+      active: 0xd9f5ec, // very pale mint - playable, not yet revealed
+      safe: Theme.winZone,
+      bad: Theme.loseZone
     };
     const border = {
       locked: Theme.panelBorder,

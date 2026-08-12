@@ -100,7 +100,7 @@ function colorForMultiplier(m: number): number {
   if (m <= 0) return Theme.danger;
   if (m >= 8) return Theme.gold;
   if (m >= 2) return Theme.accent;
-  return 0xffffff;
+  return Theme.neutral;
 }
 
 export class WheelScene extends Phaser.Scene {
@@ -161,7 +161,7 @@ export class WheelScene extends Phaser.Scene {
         -12,
         0,
         6,
-        0xffffff
+        Theme.outline
       )
       .setDepth(10);
 
@@ -238,7 +238,7 @@ export class WheelScene extends Phaser.Scene {
       g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
       g.closePath();
       g.fillPath();
-      g.lineStyle(1, 0x0e1015, 1);
+      g.lineStyle(1, Theme.outline, 1);
       g.beginPath();
       g.moveTo(0, 0);
       g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
@@ -249,7 +249,7 @@ export class WheelScene extends Phaser.Scene {
     g.strokeCircle(0, 0, WHEEL_RADIUS);
     this.wheelContainer.add(g);
 
-    const hub = this.add.circle(0, 0, 14, 0x171a22).setStrokeStyle(2, Theme.panelBorder);
+    const hub = this.add.circle(0, 0, 14, Theme.outline).setStrokeStyle(2, Theme.panelBorder);
     this.wheelContainer.add(hub);
   }
 

@@ -1,7 +1,9 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel } from "../ui/uiHelpers";
+import { makeButton, makePanel, UIButton } from "../ui/uiHelpers";
+import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
+import { GC_MULTIPLIER_BASE, GcMultiplier } from "../economy/gcMultiplier";
 
 const FIELD_W = 320;
 const FIELD_H = 36;
@@ -28,6 +30,9 @@ export class LoginScene extends Phaser.Scene {
   private usernameBox!: Phaser.GameObjects.Graphics;
   private passwordBox!: Phaser.GameObjects.Graphics;
   private errorText!: Phaser.GameObjects.Text;
+  private usernameZone!: Phaser.GameObjects.Zone;
+  private passwordZone!: Phaser.GameObjects.Zone;
+  private enterBtn!: UIButton;
 
   constructor() {
     super("LoginScene");
@@ -67,10 +72,10 @@ export class LoginScene extends Phaser.Scene {
     this.usernameText = this.add
       .text(400, 248, "", { fontSize: "15px", color: Theme.textPrimary })
       .setOrigin(0.5);
-    const usernameZone = this.add
+    this.usernameZone = this.add
       .zone(400, 248, FIELD_W, FIELD_H)
       .setInteractive({ useHandCursor: true });
-    usernameZone.on("pointerdown", () => this.setActiveField("username"));
+    this.usernameZone.on("pointerdown", () => this.setActiveField("username"));
 
     this.add
       .text(400, 283, "Password", { fontSize: "11px", color: Theme.textMuted })
@@ -80,16 +85,16 @@ export class LoginScene extends Phaser.Scene {
     this.passwordText = this.add
       .text(400, 311, "", { fontSize: "15px", color: Theme.textPrimary })
       .setOrigin(0.5);
-    const passwordZone = this.add
+    this.passwordZone = this.add
       .zone(400, 311, FIELD_W, FIELD_H)
       .setInteractive({ useHandCursor: true });
-    passwordZone.on("pointerdown", () => this.setActiveField("password"));
+    this.passwordZone.on("pointerdown", () => this.setActiveField("password"));
 
     this.errorText = this.add
       .text(400, 350, "", { fontSize: "12px", color: Theme.textDanger })
       .setOrigin(0.5);
 
-    makeButton(this, 400, 400, 220, 50, "ENTER CASINO", Theme.accent, Theme.accentHover, () =>
+    this.enterBtn = makeButton(this, 400, 400, 220, 50, "ENTER CASINO", Theme.accent, Theme.accentHover, () =>
       this.submit()
     );
 
@@ -177,9 +182,108 @@ export class LoginScene extends Phaser.Scene {
     this.drawFieldBox(this.passwordBox, 311, this.activeField === "password");
   }
 
+  /**
+   * #29: brand-new profiles play the shuffle-cup mini-game for the signup
+   * bonus's GC leg before the profile is actually created; logging into an
+   * existing profile is unchanged (instant, no mini-game - gameState.login
+   * ignores the multiplier entirely for existing profiles anyway). Validate
+   * fields here, synchronously, before deciding which path to take - a
+   * blank field should still surface its error immediately rather than
+   * only after the player sits through a shuffle animation.
+   */
   private submit() {
-    const result = gameState.login(this.usernameValue, this.passwordValue);
+    const username = this.usernameValue.trim();
+    const password = this.passwordValue;
+    if (!username) {
+      this.errorText.setText("Enter a username");
+      return;
+    }
+    if (!password) {
+      this.errorText.setText("Enter a password");
+      return;
+    }
+
+    if (gameState.isNewUsername(username)) {
+      this.runSignupShuffle(username, password);
+    } else {
+      this.completeLogin(username, password);
+    }
+  }
+
+  private setFormInteractionEnabled(enabled: boolean) {
+    if (enabled) {
+      this.usernameZone.setInteractive({ useHandCursor: true });
+      this.passwordZone.setInteractive({ useHandCursor: true });
+      this.enterBtn.setEnabled(true);
+    } else {
+      this.usernameZone.disableInteractive();
+      this.passwordZone.disableInteractive();
+      this.enterBtn.setEnabled(false);
+    }
+  }
+
+  /**
+   * Plays the shuffle-cup reveal (task #28's reusable component) for a
+   * confirmed brand-new username, then creates the profile with whatever
+   * GC multiplier the player landed on. Explicitly disables the username/
+   * password zones and the submit button while it runs - not just visually
+   * covering them - since they're raw pointer-interactive targets and a
+   * click-through during the animation could re-trigger submit() or
+   * refocus a field mid-shuffle.
+   */
+  private runSignupShuffle(username: string, password: string) {
+    this.setActiveField(null);
+    this.setFormInteractionEnabled(false);
+    this.errorText.setText("");
+
+    const overlay = makePanel(this, 400, 300, 420, 260, 300);
+    const title = this.add
+      .text(400, 195, "🪙 New Profile Bonus", {
+        fontSize: "17px",
+        color: Theme.textGold,
+        fontStyle: "bold"
+      })
+      .setOrigin(0.5)
+      .setDepth(301);
+    const sub = this.add
+      .text(400, 219, "Pick a cup to reveal your starting Gold Coins", {
+        fontSize: "12px",
+        color: Theme.textMuted
+      })
+      .setOrigin(0.5)
+      .setDepth(301);
+
+    const handle = createShuffleCupReveal(this, 400, 302, GC_MULTIPLIER_BASE, ({ multiplier }) => {
+      handle.destroy();
+      overlay.destroy();
+      title.destroy();
+      sub.destroy();
+      this.completeLogin(username, password, multiplier as GcMultiplier);
+    });
+    handle.container.setDepth(301);
+    handle.start();
+  }
+
+  /**
+   * Actually creates/loads the profile via gameState.login(). `gcMultiplier`
+   * is only meaningful (and only ever passed) for the brand-new-profile
+   * path, straight through from the shuffle-cup's resolved value - per qa's
+   * note on #27, login()/grantSignupBonus only have a defined failure mode
+   * for an *invalid* multiplier, which the mini-game can't produce, but the
+   * try/catch below is a defensive backstop so a login screen can never get
+   * stuck rather than surfacing a retryable error.
+   */
+  private completeLogin(username: string, password: string, gcMultiplier: GcMultiplier = 1) {
+    let result;
+    try {
+      result = gameState.login(username, password, gcMultiplier);
+    } catch {
+      this.setFormInteractionEnabled(true);
+      this.errorText.setText("Something went wrong creating your profile - please try again.");
+      return;
+    }
     if (!result.ok) {
+      this.setFormInteractionEnabled(true);
       this.errorText.setText(result.error);
       return;
     }

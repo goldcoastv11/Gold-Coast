@@ -161,7 +161,7 @@ export class HiLoScene extends Phaser.Scene {
       46,
       "CASH OUT",
       Theme.gold,
-      0xffe082,
+      Theme.goldHover,
       () => this.cashOut()
     );
 
@@ -193,11 +193,11 @@ export class HiLoScene extends Phaser.Scene {
       this.cardLabel.setText("?").setColor(Theme.textMuted);
       return;
     }
-    this.cardBg.fillStyle(0xf5f2ea, 1);
+    this.cardBg.fillStyle(Theme.cardFace, 1);
     this.cardBg.fillRoundedRect(400 - w / 2, 225 - h / 2, w, h, 10);
-    this.cardBg.lineStyle(2, 0x0e1015, 1);
+    this.cardBg.lineStyle(2, Theme.cardBorder, 1);
     this.cardBg.strokeRoundedRect(400 - w / 2, 225 - h / 2, w, h, 10);
-    this.cardLabel.setText(`${card.label}${card.suit}`).setColor(card.isRed ? "#c62828" : "#1a1a1a");
+    this.cardLabel.setText(`${card.label}${card.suit}`).setColor(card.isRed ? Theme.cardTextRed : Theme.cardTextBlack);
   }
 
   private renderHistory() {
@@ -212,15 +212,15 @@ export class HiLoScene extends Phaser.Scene {
       const x = startX + i * (cw + gap);
       const y = 298;
       const bg = this.add.graphics();
-      bg.fillStyle(0xf5f2ea, 1);
+      bg.fillStyle(Theme.cardFace, 1);
       bg.fillRoundedRect(x - cw / 2, y - ch / 2, cw, ch, 5);
-      bg.lineStyle(1, 0x0e1015, 1);
+      bg.lineStyle(1, Theme.cardBorder, 1);
       bg.strokeRoundedRect(x - cw / 2, y - ch / 2, cw, ch, 5);
       const label = this.add
         .text(x, y, `${card.label}${card.suit}`, {
           fontSize: "10px",
           fontStyle: "bold",
-          color: card.isRed ? "#c62828" : "#1a1a1a"
+          color: card.isRed ? Theme.cardTextRed : Theme.cardTextBlack
         })
         .setOrigin(0.5);
       this.historyContainer.add([bg, label]);

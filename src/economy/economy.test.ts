@@ -15,6 +15,7 @@ import {
 } from "./playthrough";
 import { GC_PACKAGES, purchasePackage } from "./packages";
 import { grantSignupBonus, SIGNUP_BONUS_SC } from "./signupBonus";
+import { GC_MULTIPLIER_BASE } from "./gcMultiplier";
 import { checkRedemptionEligibility, MIN_SC_REDEMPTION, redeemSc } from "./redemption";
 import { AD_REWARD_GC_AMOUNT, claimAdRewardGc } from "./adRewards";
 import { canAffordSkin, ownsSkin, purchaseSkin } from "./skinShop";
@@ -90,15 +91,32 @@ describe("GC packages - SC bonus is non-linear across tiers", () => {
 });
 
 describe("signup bonus", () => {
-  it("grants SC only and locks it behind a 1x playthrough requirement", () => {
-    const ledger = createLedger(1000, 0);
+  it("grants both GC (default 1x) and SC, and locks the SC behind a 1x playthrough requirement", () => {
+    const ledger = createLedger(0, 0);
     const playthrough = createPlaythroughState();
-    grantSignupBonus(ledger, playthrough);
+    const { gcTransaction, scTransaction } = grantSignupBonus(ledger, playthrough);
 
+    expect(gcTransaction.type).toBe("SIGNUP_BONUS_GC");
+    expect(gcTransaction.amount).toBe(GC_MULTIPLIER_BASE); // default multiplier 1x
+    expect(scTransaction.type).toBe("SIGNUP_BONUS_SC");
+    expect(getBalance(ledger, "GC")).toBe(GC_MULTIPLIER_BASE);
     expect(getBalance(ledger, "SC")).toBe(SIGNUP_BONUS_SC);
-    expect(getBalance(ledger, "GC")).toBe(1000); // untouched
     expect(playthrough.required).toBe(SIGNUP_BONUS_SC);
     expect(isPlaythroughCleared(playthrough)).toBe(false);
+  });
+
+  it("#27: the GC leg scales with the resolved multiplier, the SC leg stays flat", () => {
+    for (const [multiplier, expectedGc] of [
+      [0.5, 500],
+      [1, 1000],
+      [2, 2000]
+    ] as const) {
+      const ledger = createLedger(0, 0);
+      const playthrough = createPlaythroughState();
+      const { gcTransaction, scTransaction } = grantSignupBonus(ledger, playthrough, multiplier);
+      expect(gcTransaction.amount).toBe(expectedGc);
+      expect(scTransaction.amount).toBe(SIGNUP_BONUS_SC); // unaffected by multiplier
+    }
   });
 });
 

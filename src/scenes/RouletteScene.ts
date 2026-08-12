@@ -20,10 +20,24 @@ const PAYOUTS: Record<BetColor, number> = {
   green: 20 // generous for early playtesting, same spirit as the slots paytable
 };
 
+// Roulette's red/black/green stay domain-specific (a real wheel needs 3
+// distinguishable colors), but the black pocket is a warm dark-brown, not
+// pure black, and red/green now share the theme's danger/success family -
+// per STYLE_GUIDE direction notes 1/2/7.
 const COLOR_HEX: Record<BetColor, string> = {
-  red: "#d32f2f",
-  black: "#1a1a1a",
-  green: "#2e7d5c"
+  red: "#c2504d",
+  black: "#5c3a2e",
+  green: "#2e9b72"
+};
+const COLOR_NUM: Record<BetColor, number> = {
+  red: 0xc2504d,
+  black: 0x5c3a2e,
+  green: 0x2e9b72
+};
+const COLOR_NUM_HOVER: Record<BetColor, number> = {
+  red: 0xd47a77,
+  black: 0x7a5442,
+  green: 0x5cc79c
 };
 
 export class RouletteScene extends Phaser.Scene {
@@ -65,8 +79,13 @@ export class RouletteScene extends Phaser.Scene {
 
     this.add.image(400, 300, "roulette_table").setDisplaySize(500, 280).setAlpha(0.5);
 
-    // Dealer - stands off to the side, "dealing" via a looping animation
-    const dealer = this.add.sprite(105, 130, "dealer_sheet", 1).setScale(2.2);
+    // Dealer - stands off to the side, "dealing" via a looping animation.
+    // Scale 4.4 (not the old 2.2) - see BlackjackScene.ts's dealer comment:
+    // the #24 character reskin dropped the sheet's frame size from 21x32 to
+    // 16x16, so 2.2 now renders too small. 4.4 = old display height
+    // (32*2.2=70.4px) / new frame height (16px), preserving the dealer's
+    // previous on-screen size.
+    const dealer = this.add.sprite(105, 130, "dealer_sheet", 1).setScale(4.4);
     dealer.play("dealer_walk_down");
 
     makeInset(this, 250, 110, 210, 42, 12);
@@ -92,13 +111,22 @@ export class RouletteScene extends Phaser.Scene {
       .text(400, 295, "Place your bet", { fontSize: "15px", color: Theme.textMuted })
       .setOrigin(0.5);
 
-    const redBtn = makeButton(this, 240, 400, 140, 50, "RED (2x)", 0xd32f2f, 0xe57373, () =>
+    const redBtn = makeButton(this, 240, 400, 140, 50, "RED (2x)", COLOR_NUM.red, COLOR_NUM_HOVER.red, () =>
       this.spin("red")
     );
-    const blackBtn = makeButton(this, 400, 400, 140, 50, "BLACK (2x)", 0x1a1a1a, 0x3a3a3a, () =>
-      this.spin("black")
+    const blackBtn = makeButton(
+      this,
+      400,
+      400,
+      140,
+      50,
+      "BLACK (2x)",
+      COLOR_NUM.black,
+      COLOR_NUM_HOVER.black,
+      () => this.spin("black"),
+      Theme.textOnDark // dark warm-brown fill needs a light label
     );
-    const greenBtn = makeButton(this, 560, 400, 140, 50, "GREEN (20x)", 0x2e7d5c, 0x43a047, () =>
+    const greenBtn = makeButton(this, 560, 400, 140, 50, "GREEN (20x)", COLOR_NUM.green, COLOR_NUM_HOVER.green, () =>
       this.spin("green")
     );
     this.betButtons = [redBtn, blackBtn, greenBtn];

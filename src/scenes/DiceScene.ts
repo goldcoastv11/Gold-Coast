@@ -77,7 +77,7 @@ export class DiceScene extends Phaser.Scene {
     // Win/lose zone bar with a marker for the last roll
     this.zoneBar = this.add.graphics();
     this.marker = this.add
-      .triangle(BAR_X, BAR_Y - 16, -6, 8, 6, 8, 0, -6, 0xffffff)
+      .triangle(BAR_X, BAR_Y - 16, -6, 8, 6, 8, 0, -6, Theme.outline)
       .setVisible(false);
 
     this.minusBtn = makeButton(this, 300, 330, 44, 36, "-5", Theme.neutral, Theme.neutralHover, () =>
@@ -130,9 +130,9 @@ export class DiceScene extends Phaser.Scene {
     const winWidth = (this.target / 100) * BAR_WIDTH;
 
     this.zoneBar.clear();
-    this.zoneBar.fillStyle(0x1b5e3a, 1);
+    this.zoneBar.fillStyle(Theme.winZone, 1);
     this.zoneBar.fillRoundedRect(left, BAR_Y - 9, winWidth, 18, 6);
-    this.zoneBar.fillStyle(0x7a1f1f, 1);
+    this.zoneBar.fillStyle(Theme.loseZone, 1);
     this.zoneBar.fillRoundedRect(left + winWidth, BAR_Y - 9, BAR_WIDTH - winWidth, 18, 6);
     this.zoneBar.lineStyle(2, Theme.panelBorder, 1);
     this.zoneBar.strokeRoundedRect(left, BAR_Y - 9, BAR_WIDTH, 18, 6);

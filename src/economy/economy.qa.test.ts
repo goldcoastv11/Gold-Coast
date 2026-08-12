@@ -13,6 +13,7 @@ import { checkRedemptionEligibility, MIN_SC_REDEMPTION, redeemSc } from "./redem
 import { claimAdRewardGc } from "./adRewards";
 import { purchaseSkin } from "./skinShop";
 import { ATTENDANT_CLAIM_PACKAGE, claimAttendantBonus } from "./attendantClaim";
+import { isValidGcMultiplier, GC_MULTIPLIER_BASE, InvalidGcMultiplierError } from "./gcMultiplier";
 
 /**
  * QA's independent verification of the CLAUDE.md economy-rule tripwires
@@ -232,6 +233,12 @@ describe("QA tripwire: ad rewards only ever grant GC", () => {
  * except playthrough-gating or the redemption minimum, so this SC must
  * behave exactly like any other SC for those two rules. Written
  * independently of economy/attendantClaim.test.ts.
+ *
+ * Note (#27): claimAttendantBonus gained a `multiplier` parameter between
+ * lastClaimAtMs and nowMs (economy/attendantClaim.ts) - calls below pass
+ * `1` explicitly to keep exercising the same at-1x amounts these tests
+ * were written against; the SC leg these tests actually care about is
+ * unaffected by #27 either way.
  */
 describe("QA tripwire: attendant claim exception is scoped exactly as CLAUDE.md documents", () => {
   it("is not part of the real, purchasable GC_PACKAGES catalog (can't be bought, can't perturb the non-linear-scaling check)", () => {
@@ -249,7 +256,7 @@ describe("QA tripwire: attendant claim exception is scoped exactly as CLAUDE.md 
   it("the granted SC still requires a 1x playthrough before it's redeemable - the exception does NOT touch this rule", () => {
     const ledger = createLedger(0, 0);
     const playthrough = createPlaythroughState();
-    const outcome = claimAttendantBonus(ledger, playthrough, null, 1_000_000);
+    const outcome = claimAttendantBonus(ledger, playthrough, null, 1, 1_000_000);
     expect(outcome.ok).toBe(true);
 
     // Balance is 1 SC - can never reach MIN_SC_REDEMPTION on its own, but
@@ -273,7 +280,7 @@ describe("QA tripwire: attendant claim exception is scoped exactly as CLAUDE.md 
     let now = 1_000_000;
     let lastClaimAt: number | null = null;
     while (getBalance(ledger, "SC") < MIN_SC_REDEMPTION - 1) {
-      const outcome = claimAttendantBonus(ledger, playthrough, lastClaimAt, now);
+      const outcome = claimAttendantBonus(ledger, playthrough, lastClaimAt, 1, now);
       expect(outcome.ok).toBe(true);
       lastClaimAt = now;
       now += 30_000;
@@ -286,7 +293,7 @@ describe("QA tripwire: attendant claim exception is scoped exactly as CLAUDE.md 
     if (!elig.eligible) expect(elig.reason).toBe("BELOW_MINIMUM");
 
     // One more claim crosses the threshold - now it's eligible.
-    claimAttendantBonus(ledger, playthrough, lastClaimAt, now);
+    claimAttendantBonus(ledger, playthrough, lastClaimAt, 1, now);
     recordScWager(playthrough, ATTENDANT_CLAIM_PACKAGE.scBonus);
     const eligAfter = checkRedemptionEligibility(ledger, playthrough, MIN_SC_REDEMPTION);
     expect(eligAfter.eligible).toBe(true);
@@ -296,5 +303,65 @@ describe("QA tripwire: attendant claim exception is scoped exactly as CLAUDE.md 
     const ledger = createLedger(0, 0);
     claimAdRewardGc(ledger);
     expect(getBalance(ledger, "SC")).toBe(0); // still GC-only, unrelated module
+  });
+});
+
+/**
+ * QA finding (#27, closed before #29 lands): the multiplier passed to
+ * grantSignupBonus/claimAttendantBonus was only constrained at the
+ * TypeScript type level (GcMultiplier = 0.5 | 1 | 2) -
+ * gcMultiplier.ts's own `isValidGcMultiplier` runtime guard existed but
+ * was never called anywhere. Fixed by wiring the guard into
+ * `resolveGcAmount` itself (the one chokepoint both grantSignupBonus and
+ * claimAttendantBonus use to turn a multiplier into an amount), so it's
+ * enforced regardless of what any caller passes - including untrusted,
+ * not-necessarily-TS-checked values #29's mini-game output will feed in.
+ * These tests originally demonstrated the gap; now flipped to assert the
+ * rejection per the original finding's own note that they should be.
+ */
+describe("QA finding: gcMultiplier's runtime validator is now enforced at the source", () => {
+  it("grantSignupBonus rejects an out-of-range multiplier instead of granting a bogus amount", () => {
+    const ledger = createLedger(0, 0);
+    const playthrough = createPlaythroughState();
+    const outOfRange = 999 as unknown as Parameters<typeof grantSignupBonus>[2];
+    expect(isValidGcMultiplier(999)).toBe(false);
+
+    expect(() => grantSignupBonus(ledger, playthrough, outOfRange)).toThrow(
+      InvalidGcMultiplierError
+    );
+    // Nothing was granted - the throw happens before any applyTransaction call.
+    expect(getBalance(ledger, "GC")).toBe(0);
+    expect(getBalance(ledger, "SC")).toBe(0);
+    expect(ledger.transactions).toHaveLength(0);
+  });
+
+  it("claimAttendantBonus rejects a negative multiplier on an empty ledger with a clear InvalidGcMultiplierError, not an incidental InsufficientBalanceError", () => {
+    const ledger = createLedger(0, 0);
+    const playthrough = createPlaythroughState();
+    const outOfRange = -5 as unknown as Parameters<typeof claimAttendantBonus>[3];
+
+    expect(() => claimAttendantBonus(ledger, playthrough, null, outOfRange, 1_000_000)).toThrow(
+      InvalidGcMultiplierError
+    );
+  });
+
+  it("claimAttendantBonus rejects a negative multiplier on a well-funded ledger too - no more silent GC drain disguised as a successful claim", () => {
+    const ledger = createLedger(100_000, 0); // plenty of balance - this is the case that used to silently succeed
+    const playthrough = createPlaythroughState();
+    const outOfRange = -5 as unknown as Parameters<typeof claimAttendantBonus>[3];
+
+    expect(() => claimAttendantBonus(ledger, playthrough, null, outOfRange, 1_000_000)).toThrow(
+      InvalidGcMultiplierError
+    );
+    // Balance is completely untouched - the rejection happens before grantPackage/applyTransaction ever runs.
+    expect(getBalance(ledger, "GC")).toBe(100_000);
+  });
+
+  it("still accepts every real multiplier (0.5/1/2) without throwing", () => {
+    for (const multiplier of [0.5, 1, 2] as const) {
+      const ledger = createLedger(0, 0);
+      const playthrough = createPlaythroughState();
+      expect(() => grantSignupBonus(ledger, playthrough, multiplier)).not.toThrow();
+    }
   });
 });

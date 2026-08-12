@@ -16,7 +16,7 @@ const MULTIPLIERS = [16, 9, 2, 1.4, 0.6, 1.4, 2, 9, 16];
 function colorForMultiplier(m: number): number {
   if (m >= 9) return Theme.gold;
   if (m >= 2) return Theme.accent;
-  if (m >= 1) return 0xffffff;
+  if (m >= 1) return Theme.neutral;
   return Theme.danger;
 }
 
@@ -85,7 +85,7 @@ export class PlinkoScene extends Phaser.Scene {
       const y = BOARD_TOP_Y + r * ROW_SPACING;
       for (let p = 0; p <= r; p++) {
         const x = BOARD_CENTER_X + (2 * p - r) * (PEG_SPACING / 2);
-        this.add.circle(x, y, 2.5, 0x8a92a3);
+        this.add.circle(x, y, 2.5, Theme.outline);
       }
     }
   }

@@ -22,12 +22,64 @@ when testing login or first-run flows so localStorage is empty.
 
 Several of us have hit environments where the page loads but doesn't
 visually render (screenshots time out, `document.hidden` is `true`,
-`document.hasFocus()` is `false`) - Chromium throttles `requestAnimationFrame`
-for a backgrounded/non-composited tab, which silently stalls Phaser's game
-loop (queued scene transitions, tweens, and `time.addEvent` timers never
-advance) and also breaks synthetic `PointerEvent` clicks (Phaser's input
-manager never registers a position - `game.input.activePointer.x/y` stay
-`0`). Confirmed reproducible 2026-08-10.
+`document.hasFocus()` is `false`). Confirmed reproducible 2026-08-10;
+root-caused (incorrectly) 2026-08-12 after task #32; **corrected and
+actually nailed down 2026-08-12 (later same day)** after games checked
+Phaser's own source and did a joint follow-up - see below. Read this
+version, not any earlier one you might recall.
+
+**Precise mechanism (corrected, 2026-08-12):** an earlier version of this
+note blamed `game.hasFocus`. **That was wrong** - games read Phaser's
+actual bundled source (`node_modules/phaser/dist/phaser.js`) and found
+`hasFocus`/`inFocus` is consumed in exactly one place,
+`TimeStep.smoothDelta()`, purely to clamp the delta value after being
+backgrounded - independently re-verified via the same grep, confirmed
+`hasFocus`/`inFocus` appear nowhere in `InputManager` or `MouseManager`.
+It does NOT gate input processing anywhere. Two separate signals were
+being conflated:
+
+- `game.hasFocus` (real, but a **red herring** for input - only affects
+  delta smoothing).
+- **The actual mechanism**: Phaser's `ScaleManager` sizes the canvas from
+  its parent DOM element (`scale.parent`). When the browser pane isn't
+  currently displayed/composited to the user, that parent element's live
+  `clientWidth`/`clientHeight` measure `0` (confirmed directly:
+  `gg.scale.parent.clientWidth === 0` at the exact moment a click fails)
+  - so Phaser's own internal `scale.displaySize`/`scale.canvasBounds`
+  stay stuck at `{width:0, height:0}`, and the `InputManager`'s
+  pointer-to-world transform has nothing valid to work with, so
+  `activePointer` never updates (stays `null`, not just `0`) no matter
+  how the event is dispatched.
+- This is why patching it from inside the page doesn't work, and *why* it
+  doesn't work is itself informative: `canvas.style.width/height` can be
+  set directly (and `getBoundingClientRect()` will honestly reflect that),
+  but it doesn't help - `scale.displaySize` is Phaser's own cached number,
+  not derived from a fresh `getBoundingClientRect()` read per event, and
+  the moment anything triggers Phaser to recompute (even calling
+  `scale.refresh()` or `scale.resize()` explicitly) it re-measures the
+  still-zero parent and **overwrites your manual CSS fix back to 0x0**.
+  There is no known in-page-JS fix - the parent's live layout size is a
+  genuine reflection of whether the pane is actually displayed to the
+  user right now, not spoofable from script.
+- `gg.loop.step()` still works fine for advancing tweens/timers/scene
+  transitions regardless of any of this - **that part of the existing
+  workaround below is unaffected and still reliable.**
+- **Consequence: `zone.emit("pointerdown")` (the technique used
+  throughout most of this file) invokes a GameObject's listener directly
+  and completely bypasses Phaser's hit-testing.** It correctly tells you
+  "does the code behind this handler do the right thing" but CANNOT tell
+  you "does a real click at this screen position actually reach this
+  handler" - camera-scroll/scrollFactor/z-order/occlusion bugs in the hit
+  path are invisible to it. This is exactly how task #32's scrollFactor
+  bug (cups not clickable once the camera scrolled) survived earlier
+  `emit()`-based testing undetected by both games and QA - see that
+  task's entry below for the full story. If you want to at least confirm
+  *whether* real hit-testing is even possible in your current session
+  before relying on `emit()`, check `gg.scale.parent.clientWidth` (or
+  `gg.scale.displaySize.width`) - if it's `0`, no dispatch technique will
+  get you a real click, so don't spend time trying variations of it; say
+  so explicitly and fall back to `emit()` with the "logic verified,
+  hit-testing not verified" caveat from item 5 below.
 
 Workaround that verifies real behavior instead of pixels:
 1. `const gg = window.__game;` - the Phaser.Game instance (exposed as
@@ -44,10 +96,19 @@ Workaround that verifies real behavior instead of pixels:
 4. Assert against `localStorage.getItem('casinoPocProfiles')` (ledger/
    playthrough/unlockedSkins live there) and against the scene's own text
    objects (`scene.balanceText.text` etc.) rather than screenshots.
-5. If you truly need pixels (verifying colors/layout/animation smoothness,
-   not just outcomes), you need a tool where the pane is actually displayed/
-   composited - flag that explicitly rather than reporting "looks fine" from
-   a state check alone.
+5. `zone.emit("pointerdown")` / `container.emit("pointerdown")` is fine for
+   verifying handler *logic* (amounts, guards, sequencing) but is NOT
+   evidence the real click-to-handler path works - see the `game.hasFocus`
+   mechanism above. For anything involving a scrollable camera (i.e.
+   OverworldScene, once the player has moved at all) plus nested
+   interactive children in a container, treat `emit()`-based passes as
+   "logic verified, hit-testing NOT verified" and say so explicitly rather
+   than implying a full click-through happened.
+6. If you truly need real hit-testing or pixels (verifying colors/layout/
+   animation smoothness, camera-scroll-dependent click targets, not just
+   logic outcomes), you need a tool session where the pane is actually
+   focused/displayed to the user - flag that explicitly as unverified
+   rather than reporting "looks fine" from an `emit()`-based check alone.
 
 ---
 
@@ -273,7 +334,14 @@ case.
       tested in economy.test.ts/economy.qa.test.ts; not re-driven live.)*
 - [ ] Can't re-purchase an already-owned skin (no double debit). *(unit
       tested; not re-driven live.)*
-- [ ] Equipping a purchased skin persists across logout/login.
+- [x] Equipping a purchased skin persists across logout/login.
+      *(2026-08-11, re-verified post-#24 reskin with the new mixed-rig
+      system: bought skin_002 [legacy 21x32 rig] with the real "Buy" button,
+      equipped it with the real "Wear" button, did a genuine full page
+      reload, and confirmed both `unlockedSkins` and `currentSkin` persisted
+      correctly and the player spawned already wearing it at the correct
+      scale/size for that rig. See "Bright Social-Hub reskin" section below
+      for the full #25 pass.)*
 - [ ] **Not yet checked (needs a visually-composited browser, see note
       above)**: actual pixel-level click-through of the shop panel - button
       hover states, layout/pagination rendering, preview art. Everything
@@ -292,3 +360,314 @@ case.
       met.
 - [ ] Attempting redemption below the minimum SC threshold is blocked with a
       clear message.
+
+## Shuffle-cup GC multiplier (#27-30, in progress)
+
+economy's #27 landed early (gcMultiplier.ts + variable-GC legs on
+signupBonus.ts/attendantClaim.ts, both defaulting to 1x for backward compat).
+Full #30 pass is still blocked on #29 wiring the real mini-game in - this is
+a preliminary independent check of the #27 foundation only.
+
+- [x] Independently re-ran the suite: 90/90 (economy's 87 + 3 new QA tests
+      below), `npx tsc --noEmit` clean. Confirmed both GameState.ts call
+      sites (`login()`'s new-profile branch, `claimAttendantBonus()`) were
+      correctly updated for attendantClaim.ts's reordered signature
+      (`multiplier` inserted before `nowMs`) - checked this specifically
+      since a positional-arg reorder like that is an easy way to silently
+      break an existing caller; it wasn't.
+- [x] Confirmed existing-profile login structurally cannot re-trigger the
+      GC shuffle: the `if (existingRaw)` branch in `login()` returns before
+      ever touching `grantSignupBonus`/`gcMultiplier` - not just "won't be
+      called," actually can't reach that code on the existing-profile path.
+- [x] SC legs (25 signup / 1 attendant) confirmed still flat and
+      multiplier-independent, both in economy's tests and QA's own.
+- [x] **Finding, RESOLVED same day**: `gcMultiplier.ts` exported
+      `isValidGcMultiplier()` but nothing called it - the multiplier was
+      only constrained at the TypeScript type level. economy fixed it by
+      wiring the guard directly into `resolveGcAmount()` (the one
+      chokepoint both `grantSignupBonus` and `claimAttendantBonus` use),
+      throwing `InvalidGcMultiplierError` for anything outside
+      {0.5, 1, 2} - so every caller, present and future (#29's mini-game
+      output included), gets the guard automatically rather than needing
+      to remember to call it. QA's 3 tripwire tests were flipped from
+      "demonstrates the gap" to "asserts the rejection" (per the original
+      finding's own note that they should be), plus a 4th confirming
+      0.5/1/2 still work with zero throw - independently re-run (91/91),
+      `tsc`/`build` clean. Independently live-verified against the running
+      dev server (not just re-trusting the unit tests): `claimAttendantBonus(999)`
+      and `claimAttendantBonus(-5)` both throw `InvalidGcMultiplierError`
+      with balance completely untouched (1000/25 unchanged both times),
+      then `claimAttendantBonus(2)` on the same session succeeds normally
+      (2000 GC + 1 SC granted) - confirming the fix doesn't collaterally
+      break the valid path. Also checked the signup-bonus path specifically
+      (`login('user','pw', 42)`) - same `InvalidGcMultiplierError`, and a
+      follow-up `login('user','pw', 0.5)` succeeds normally (500 GC, 25
+      SC), confirming both call sites are protected identically, not just
+      the one economy's own report focused on.
+      **Very minor, currently-unreachable side-observation**: `login()` sets
+      `this.activeUsername` *before* calling `grantSignupBonus`, so if that
+      throws (only possible today via a manually-bad multiplier, since
+      `LoginScene` never passes one), `GameState` is left "logged in" as a
+      username with no persisted profile until the caller retries or calls
+      `logout()`. Verified retrying with a valid multiplier recovers
+      cleanly (no corrupted/partial profile gets written). Not flagging as
+      an action item - not reachable from any current UI path - just noting
+      in case #29's mini-game integration ever calls `login()` with an
+      unvalidated resolved multiplier directly.
+
+### #30 full pass (2026-08-12) - floor's #29 landed, all items closed
+
+floor's browser pane was headless (zero-size canvas rect) so they could only
+do a static read-through of the two wired entry points, and explicitly asked
+QA to prioritize an actual live click-through - done, below, using the
+scene-driving/loop-stepping technique (real Phaser pointerdown events on the
+real buttons/hit-zones, not direct function calls, except where noted).
+
+- [x] **Cup-outcome fairness/uniformity over many trials.** Didn't trust
+      `ShuffleCupReveal.ts`'s own docstring claim of a 1M-trial simulation
+      (the script isn't in this repo) - wrote an independent from-scratch
+      reimplementation of its exact swap algorithm (SWAP_STEPS=18,
+      NOOP_CHANCE=1/3, same random-transposition logic) and ran 2,000,000
+      trials myself. Max deviation from perfectly uniform 33.333% across all
+      9 (slot x multiplier) cells: 0.042 percentage points. Also confirmed
+      all 6 of S3's permutations are reachable and roughly evenly
+      distributed (~16.6-16.8% each vs. expected 16.67%) - matches the
+      source's claim that the "lazy" no-op steps avoid parity-locking to a
+      3-of-6 subset.
+- [x] **Correct GC amount matches what's revealed**, both entry points,
+      live: drove the real signup shuffle (LoginScene, real keyboard events
+      + real hit-zone pointerdown) end to end for 3 separate new profiles,
+      landing 1x/1x/2x - each time `ledger.gc === 1000 * resolved multiplier`
+      exactly, transaction typed `SIGNUP_BONUS_GC` with the multiplier in
+      `meta`. Same live check on the attendant claim (OverworldScene, real
+      button clicks) landing 2x then 0.5x - `PACKAGE_GC` amount matched in
+      both cases.
+- [x] **SC portions unaffected, still register playthrough.** Both live
+      runs above: signup SC stayed exactly 25, attendant SC stayed exactly
+      1, regardless of the GC multiplier landed on. `playthrough.required`
+      incremented by exactly the SC amount granted each time (25 on
+      signup, +1 more to 26 after the attendant claim) - never by anything
+      GC-multiplier-scaled.
+- [x] **Attendant's 30s cooldown still enforced**, including the specific
+      edge case that matters most (cooldown surviving a reload while
+      *mid-window*, not just "eventually re-enables"): claimed live, noted
+      the fresh timestamp, immediately did a genuine full page reload
+      (~650ms later, well inside the 30s window), logged back in, opened
+      the chip panel, and confirmed the button showed "Available in 1s"
+      and clicking "Yes" did NOT start a new shuffle (no shuffle container
+      ever got created, balance untouched, persisted timestamp unchanged).
+      Also confirmed cooldown gates *starting* the shuffle specifically
+      (not just the final grant) by clicking "Claim Again" immediately
+      after a claim and confirming no shuffle spawned.
+- [x] **Existing-profile login does NOT re-trigger the shuffle.** Live:
+      logged into an already-created profile through the real LoginScene
+      flow, landed on StartMenuScene within a handful of frames (no
+      ~1000-frame shuffle-animation delay), no shuffle container was ever
+      instantiated, GC and transaction count both completely unchanged.
+      Backed by the structural read from the #27-level pass: `login()`'s
+      existing-profile branch returns before the code that would even
+      reference a multiplier is reached.
+- [x] **No skip/exploit path.** Checked three angles:
+      1. *Claiming without resolving a cup*: traced the only path to a
+         grant (`completeLogin`/`completeAttendantClaim`) - both are only
+         ever called from `onResolve`, which only ever fires from
+         `pickSlot()`, which only exists to be called by a hit-zone's
+         `pointerdown` (registered only after the shuffle animation
+         finishes). No code path grants without a pick.
+      2. *Double-grant via double-pick*: `pickSlot` guards on a `resolved`
+         flag. Live-tested by emitting `pointerdown` on two different cup
+         zones back-to-back on the same shuffle - confirmed exactly 2
+         ledger transactions total (one GC, one SC), not 4.
+      3. *Re-triggering a concurrent shuffle*: `OverworldScene.update()`
+         returns early whenever `panelOpen` is true (blocks
+         movement/proximity/interaction entirely), and `panelOpen` stays
+         true continuously from the "Yes" click through the whole
+         shuffle+result flow - so the NPC can't be re-interacted with to
+         spawn a second concurrent shuffle. Confirmed live that
+         `panelOpen` was `true` throughout an active shuffle.
+- [x] **Applied identically at both call sites.** Both `LoginScene.ts` and
+      `OverworldScene.ts` call the exact same `createShuffleCupReveal`
+      (same `SWAP_STEPS`/`NOOP_CHANCE`/algorithm, no per-call-site
+      parameters affecting fairness) with `GC_MULTIPLIER_BASE` as the base
+      amount - not two independently-tuned copies. Only difference is
+      cosmetic (panel copy/positioning) and what happens in `onResolve`
+      (`completeLogin` vs. `completeAttendantClaim`), which is expected.
+- [x] `npm test` (91/91), `npx tsc --noEmit`, `npm run build` all
+      independently re-run and clean with #29 in place.
+
+### #32 (2026-08-12) - cups not clickable once camera scrolled + amount-label/preview-sequence feature
+
+**Important correction to my own #30 pass above**: my #30 "no skip/exploit"
+and "live click-through" claims were verified via `zone.emit("pointerdown")`
+and were **wrong to describe as click-through** - `emit()` invokes a
+GameObject's listener directly and completely bypasses Phaser's real
+hit-testing pipeline. games found (via a genuine `mousedown` dispatch with
+the camera actually scrolled) that the attendant-claim shuffle's cups were
+**not clickable at all** in real play once the player had walked anywhere -
+`handle.container.setScrollFactor(0)` correctly fixes the outer container
+on screen for *rendering*, but Phaser does not propagate scrollFactor to
+interactive children nested inside a container for *hit-testing* - each
+child still hit-tests at its own default scrollFactor (1) unless told
+otherwise. LoginScene never surfaced this since it has no scrollable
+camera. See "browser can't render/composite" section up top - this is
+precisely the class of bug that testing methodology cannot catch, and this
+task is the concrete example of it happening for real.
+
+**Fix** (`src/ui/ShuffleCupReveal.ts`): every element the component creates
+(cup containers, graphics, labels, hit zones, status text) now gets its own
+explicit `.setScrollFactor(0)`, not just the outer wrapper - matches the
+per-element pattern every other OverworldScene modal already used.
+
+**Feature added alongside**: cups now show the actual resolved GC amount
+("500"/"1000"/"2000") instead of a bare "0.5x/1x/2x" label, and `start()`
+now runs preview (all 3 amounts shown ~1.4s) -> hide (cups close back to
+identical unrevealed state) -> shuffle -> pick -> reveal, instead of
+shuffling immediately.
+
+**QA re-verification (2026-08-12), being explicit about what could and
+couldn't be confirmed this time:**
+
+- [x] Read the full diff. Confirmed every cup container/bg/label/hit-zone/
+      status-text call now has `.setScrollFactor(0)`, matching the
+      described mechanism exactly.
+- [x] **Attempted to independently reproduce games' exact live-click
+      methodology** (genuine `mousedown` dispatch, camera scrolled via
+      real player movement - held `wasd.D`/`wasd.S` `.isDown = true`
+      through real `handleMovement()` calls, not a teleport, confirmed the
+      camera genuinely scrolled: scrollX 240 -> 480). Could NOT get a real
+      click to register in this attempt: `game.hasFocus` was `false` in
+      this tool session, which - confirmed by direct experiment - makes
+      Phaser's entire real input pipeline inert (a genuine
+      `canvas.dispatchEvent(new MouseEvent(...))`, and even calling
+      `game.input.mouse.onMouseDown()` directly, both left `activePointer`
+      unset). This is a non-spoofable browser-focus property, not
+      something fixable from in-page JS - tried forcing the canvas back
+      to a real CSS size (it had also collapsed to 0x0, a separate,
+      apparently-related symptom of the same non-focused state) and
+      `scale.refresh()`; neither changed `game.hasFocus`. **I could not
+      personally confirm the exact hit-testing fix via a real click in
+      this session** - flagging this honestly rather than either
+      papering over it or re-using `emit()` and implying it's equivalent.
+- [x] What I *could* still verify, precisely scoped: with the camera
+      genuinely scrolled (scrollX 480), ran the full functional sequence
+      via `emit()` (logic-only, see caveat above) end to end twice more
+      (one fresh signup, one attendant claim) - preview correctly shows
+      500/1000/2000, labels correctly hide during the shuffle, status text
+      correctly reads "Pick a cup!", the resolved GC amount correctly
+      matches the multiplier (2000 on signup, 500 on attendant claim this
+      run), SC stayed flat, playthrough incremented correctly. This
+      confirms the *feature* (amounts + preview sequence) and that #32
+      didn't regress anything the #30 pass covered - it does NOT confirm
+      the hit-testing fix itself.
+- [x] `npm test` (91/91), `tsc`, `build` independently re-run, clean.
+- [x] **Still open, as of the original entry above → now closed, two ways:**
+      (1) the actual user personally tested the cup click and reveal
+      sequence live and confirmed it's good - #32 is closed on the board.
+      (2) **the `game.hasFocus` diagnosis two entries above was wrong**,
+      corrected the same day after games checked Phaser's actual source:
+      `hasFocus`/`inFocus` is only consumed by `TimeStep.smoothDelta()` for
+      delta clamping and does not gate input anywhere - independently
+      re-verified via the same grep. The real mechanism (also confirmed
+      independently, including forcing `gg.scale.resize()` and watching it
+      re-collapse) is that Phaser's `ScaleManager` derives
+      `scale.displaySize`/`canvasBounds` from `scale.parent`'s live
+      `clientWidth`/`clientHeight`, which read `0` while this tool's
+      browser pane isn't displayed to the user - see the corrected,
+      complete writeup in the "browser can't render/composite" section up
+      top. `game.hasFocus` being `false` was real but a coincidental
+      correlate, not the cause. Credit to games for not letting a
+      plausible-sounding wrong explanation stand once something didn't add
+      up (their own session also had `hasFocus: false` during their
+      *successful* repro, which is what triggered them to actually go
+      check).
+
+## Bright Social-Hub reskin (#21-25, 2026-08-11)
+
+Full reskin: art-director sourced Kenney's "RPG Urban Pack" (CC0) and wrote
+`STYLE_GUIDE.md` (#21), chrome reworked `Theme.ts`/`uiHelpers.ts` + a
+scene-wide hardcoded-color cleanup (#22), environment swapped
+floor/wall/nature tiles + recolored BootScene's drawn cabinet placeholders +
+OverworldScene's tooltip chips (#23), characters landed new player/NPC/dealer
+spritesheets on a non-standard 4-col x 3-row frame layout (#24). This is QA's
+#25 independent verification pass.
+
+- [x] `npm test` (74/74), `npx tsc --noEmit`, and `npm run build` all clean
+      with the full reskin in place.
+- [x] **STYLE_GUIDE.md fidelity** - read the full guide and cross-checked
+      `Theme.ts` against its sampled color table: all 8 tile-sampled colors
+      present and correctly labeled (Primary #3BD2AB, Secondary #59B6D8,
+      Accent-warm #F5AA57, Success #42DFAB, Danger #C2504D, Neutral sand
+      #C6BC9F, plus the two chosen-not-sampled background/panel/text rows).
+      One naming nuance, not a bug: `Theme.accent` holds STYLE_GUIDE's
+      "Primary" role (mint-teal) rather than its "Accent" role
+      (coral-orange #FF7143) - the coral value does exist and is used, just
+      as a local `BootScene.PALETTE.coral` for cabinet-texture drawing
+      rather than a shared `Theme.ts` token other scenes could reference as
+      a general "hot CTA" color. Cosmetic/naming only, not incorrect, not
+      raising as a blocker - noting in case a future screen wants a
+      Theme-level coral CTA color and can't find one under an obvious name.
+- [x] **Frame-index math for the new 4x3 character layout** (the thing
+      specifically flagged as easy to get subtly wrong) - `BootScene.ts`'s
+      `createKenneyWalkAnims`/`DIRECTION_FRAMES` matches STYLE_GUIDE.md's
+      documented mapping exactly (left=[0,4,8], down=[1,5,9], up=[2,6,10],
+      right=[3,7,11]), verified by direct comparison, not just "it renders
+      something."
+- [x] **Mixed-rig skin system** (Classic = new 16x16 Kenney rig, all 17
+      purchased skins = old 21x32 Jephed rig, left un-redrawn per
+      STYLE_GUIDE.md's explicit scope note) - dug into this hard since it's
+      exactly the kind of thing that looks fine at a glance while being
+      subtly wrong:
+      - `applyPlayerBody()`/`applyPlayerScale()` correctly discriminate rig
+        by native frame height (`.height <= 16`, confirmed this reads the
+        *native* unscaled frame size in this Phaser setup, not
+        display-scaled size - verified empirically, not assumed) and
+        produce the right collision-body proportions and on-screen scale
+        for both rigs, confirmed live for both Classic and a purchased
+        skin.
+      - **Investigated a suspected bug and disproved it**: the "Wear"
+        handler does `player.setTexture(newTex, player.frame.name)`,
+        reusing a raw frame index across two *differently laid-out* sheets
+        (old: 3-contiguous-frames-per-direction; new: direction-interleaved,
+        4 apart). Mapped all 12 frame indices and found 8 of them
+        (0,2,3,5,6,8,9,11) genuinely resolve to a *different* direction
+        under the two layouts - confirmed live that forcing the player onto
+        one of those "bad" frames right before a real skin-swap does
+        initially leave a wrong-direction frame set. **But** `handleMovement()`
+        runs every game step regardless of input and its idle branch
+        (`idleFrameForDir`) unconditionally overwrites the frame to match
+        the player's actual current facing direction - confirmed live that
+        the bad frame is corrected within the same/next game step, before
+        any render. Net: not a real bug, just a non-obvious mitigation that
+        held up under a deliberately adversarial test.
+      - Skin shop purchase (GC-only, GC 1000→0 exact price, SC untouched)
+        and equip verified end-to-end through the real UI buttons, plus
+        persistence across a genuine full page reload (see "Skin shop"
+        section above).
+- [x] **Station spacing/interaction radii** - `registerStation`'s radius is
+      computed from `sprite.displayWidth/Height` at registration time, and
+      since all `GAME_STATIONS` furniture textures are explicitly untouched
+      by this reskin (STYLE_GUIDE.md's scope note - no equivalent in the new
+      pack), none of their radii changed. The one sprite that *did* rescale
+      (the Chip Attendant NPC, new rig at scale 2) correctly calls
+      `refreshBody()` after `setScale()` - a real Arcade Physics gotcha
+      (static bodies don't auto-resync their collision box to a
+      post-creation scale change, unlike dynamic bodies) that's easy to
+      miss and was handled correctly. Live-verified: dumped all 25
+      registered interactables' radii (sane values, e.g. NPC radius 32 =
+      max(32,32)/2+16), and directly exercised `handleProximity()` at the
+      NPC's exact position (prompt shows) and far away (prompts clears).
+- [x] Confirmed `STYLE_GUIDE.md`'s required README.md credit line for Kenney
+      RPG Urban Pack is present and correctly scoped (base player/NPC/dealer
+      only, not the 17 still-Jephed skins).
+- [ ] **Not yet checked (needs a visually-composited browser)**: actual
+      pixel/visual confirmation that the palette *looks* like the intended
+      "bright social-hub" mood, that outlines read as warm brown not black,
+      that the new tiles don't have visible seams/misalignment against the
+      old furniture art they sit next to, and that col1/col2/col3 of each
+      of the 3 wired-up character sheets (green/gray/lavender) actually show
+      the claimed down/up/left-right poses rather than something else -
+      STYLE_GUIDE.md's author flagged they eyeballed this visually
+      per-variant and asked implementers to re-check; QA could not
+      independently re-verify that specific claim pixel-by-pixel in this
+      environment (see the browser-pane-limitation note up top). Everything
+      else in this section was verified functionally/structurally instead.

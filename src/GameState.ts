@@ -40,6 +40,7 @@ import {
   remainingPlaythrough
 } from "./economy/playthrough";
 import { grantSignupBonus } from "./economy/signupBonus";
+import { GcMultiplier } from "./economy/gcMultiplier";
 import {
   PackagePurchaseOutcome,
   purchasePackage as purchasePackageInternal
@@ -62,7 +63,7 @@ import {
   resolveBet as resolveBetInternal
 } from "./economy/betting";
 
-export type { Currency };
+export type { Currency, GcMultiplier };
 
 export interface SkinDef {
   id: string; // also used as the animation prefix, e.g. "skin_000"
@@ -405,13 +406,20 @@ class GameState {
    * cooldown - check `attendantClaimCooldownRemainingMs` before showing a
    * claim button as enabled, or just call this and handle the `COOLDOWN`
    * outcome.
+   *
+   * `multiplier` (#27) is the resolved shuffle-cup outcome (0.5x/1x/2x,
+   * see economy/gcMultiplier.ts) that games/floor's mini-game (#28/#29)
+   * produces - pass it in once that's wired up. Defaults to 1 (= 1000 GC,
+   * the pre-#27 fixed amount), so this method works exactly as before if
+   * called with no multiplier. The SC bonus (1) is unaffected either way.
    */
-  claimAttendantBonus(): AttendantClaimOutcome {
+  claimAttendantBonus(multiplier: GcMultiplier = 1): AttendantClaimOutcome {
     const now = Date.now();
     const outcome = claimAttendantBonusInternal(
       this._ledger,
       this._playthrough,
       this._attendantClaimedAt,
+      multiplier,
       now
     );
     if (outcome.ok) {
@@ -422,11 +430,33 @@ class GameState {
   }
 
   /**
+   * True if `username` (trimmed) has no existing profile - i.e. calling
+   * `login()` with it would create a new one and run the signup bonus.
+   * Read-only, no side effects. #29: LoginScene calls this before deciding
+   * whether to play the shuffle-cup mini-game (new profiles only) or just
+   * log in directly (existing profiles never get the mini-game/a resolved
+   * multiplier - see login()'s doc comment).
+   */
+  isNewUsername(usernameRaw: string): boolean {
+    const username = usernameRaw.trim();
+    if (!username) return false;
+    return !loadProfiles()[username];
+  }
+
+  /**
    * Logs into (or creates, if the username is new) a local profile. On
    * success, every persisted field above is loaded from - or initialized
    * and saved to - localStorage under this username.
+   *
+   * `gcMultiplier` (#27) only matters for brand-new profiles: it's the
+   * resolved shuffle-cup outcome (0.5x/1x/2x, see economy/gcMultiplier.ts)
+   * for the signup bonus's GC leg, from games/floor's mini-game (#28/#29).
+   * Defaults to 1 (= 1000 GC, the pre-#27 fixed amount), so existing call
+   * sites (e.g. LoginScene.ts) work unchanged until that's wired up. The
+   * 25 SC signup bonus is unaffected either way. Ignored when logging into
+   * an existing profile (no new bonus is granted on re-login).
    */
-  login(usernameRaw: string, password: string): LoginResult {
+  login(usernameRaw: string, password: string, gcMultiplier: GcMultiplier = 1): LoginResult {
     const username = usernameRaw.trim();
     if (!username) return { ok: false, error: "Enter a username" };
     if (!password) return { ok: false, error: "Enter a password" };
@@ -456,15 +486,16 @@ class GameState {
     }
 
     // New username - create a fresh profile with default starting state,
-    // including the no-deposit SC signup bonus (with its playthrough lock).
-    this._ledger = createLedger(1000, 0);
+    // including the no-deposit signup bonus (#27: GC leg resolved from
+    // gcMultiplier, SC leg flat 25, both with the SC playthrough lock).
+    this._ledger = createLedger(0, 0);
     this._playthrough = createPlaythroughState();
     this._betAmount = 25;
     this._currentSkin = "player";
     this.unlockedSkins = ["player"];
     this._attendantClaimedAt = null;
     this.activeUsername = username;
-    grantSignupBonus(this._ledger, this._playthrough);
+    grantSignupBonus(this._ledger, this._playthrough, gcMultiplier);
 
     profiles[username] = {
       passwordHash: hash,

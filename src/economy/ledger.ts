@@ -26,6 +26,11 @@ export type TransactionType =
   // SC bonus - the ONLY two legitimate sources of SC (never sold directly)
   | "SIGNUP_BONUS_SC"
   | "PACKAGE_BONUS_SC"
+  // GC leg of the signup bonus (#27 - resolved GC amount, see
+  // economy/gcMultiplier.ts). Separate from SIGNUP_BONUS_SC above so each
+  // currency's grant is independently auditable even though both happen
+  // as part of the same signup event.
+  | "SIGNUP_BONUS_GC"
   // GC purchase
   | "PACKAGE_GC"
   // GC-only skin shop

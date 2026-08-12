@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { Theme } from "./ui/Theme";
 import { BootScene } from "./scenes/BootScene";
 import { LoginScene } from "./scenes/LoginScene";
 import { StartMenuScene } from "./scenes/StartMenuScene";
@@ -23,7 +24,7 @@ const config: Phaser.Types.Core.GameConfig = {
   width: 800,
   height: 600,
   parent: "game-container",
-  backgroundColor: "#1a1a1f",
+  backgroundColor: Theme.bgDark,
   pixelArt: true,
   scale: {
     mode: Phaser.Scale.FIT,

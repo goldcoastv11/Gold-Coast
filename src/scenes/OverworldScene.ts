@@ -2,14 +2,26 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { listSkins, SkinDef } from "../economy/skinShop";
 import type { AttendantClaimOutcome } from "../economy/attendantClaim";
+import { GC_MULTIPLIER_BASE, GcMultiplier } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, UIButton } from "../ui/uiHelpers";
+import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 
 const TILE = 16; // real tileset is 16x16 pixels per tile
 const MAP_COLS = 80;
 const MAP_ROWS = 56;
 const PLAYER_SPEED = 160;
 const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
+
+// Floating text "chips" (prompt/HUD/labels/toasts) draw their own CSS-style
+// backgroundColor rather than a Theme.ts Graphics fill, so they need string
+// hex constants here instead of Theme's numeric ones. Task #23: swapped from
+// the old near-black "#000000cc"/"#000000aa" tooltip chips (leftover
+// old-dark-casino look, flagged during #22's audit) to a warm-cream chip
+// matching Theme.panel, so nothing still reads as "casino at night" against
+// the new bright backdrop (STYLE_GUIDE direction notes 1 & 7).
+const CHIP_BG = "#fdf3e1e6"; // Theme.panel, ~90% opaque - prompt/HUD/toast
+const CHIP_BG_SOFT = "#fdf3e1cc"; // Theme.panel, ~80% opaque - per-station labels (many on screen at once)
 
 interface Interactable {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -301,11 +313,19 @@ export class OverworldScene extends Phaser.Scene {
     this.player.setCollideWorldBounds(true);
     this.player.setDamping(true);
     this.player.setDrag(0.85);
-    this.player.setSize(14, 10);
-    this.player.setOffset(3.5, 20);
+    this.applyPlayerBody();
+    this.applyPlayerScale();
 
-    // NPC - the "chip person", now in the center of the floor
-    const npc = this.physics.add.staticSprite(40 * TILE, 28 * TILE, "npc_sheet", 1);
+    // NPC - the "chip person", now in the center of the floor. Always the
+    // new Kenney rig (npc_sheet never changes texture), so a fixed scale is
+    // safe here - see applyPlayerScale's comment for why the player can't
+    // use a fixed value.
+    const npc = this.physics.add.staticSprite(40 * TILE, 28 * TILE, "npc_sheet", 1).setScale(2);
+    // Static bodies don't auto-resync to a post-creation setScale (see the
+    // refreshBody() calls in addFurnitureStation/registerReservedStation
+    // below) - without this the collider still uses the pre-scale 16x16
+    // box while the sprite renders at 32x32.
+    npc.refreshBody();
     this.physics.add.collider(this.player, npc);
     this.registerStation(npc, "Chip Attendant", "Press E to talk to the Chip Attendant", () =>
       this.openChipPanel()
@@ -383,8 +403,8 @@ export class OverworldScene extends Phaser.Scene {
     this.promptText = this.add
       .text(400, 550, "", {
         fontSize: "16px",
-        color: "#ffffff",
-        backgroundColor: "#000000cc",
+        color: Theme.textPrimary,
+        backgroundColor: CHIP_BG,
         padding: { x: 10, y: 6 }
       })
       .setOrigin(0.5)
@@ -396,7 +416,7 @@ export class OverworldScene extends Phaser.Scene {
       .text(0, 0, "", {
         fontSize: "13px",
         color: Theme.textGold,
-        backgroundColor: "#000000cc",
+        backgroundColor: CHIP_BG,
         padding: { x: 8, y: 4 }
       })
       .setOrigin(0.5, 1)
@@ -452,10 +472,73 @@ export class OverworldScene extends Phaser.Scene {
       this.player.play(`${gameState.currentSkin}_walk_${this.lastDir}`, true);
     } else {
       this.player.stop();
-      // middle frame (index 1) of the current direction's row is the idle pose
-      const rowMap = { down: 0, left: 1, right: 2, up: 3 } as const;
-      this.player.setFrame(rowMap[this.lastDir] * 3 + 1);
+      this.player.setFrame(this.idleFrameForDir(this.lastDir));
     }
+  }
+
+  /**
+   * Task #24 (Kenney reskin) left two different character rigs in play:
+   * the free "Classic" skin is the new Kenney sheet (16x16, 4 cols
+   * [left,down,up,right] x 3 rows - see BootScene's createKenneyWalkAnims/
+   * DIRECTION_FRAMES), while every purchased skin is still the old
+   * Jephed-pack rig (21x32, 3 cols x 4 rows [down,left,right,up] - see
+   * createLegacySkinWalkAnims). Walking animations already resolve
+   * correctly either way since they're looked up by name
+   * (`${skin}_walk_${dir}`), but the idle pose sets a raw frame index, so
+   * it has to know which rig is currently equipped. Discriminated by frame
+   * height (16 vs 32) rather than skin id, so it keeps working if more
+   * skins land on either rig later.
+   */
+  private idleFrameForDir(dir: "down" | "left" | "right" | "up"): number {
+    if (this.player.height <= 16) {
+      // New Kenney rig: frame = row*4 + col, walk rows are [start,mid,end]
+      // 4 apart per direction (DIRECTION_FRAMES in BootScene) - mid frame
+      // is col + 4.
+      const col = { left: 0, down: 1, up: 2, right: 3 } as const;
+      return col[dir] + 4;
+    }
+    // Old Jephed rig: 3 cols/row, frame = row*3 + col; middle frame (index 1)
+    // of the current direction's row is the idle pose.
+    const row = { down: 0, left: 1, right: 2, up: 3 } as const;
+    return row[dir] * 3 + 1;
+  }
+
+  /**
+   * Sizes/positions the player's physics body as a small "feet" footprint
+   * (not the full sprite) proportional to whichever texture is currently
+   * equipped - same width/height-fraction pattern addFurnitureStation uses
+   * for furniture. Needed (not just a fixed pixel size) because, per #24,
+   * SKIN_CATALOG now mixes two rig sizes (16x16 Kenney "Classic" vs 21x32
+   * legacy purchased skins) - fractions computed from the original 21x32
+   * tuning (14x10 body, 3.5/20 offset) reproduce that exact box for legacy
+   * skins and scale proportionally for the new 16x16 rig. Call again after
+   * switching skins (see openSkinPanel's "Wear" handler).
+   */
+  private applyPlayerBody() {
+    const fracW = 14 / 21;
+    const fracH = 10 / 32;
+    const fracOffX = 3.5 / 21;
+    const fracOffY = 20 / 32;
+    this.player.setSize(this.player.width * fracW, this.player.height * fracH);
+    this.player.setOffset(this.player.width * fracOffX, this.player.height * fracOffY);
+  }
+
+  /**
+   * Task #24 follow-up (flagged by "environment"/#23): the new Kenney rig's
+   * native frame is 16x16, vs. the legacy Jephed rig's 21x32 - rendered at
+   * 1:1 scale (as it always was, and still is for legacy skins) the new
+   * "Classic" character reads about half as tall as before, next to the
+   * new 16x16 floor tiles and the untouched 48x64-cabinet-scale furniture.
+   * A single fixed setScale can't be applied unconditionally though: it
+   * would also double-size any equipped legacy 21x32 skin, which
+   * applyPlayerBody's whole point is to keep looking exactly as it did
+   * pre-#24. So this branches the same way applyPlayerBody/idleFrameForDir
+   * do - by native frame height, not skin id - and only scales up the new
+   * 16x16 rig. Call alongside applyPlayerBody(), same two call sites
+   * (spawn + the "Wear" handler).
+   */
+  private applyPlayerScale() {
+    this.player.setScale(this.player.height <= 16 ? 2 : 1);
   }
 
   private getSkinDef(id: string): SkinDef {
@@ -512,8 +595,8 @@ export class OverworldScene extends Phaser.Scene {
     this.add
       .text(sprite.x, sprite.y - sprite.displayHeight / 2 - 8, label, {
         fontSize: "12px",
-        color: "#ffffff",
-        backgroundColor: "#000000aa",
+        color: Theme.textPrimary,
+        backgroundColor: CHIP_BG_SOFT,
         padding: { x: 6, y: 3 }
       })
       .setOrigin(0.5, 1);
@@ -613,7 +696,7 @@ export class OverworldScene extends Phaser.Scene {
         fontSize: "15px",
         color: Theme.textGold,
         fontStyle: "bold",
-        backgroundColor: "#000000aa",
+        backgroundColor: CHIP_BG_SOFT,
         padding: { x: 8, y: 4 }
       })
       .setOrigin(0.5);
@@ -646,9 +729,9 @@ export class OverworldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
 
-    const yesBtn = this.createAttendantClaimButton(340, 335, 120, 46, "Yes", (outcome) => {
+    const yesBtn = this.createAttendantClaimButton(340, 335, 120, 46, "Yes", () => {
       cleanup();
-      this.showClaimResult(outcome);
+      this.runAttendantClaimShuffle();
     });
     yesBtn.container.setScrollFactor(0).setDepth(201);
 
@@ -668,14 +751,20 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * Creates a button wired to the attendant claim (#18/#19): calls
-   * gameState.claimAttendantBonus() on click and invokes `onClaimed` with
-   * the successful outcome (GC + SC transactions). While the 30s cooldown
-   * is active it auto-disables itself and shows a live "Available in Ns"
-   * countdown instead of `readyLabel`, ticking off a Phaser timer that's
-   * torn down when the button is destroyed - so cooldown state (persisted
-   * in GameState/localStorage, #19) is always reflected accurately even
-   * across a panel reopen or a reload.
+   * Creates a button wired to the attendant claim (#18/#19, #29). While the
+   * 30s cooldown is active it auto-disables itself and shows a live
+   * "Available in Ns" countdown instead of `readyLabel`, ticking off a
+   * Phaser timer that's torn down when the button is destroyed - so
+   * cooldown state (persisted in GameState/localStorage, #19) is always
+   * reflected accurately even across a panel reopen or a reload.
+   *
+   * #29: the actual grant no longer happens on click - clicking now starts
+   * the shuffle-cup mini-game, and the grant (with whatever multiplier the
+   * cup resolves to) happens afterward. The cooldown is still checked here,
+   * before calling `onConfirmed`, so it still gates *starting* the shuffle,
+   * not just the eventual grant - a stale/raced button click just resyncs
+   * the countdown instead of burning through the whole animation only to
+   * fail at the end.
    */
   private createAttendantClaimButton(
     x: number,
@@ -683,15 +772,14 @@ export class OverworldScene extends Phaser.Scene {
     w: number,
     h: number,
     readyLabel: string,
-    onClaimed: (outcome: Extract<AttendantClaimOutcome, { ok: true }>) => void
+    onConfirmed: () => void
   ): UIButton {
     const btn = makeButton(this, x, y, w, h, readyLabel, Theme.accent, Theme.accentHover, () => {
-      const outcome = gameState.claimAttendantBonus();
-      if (outcome.ok) onClaimed(outcome);
-      // If blocked (e.g. a race with the cooldown expiring mid-panel), the
-      // next tick below immediately reflects the accurate remaining time -
-      // no separate error state needed since the button was already
-      // showing the correct countdown a moment ago.
+      if (gameState.attendantClaimCooldownRemainingMs > 0) {
+        refreshCooldownLabel();
+        return;
+      }
+      onConfirmed();
     });
 
     const refreshCooldownLabel = () => {
@@ -714,6 +802,54 @@ export class OverworldScene extends Phaser.Scene {
     };
 
     return btn;
+  }
+
+  /**
+   * Runs the shuffle-cup mini-game (#28) for the attendant claim's GC leg,
+   * then grants the claim with whatever multiplier the player landed on.
+   * Called only after createAttendantClaimButton has already confirmed the
+   * cooldown is clear.
+   */
+  private runAttendantClaimShuffle() {
+    const panel = makePanel(this, 400, 300, 420, 260, 200).setScrollFactor(0);
+    const title = this.add
+      .text(400, 195, "🪙 Chip Attendant's Shuffle", {
+        fontSize: "17px",
+        color: Theme.textGold,
+        fontStyle: "bold"
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(201);
+
+    const handle = createShuffleCupReveal(this, 400, 302, GC_MULTIPLIER_BASE, ({ multiplier }) => {
+      handle.destroy();
+      panel.destroy();
+      title.destroy();
+      this.completeAttendantClaim(multiplier as GcMultiplier);
+    });
+    handle.container.setScrollFactor(0).setDepth(201);
+    handle.start();
+  }
+
+  /**
+   * Actually grants the attendant claim via gameState.claimAttendantBonus(),
+   * passing the shuffle-cup's resolved multiplier straight through. A
+   * COOLDOWN failure here would mean the 30s window started elsewhere
+   * between createAttendantClaimButton's pre-check and now - not reachable
+   * in normal single-tab play (nothing else in this session can trigger a
+   * claim), but handled rather than assumed impossible: closes the panel
+   * and surfaces a toast instead of leaving the screen stuck.
+   */
+  private completeAttendantClaim(multiplier: GcMultiplier) {
+    const outcome = gameState.claimAttendantBonus(multiplier);
+    if (outcome.ok) {
+      this.showClaimResult(outcome);
+    } else {
+      this.panelOpen = false;
+      this.updateHud();
+      this.showToast(`Try again in ${Math.ceil(outcome.remainingMs / 1000)}s.`, Theme.textDanger);
+    }
   }
 
   /** Shows the result panel for a successful attendant claim, formatting both the GC and SC granted. */
@@ -772,9 +908,9 @@ export class OverworldScene extends Phaser.Scene {
 
     // Claim again right from here - no need to close and re-open the panel.
     // Same cooldown-aware button as the initial confirm panel.
-    const againBtn = this.createAttendantClaimButton(340, 340, 140, 44, "Claim Again", (outcome) => {
+    const againBtn = this.createAttendantClaimButton(340, 340, 140, 44, "Claim Again", () => {
       cleanup();
-      this.showClaimResult(outcome);
+      this.runAttendantClaimShuffle();
     });
     againBtn.container.setScrollFactor(0).setDepth(201);
 
@@ -790,28 +926,28 @@ export class OverworldScene extends Phaser.Scene {
     this.hudText.setText(`🪙 ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 
-  private activeSkinToast?: Phaser.GameObjects.Text;
+  private activeToast?: Phaser.GameObjects.Text;
 
   /**
-   * Brief fading confirmation/error message for skin shop actions, so a
-   * purchase's owned/unowned state change is visibly confirmed rather than
-   * just silently updating the list.
+   * Brief fading confirmation/error message, positioned above the skin
+   * shop panel but generic enough for any overworld panel flow (also used
+   * by the attendant claim's rare cooldown-race fallback, #29).
    */
-  private showSkinToast(message: string, color: string) {
-    this.activeSkinToast?.destroy();
+  private showToast(message: string, color: string) {
+    this.activeToast?.destroy();
     const toast = this.add
       .text(400, 145, message, {
         fontSize: "13px",
         color,
         fontStyle: "bold",
-        backgroundColor: "#000000cc",
+        backgroundColor: CHIP_BG,
         padding: { x: 10, y: 5 }
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(210)
       .setAlpha(0);
-    this.activeSkinToast = toast;
+    this.activeToast = toast;
 
     this.tweens.add({
       targets: toast,
@@ -824,7 +960,7 @@ export class OverworldScene extends Phaser.Scene {
             alpha: 0,
             duration: 300,
             onComplete: () => {
-              if (this.activeSkinToast === toast) this.activeSkinToast = undefined;
+              if (this.activeToast === toast) this.activeToast = undefined;
               toast.destroy();
             }
           });
@@ -962,10 +1098,10 @@ export class OverworldScene extends Phaser.Scene {
               // while this panel was open) - surfaced rather than silent.
               if (gameState.purchaseSkin(def.id)) {
                 this.updateHud();
-                this.showSkinToast(`✓ Bought ${def.name}!`, Theme.textAccent);
+                this.showToast(`✓ Bought ${def.name}!`, Theme.textAccent);
                 render();
               } else {
-                this.showSkinToast(`Couldn't buy ${def.name} - try again.`, Theme.textDanger);
+                this.showToast(`Couldn't buy ${def.name} - try again.`, Theme.textDanger);
                 render();
               }
             }
@@ -986,6 +1122,11 @@ export class OverworldScene extends Phaser.Scene {
             () => {
               gameState.currentSkin = def.id;
               this.player.setTexture(def.textureKey, this.player.frame.name);
+              // Re-tune the collision body and on-screen scale for
+              // whichever rig this skin uses (16x16 Kenney vs 21x32
+              // legacy) - see applyPlayerBody's/applyPlayerScale's comments.
+              this.applyPlayerBody();
+              this.applyPlayerScale();
               render();
             }
           );
@@ -1062,7 +1203,10 @@ export class OverworldScene extends Phaser.Scene {
         const inRug = x > 16 && x < 64 && y > 10 && y < 46;
         let key = "floor_tan";
         if (inRug) {
-          // simple alternating rug pattern for visual interest
+          // Central "plaza path" through the social hub - alternates between
+          // the sand and stone plaza tiles (task #23; these keys used to be
+          // literal red/blue casino carpet, now a Kenney plaza path - see
+          // BootScene.ts's preload comments for the tile source).
           key = (x + y) % 5 === 0 ? "carpet_blue" : "carpet_red";
         }
         this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key);
@@ -1070,18 +1214,51 @@ export class OverworldScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * Social-hub dressing (task #23, STYLE_GUIDE.md direction note 4: "nature
+   * woven into a social hub, not wilderness"). Every piece here is purely
+   * decorative (no collider registered) so placement only has to dodge
+   * GAME_STATIONS/NPC/attendant sprites and their name labels visually - it
+   * can't break interaction radii. Native tile art is 16x16; scaled up a
+   * little (setScale) so it still reads as furniture next to the 48x64
+   * cabinet-scale game stations, without touching any station's own scale.
+   */
   private buildDecorations() {
-    // A few plants scattered around for atmosphere, placed in open gaps
-    // between the station layout
-    // Nudged from (8,8) to clear "games"' incoming Baccarat cabinet at
-    // (10,8) - the two 48x64 sprites were only 2 tiles apart and would
-    // have visually clipped into each other (no collider/interactable
-    // conflict, just overlapping art).
-    this.add.image(4 * TILE, 9 * TILE, "plant").setOrigin(0.5);
-    this.add.image(8 * TILE, 48 * TILE, "plant").setOrigin(0.5);
-    this.add.image(68 * TILE, 6 * TILE, "plant").setOrigin(0.5);
-    this.add.image(28 * TILE, 46 * TILE, "plant").setOrigin(0.5);
-    this.add.image(52 * TILE, 46 * TILE, "plant").setOrigin(0.5);
+    // Trees - kept at the same spots as the old plants (still clear of
+    // "games"' Baccarat cabinet at (10,8), see prior nudge-from-(8,8) note),
+    // just re-themed to the new mint-green tree art. Scaled 2x so a single
+    // 16x16 tile still reads as a small tree canopy rather than a speck.
+    const treeSpots: Array<[number, number]> = [
+      [4, 9],
+      [8, 48],
+      [68, 6],
+      [28, 46],
+      [52, 46]
+    ];
+    for (const [col, row] of treeSpots) {
+      this.add.image(col * TILE, row * TILE, "plant").setOrigin(0.5).setScale(2);
+    }
+    // One autumn-toned tree for a bit of the pack's color variety, tucked
+    // beside the existing top-right tree cluster.
+    this.add.image(70 * TILE, 6 * TILE, "tree_accent").setOrigin(0.5).setScale(2);
+
+    // Lamp posts flanking the main north-south path down to the exit door
+    // (40,51) - well clear of Plinko (52,36) and Video Poker (67,48).
+    this.add.image(36 * TILE, 44 * TILE, "lamp_post").setOrigin(0.5, 1).setScale(1.75);
+    this.add.image(44 * TILE, 44 * TILE, "lamp_post").setOrigin(0.5, 1).setScale(1.75);
+
+    // Benches flanking the Chip Attendant (40,28) - a small "town square"
+    // gathering nook, 3+ tiles from the NPC's own interaction radius.
+    this.add.image(37 * TILE, 31 * TILE, "bench_prop").setOrigin(0.5).setScale(1.5);
+    this.add.image(43 * TILE, 31 * TILE, "bench_prop").setOrigin(0.5).setScale(1.5);
+
+    // Market stall beside the Skin Attendant (40,18) - reinforces the
+    // "market stall" social-hub read from STYLE_GUIDE direction note 4.
+    this.add.image(35 * TILE, 17 * TILE, "market_stall").setOrigin(0.5).setScale(1.5);
+
+    // Low hedges as garden-patch accents near a couple of the tree spots.
+    this.add.image(4 * TILE, 12 * TILE, "hedge").setOrigin(0.5).setScale(1.5);
+    this.add.image(66 * TILE, 8 * TILE, "hedge").setOrigin(0.5).setScale(1.5);
   }
 
   private buildWalls() {

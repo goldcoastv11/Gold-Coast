@@ -25,6 +25,16 @@
  * itself) so it stays pure/testable; GameState is responsible for
  * persisting that timestamp across reloads.
  *
+ * #27 makes the GC leg variable: `claimAttendantBonus` now takes a
+ * `multiplier` (see economy/gcMultiplier.ts) resolved by games/floor's
+ * shuffle-cup mini-game (#28/#29) and grants GC_MULTIPLIER_BASE *
+ * multiplier instead of a hardcoded 1000. It defaults to 1 (= 1000,
+ * identical to the old fixed behavior) so every call site that predates
+ * the mini-game keeps working unchanged until floor wires the resolved
+ * pick through. The SC leg (scBonus: 1) is explicitly untouched by #27 -
+ * still flat, still PACKAGE_BONUS_SC, still registers the same
+ * playthrough requirement either way.
+ *
  * Authorization: this is a narrow, explicitly-scoped exception to the
  * "SC only via signup bonus or GC-purchase bonus" / "ad-reward refills are
  * GC only" rules - see repo-root CLAUDE.md, "Temporary POC exception -
@@ -39,14 +49,17 @@
 import { LedgerState } from "./ledger";
 import { PlaythroughState } from "./playthrough";
 import { GcPackage, PackagePurchaseResult, grantPackage } from "./packages";
+import { GcMultiplier, resolveGcAmount } from "./gcMultiplier";
 
 /**
  * Not a real purchasable tier - intentionally absent from GC_PACKAGES.
- * priceUsd is 0 because no money changes hands for this claim yet;
- * gcAmount mirrors the overworld NPC's existing "Claim 1000 Gold Coins?"
- * copy (src/scenes/OverworldScene.ts) - if that copy changes, update this
- * to match. scBonus is deliberately small: a taste of the mechanic, not a
- * real grant.
+ * priceUsd is 0 because no money changes hands for this claim yet.
+ * `gcAmount` here is just the at-1x reference value (mirrors the overworld
+ * NPC's original "Claim 1000 Gold Coins?" copy) - the actual grant always
+ * recomputes it from the caller's `multiplier` via `resolveGcAmount` (see
+ * `claimAttendantBonus` below), this field is never read directly for a
+ * real claim. scBonus is deliberately small and, per #27, fixed - it does
+ * NOT scale with the GC multiplier.
  */
 export const ATTENDANT_CLAIM_PACKAGE: GcPackage = {
   id: "attendant_claim_internal",
@@ -81,15 +94,18 @@ export function attendantClaimCooldownRemaining(
 /**
  * Attempts the claim. Checks the cooldown first (using `lastClaimAtMs` +
  * `nowMs`, both explicit so the caller controls persistence/clock); if
- * clear, grants ATTENDANT_CLAIM_PACKAGE via the same mechanics as a real
- * purchase (GC + SC bonus + playthrough lock). Does not mutate/return a
- * new lastClaimAtMs itself - the caller (GameState) is responsible for
- * recording `nowMs` as the new last-claim time on a successful outcome.
+ * clear, grants GC_MULTIPLIER_BASE * `multiplier` GC (#27 - default 1x =
+ * 1000, the pre-#27 fixed amount) plus the flat 1 SC bonus, via the same
+ * mechanics as a real purchase (playthrough lock included). Does not
+ * mutate/return a new lastClaimAtMs itself - the caller (GameState) is
+ * responsible for recording `nowMs` as the new last-claim time on a
+ * successful outcome.
  */
 export function claimAttendantBonus(
   ledger: LedgerState,
   playthrough: PlaythroughState,
   lastClaimAtMs: number | null,
+  multiplier: GcMultiplier = 1,
   nowMs: number = Date.now()
 ): AttendantClaimOutcome {
   const remainingMs = attendantClaimCooldownRemaining(lastClaimAtMs, nowMs);
@@ -97,6 +113,7 @@ export function claimAttendantBonus(
     return { ok: false, reason: "COOLDOWN", remainingMs };
   }
 
-  const result = grantPackage(ledger, playthrough, ATTENDANT_CLAIM_PACKAGE);
+  const pkg: GcPackage = { ...ATTENDANT_CLAIM_PACKAGE, gcAmount: resolveGcAmount(multiplier) };
+  const result = grantPackage(ledger, playthrough, pkg, { multiplier });
   return { ok: true, ...result };
 }

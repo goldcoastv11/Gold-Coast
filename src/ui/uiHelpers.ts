@@ -20,7 +20,8 @@ function drawPill(
   g.clear();
   g.fillStyle(fill, alpha);
   g.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
-  g.lineStyle(2, 0x000000, 0.25);
+  // Warm dark-brown outline, never pure black - STYLE_GUIDE direction note 2.
+  g.lineStyle(2, Theme.outline, 0.35);
   g.strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
 }
 
@@ -38,7 +39,7 @@ export function makeButton(
   baseColor: number,
   hoverColor: number,
   onClick: () => void,
-  textColor = "#0e1015"
+  textColor = Theme.textPrimary
 ): UIButton {
   const container = scene.add.container(x, y);
   const bg = scene.add.graphics();

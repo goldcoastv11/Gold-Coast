@@ -116,7 +116,7 @@ export class MinesScene extends Phaser.Scene {
       46,
       "CASH OUT",
       Theme.gold,
-      0xffe082,
+      Theme.goldHover,
       () => this.cashOut()
     );
     this.cashOutBtn.setEnabled(false);
@@ -165,9 +165,9 @@ export class MinesScene extends Phaser.Scene {
     bg.clear();
     const colors = {
       hidden: Theme.inset,
-      clickable: 0x1e2530,
-      gem: 0x1b5e3a,
-      mine: 0x7a1f1f
+      clickable: 0xd9f5ec, // very pale mint - playable, not yet revealed
+      gem: Theme.winZone,
+      mine: Theme.loseZone
     };
     const border = {
       hidden: Theme.panelBorder,

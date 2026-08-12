@@ -81,17 +81,25 @@ export type PackagePurchaseOutcome =
  * `listPackages` (see src/economy/attendantClaim.ts for that use case).
  * Real purchase flows should go through `purchasePackage` below instead,
  * which only resolves ids from the real catalog.
+ *
+ * `extraMeta`, if given, is merged into both transactions' `meta` on top
+ * of `{ packageId }` - e.g. attendantClaim.ts records the resolved
+ * shuffle-cup multiplier (#27) there for audit purposes without needing
+ * its own copy of this granting logic.
  */
 export function grantPackage(
   ledger: LedgerState,
   playthrough: PlaythroughState,
-  pkg: GcPackage
+  pkg: GcPackage,
+  extraMeta?: Record<string, unknown>
 ): PackagePurchaseResult {
   const gcTransaction = applyTransaction(ledger, "GC", "PACKAGE_GC", pkg.gcAmount, {
-    packageId: pkg.id
+    packageId: pkg.id,
+    ...extraMeta
   });
   const scBonusTransaction = applyTransaction(ledger, "SC", "PACKAGE_BONUS_SC", pkg.scBonus, {
-    packageId: pkg.id
+    packageId: pkg.id,
+    ...extraMeta
   });
   addPlaythroughRequirement(playthrough, pkg.scBonus);
 

@@ -76,8 +76,13 @@ export class BlackjackScene extends Phaser.Scene {
     // Real table art as backdrop, inset within the panel
     this.add.image(400, 300, "blackjack_table").setDisplaySize(560, 320).setAlpha(0.85);
 
-    // Dealer - stands off to the side, "dealing" via a looping animation
-    const dealer = this.add.sprite(95, 150, "dealer_sheet", 1).setScale(2.4);
+    // Dealer - stands off to the side, "dealing" via a looping animation.
+    // Scale 4.8 (not the old 2.4) - the #24 character reskin dropped the
+    // sheet's frame size from 21x32 to 16x16 (square), so 2.4 now renders
+    // noticeably too small. 4.8 = old display height (32*2.4=76.8px) / new
+    // frame height (16px), preserving how big the dealer used to look
+    // on-screen rather than guessing a new number from scratch.
+    const dealer = this.add.sprite(95, 150, "dealer_sheet", 1).setScale(4.8);
     dealer.play("dealer_walk_down");
 
     makeInset(this, 245, 115, 210, 50, 12);
@@ -297,16 +302,16 @@ export class BlackjackScene extends Phaser.Scene {
   private drawCardVisual(x: number, y: number, card: Card | null): Phaser.GameObjects.GameObject[] {
     if (!card) {
       const back = this.add
-        .rectangle(x, y, CARD_W, CARD_H, 0x1a3a6b)
-        .setStrokeStyle(2, 0xffffff);
+        .rectangle(x, y, CARD_W, CARD_H, Theme.secondary)
+        .setStrokeStyle(2, Theme.cardBorder);
       const pattern = this.add
-        .text(x, y, "?", { fontSize: "22px", color: "#6fa8ff", fontStyle: "bold" })
+        .text(x, y, "?", { fontSize: "22px", color: Theme.textPrimary, fontStyle: "bold" })
         .setOrigin(0.5);
       return [back, pattern];
     }
 
-    const bg = this.add.rectangle(x, y, CARD_W, CARD_H, 0xffffff).setStrokeStyle(2, 0x333333);
-    const color = isRed(card) ? "#d32f2f" : "#1a1a1a";
+    const bg = this.add.rectangle(x, y, CARD_W, CARD_H, Theme.cardFace).setStrokeStyle(2, Theme.cardBorder);
+    const color = isRed(card) ? Theme.cardTextRed : Theme.cardTextBlack;
     const rankText = this.add
       .text(x, y - 8, card.rank, { fontSize: "18px", color, fontStyle: "bold" })
       .setOrigin(0.5);
