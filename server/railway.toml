@@ -12,12 +12,12 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 # Railway's startCommand (when set) overrides the Dockerfile's CMD entirely,
-# so this repeats the same "migrate then start" sequence explicitly rather
-# than relying on the Dockerfile alone - keeps behavior identical whichever
-# one Railway actually uses. Calls the local prisma binary directly instead
-# of through npx - see the Dockerfile's CMD comment for why (npx was
-# observed to hang indefinitely after migrate deploy's actual work finished).
-startCommand = "./node_modules/.bin/prisma migrate deploy && node dist/index.js"
+# so this repeats the same sequence explicitly rather than relying on the
+# Dockerfile alone - keeps behavior identical whichever one Railway
+# actually uses. See the Dockerfile's CMD comment for why this uses
+# `timeout 20 ...; node dist/index.js` instead of `&& ` - prisma migrate
+# deploy was observed to hang indefinitely after its actual work finished.
+startCommand = "timeout 20 ./node_modules/.bin/prisma migrate deploy; node dist/index.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 healthcheckPath = "/health"

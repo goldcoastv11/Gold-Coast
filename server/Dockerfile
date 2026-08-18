@@ -18,7 +18,7 @@ WORKDIR /app
 # itself warns "failed to detect the libssl/openssl version" and explicitly
 # suggests this exact fix for Docker. Migrations (a separate binary) worked
 # without it; @prisma/client at actual server runtime is what needs this.
-RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && apt-get install -y openssl coreutils && rm -rf /var/lib/apt/lists/*
 
 # NODE_ENV=production must NOT be set yet here - `npm install` treats it as
 # an implicit --omit=dev, which would skip typescript/@types/*/prisma (all
@@ -41,12 +41,19 @@ EXPOSE 8787
 # Applies any pending migrations, then starts the server. Safe to run on
 # every deploy - a no-op when the schema's already up to date.
 #
-# Calls the local prisma binary directly (node_modules/.bin/prisma) rather
-# than through `npx` - npx's own resolution/update-check overhead was
-# observed to hang indefinitely after migrate deploy finished its actual
-# work (migrations applied successfully every time, but control never
-# returned to the shell to run the next command), even with
-# CHECKPOINT_DISABLE=1 set. The local binary is already guaranteed present
-# (prisma is a devDependency, installed above) so there's nothing for npx
-# to resolve or fetch in the first place.
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && node dist/index.js"]
+# `timeout 20 ... ; node dist/index.js` (semicolon, not &&) rather than the
+# more obvious `prisma migrate deploy && node dist/index.js`: on Railway,
+# `prisma migrate deploy` was observed to hang indefinitely AFTER printing
+# its own final success output ("No pending migrations to apply." / "All
+# migrations have been successfully applied.") - the actual migration work
+# completes in under a second every time, but the CLI process itself never
+# returns control to the shell (reproduced with both npx and the local
+# binary directly, with and without CHECKPOINT_DISABLE - not an npx or
+# telemetry issue, something about the CLI process itself not exiting
+# cleanly in this container environment, most likely a lingering DB
+# connection handle keeping its event loop alive). `timeout 20` caps how
+# long we wait for it, and the server always starts afterward regardless of
+# the migrate command's exit status - safe given migrations have reliably
+# already applied by then in every observed run. If prisma's own behavior
+# here is fixed in a future version, this can safely revert to `&&`.
+CMD ["sh", "-c", "timeout 20 ./node_modules/.bin/prisma migrate deploy; node dist/index.js"]
