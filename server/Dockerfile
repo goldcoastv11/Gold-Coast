@@ -13,6 +13,13 @@
 FROM node:20-slim
 WORKDIR /app
 
+# node:20-slim (Debian) doesn't ship OpenSSL, which Prisma's native query-
+# engine binary needs at runtime to load correctly - without this, prisma
+# itself warns "failed to detect the libssl/openssl version" and explicitly
+# suggests this exact fix for Docker. Migrations (a separate binary) worked
+# without it; @prisma/client at actual server runtime is what needs this.
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+
 # NODE_ENV=production must NOT be set yet here - `npm install` treats it as
 # an implicit --omit=dev, which would skip typescript/@types/*/prisma (all
 # devDependencies) and break both `npm run build` (tsc) and `prisma migrate
