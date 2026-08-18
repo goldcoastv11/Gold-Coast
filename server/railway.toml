@@ -12,15 +12,15 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 # Railway's startCommand (when set) overrides the Dockerfile's CMD entirely,
-# so this repeats the same sequence explicitly rather than relying on the
-# Dockerfile alone - keeps behavior identical whichever one Railway
-# actually uses. See the Dockerfile's CMD comment for the full history -
-# backgrounding prisma with `&` *still* produced a silent deploy log with
-# zero server output, ruling out prisma's process lifecycle as the cause
-# entirely. These bare `echo` markers need zero Node/TypeScript/Prisma to
-# produce output - they tell us whether the shell itself ever reaches the
-# point of launching node at all.
-startCommand = "echo '>>> BOOT-A: shell entered CMD'; ./node_modules/.bin/prisma migrate deploy & echo '>>> BOOT-B: migrate backgrounded, about to exec node'; exec node dist/index.js"
+# so this repeats it explicitly rather than relying on the Dockerfile alone
+# - keeps behavior identical whichever one Railway actually uses. See the
+# Dockerfile's CMD comment for the full history of why `prisma migrate
+# deploy` was removed from container start entirely (three different
+# invocation strategies all failed on Railway specifically, most likely an
+# OOM kill from two Node-based processes starting concurrently) - migrations
+# now run as a decoupled step, see DEPLOYMENT.md's "Ongoing: running a new
+# migration".
+startCommand = "node dist/index.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 healthcheckPath = "/health"

@@ -55,22 +55,29 @@ EXPOSE 8787
 # and keep holding the shell open past when `timeout` was expected to force
 # a return.
 #
-# Fix: stop waiting on prisma's process lifecycle entirely. `&` backgrounds
-# `prisma migrate deploy` (fire-and-forget) and the shell moves to
-# `node dist/index.js` immediately, regardless of whether/when the
-# migration command's process tree ever fully exits. Safe here because
-# every observed deploy shows all migrations already applied (nothing
-# pending) - the real migration work, when there is any, still completes
-# in under a second, well before the server would see meaningful traffic.
-#
-# STILL failed after this change too - Railway's deploy log went silent in
-# the exact same place (right after Prisma's own "No pending migrations to
-# apply."), with zero server output, even though `node dist/index.js` is no
-# longer waiting on prisma at all. That ruled out prisma's process lifecycle
-# as the cause entirely. So: bare `echo` markers below, needing zero Node,
-# zero TypeScript, zero Prisma - just plain `sh` - to see whether the shell
-# itself ever reaches the point of launching node in the first place. Also
-# switched to `exec node ...` so node replaces the shell as PID 1 instead of
-# running as its child (correct signal handling, and one less process in
-# the way).
-CMD ["sh", "-c", "echo '>>> BOOT-A: shell entered CMD'; ./node_modules/.bin/prisma migrate deploy & echo '>>> BOOT-B: migrate backgrounded, about to exec node'; exec node dist/index.js"]
+# Migrations are NOT run here anymore - see "Ongoing: running a new
+# migration" in DEPLOYMENT.md for the decoupled replacement. History, in
+# order, all on Railway specifically (never reproduced locally):
+#   1. `prisma migrate deploy && node dist/index.js` - prisma's CLI hung
+#      forever after printing its own final success line; never returned
+#      control to the shell.
+#   2. `timeout 20 prisma migrate deploy; node dist/index.js` - still no
+#      server output after the full healthcheck window. `timeout` only
+#      signals the direct child it spawns; Prisma's Rust query-engine
+#      grandchild can survive that and keep the shell blocked.
+#   3. `prisma migrate deploy & node dist/index.js` (background, fire-and-
+#      forget) - deploy log went completely silent in the exact same place
+#      as attempt 1, immediately after launching the backgrounded prisma
+#      process and BEFORE a second, completely independent `echo` even had
+#      a chance to run - i.e. something took the whole container down right
+#      at that moment, not merely "prisma hung." The likely mechanism: two
+#      Node-based processes (the prisma CLI and, moments later, node itself)
+#      starting concurrently on a memory-constrained container is a classic
+#      OOM trigger, and an OOM kill of the container would explain silence
+#      that abrupt and that total.
+# Every attempt's logs, when prisma ran alone/sequentially, showed
+# migrations already fully applied - so it's provably safe to stop running
+# it here at all. Also: plain exec-form CMD now (no shell, no `;`/`&`
+# scripting at all) - node runs directly as PID 1, which also removes the
+# whole shell-scripting failure class from the equation.
+CMD ["node", "dist/index.js"]

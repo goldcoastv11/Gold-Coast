@@ -61,13 +61,13 @@ On the server service's **Variables** tab, add everything else from
    For the first deploy, trigger it manually from the service's
    **Deployments** tab if it didn't already start.
 2. Railway builds the image from `casino-poc/server/Dockerfile`.
-3. On container start, the entrypoint runs `prisma migrate deploy` (applies
-   every migration in `prisma/migrations/` that isn't already applied) and
-   then starts the server - see `railway.toml`'s `startCommand` and the
-   Dockerfile's `CMD`. You do not need to run migrations by hand; this
-   happens automatically on every deploy and is a no-op if nothing's
-   pending.
-4. Watch the **Deploy Logs** for the migration step and
+3. On container start, the entrypoint runs `node dist/index.js` directly -
+   nothing else. **Migrations are NOT run automatically on deploy** (see
+   "Ongoing: running a new migration" below for why and what to do
+   instead) - make sure you've applied migrations at least once (step 6
+   below, or whenever the schema last changed) before expecting the API to
+   work against a fresh database.
+4. Watch the **Deploy Logs** for
    `casino-poc server listening on http://localhost:<port>` - that
    confirms it came up cleanly.
 
@@ -83,19 +83,33 @@ On the server service's **Variables** tab, add everything else from
 
 ## Ongoing: running a new migration
 
-Whenever `prisma/schema.prisma` changes locally:
+Migrations are **not** run automatically on deploy (see the Dockerfile's
+`CMD` comment for why - running `prisma migrate deploy` at container start,
+in three different forms, reliably broke the deploy on Railway specifically,
+most likely an OOM kill from two Node-based processes starting concurrently
+on a memory-constrained container - never reproduced locally). Apply
+migrations against production as a separate, decoupled step using the
+Railway CLI instead, which runs the command on your own machine with
+production's env vars (`DATABASE_URL` etc.) injected - no container startup
+involved at all:
 
 ```bash
 cd casino-poc/server
 npm run prisma:migrate   # prisma migrate dev --name <something> - creates + applies locally
 git add prisma/migrations
 git commit -m "..."
-git push
+git push                 # deploys the new server code (no migration yet)
+
+npm install -g @railway/cli   # one-time
+railway login                 # one-time, opens a browser to authenticate
+railway link                  # one-time per clone, pick this project/service
+railway run npx prisma migrate deploy   # applies pending migrations to production
 ```
 
-Pushing triggers a Railway redeploy, which runs `prisma migrate deploy`
-automatically against the production database as described in step 5 above
-- no manual migration step needed in production.
+Run that last command once after every `git push` that includes new files
+under `prisma/migrations/`, and once now (before the first real deploy) if
+you haven't already applied the existing migrations to this project's
+Postgres.
 
 ## Rolling back
 
