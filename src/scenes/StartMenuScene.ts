@@ -3,12 +3,17 @@ import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel } from "../ui/uiHelpers";
 
+interface StartMenuData {
+  /** Task #43: set by LoginScene.reconcileAndEnter() when an orphaned stateful-game round was forfeited on this login - shown once, not persisted. */
+  notice?: string;
+}
+
 export class StartMenuScene extends Phaser.Scene {
   constructor() {
     super("StartMenuScene");
   }
 
-  create() {
+  create(data: StartMenuData) {
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
     makePanel(this, 400, 300, 460, 340);
@@ -31,6 +36,17 @@ export class StartMenuScene extends Phaser.Scene {
         color: Theme.textGold
       })
       .setOrigin(0.5);
+
+    if (data?.notice) {
+      this.add
+        .text(400, 320, data.notice, {
+          fontSize: "11px",
+          color: Theme.textMuted,
+          align: "center",
+          wordWrap: { width: 380 }
+        })
+        .setOrigin(0.5);
+    }
 
     makeButton(
       this,

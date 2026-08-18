@@ -1,18 +1,31 @@
 /**
- * Placeholder client-side state for the POC only.
+ * Client-side state, now backed by casino-poc/server (task #37).
  *
- * IMPORTANT: In a real build, balances and game outcomes must be
- * authoritative on a server you control - never trust the client for
- * currency amounts or RNG results. This local state exists purely so
- * the POC is playable end-to-end without a backend yet.
+ * Task #37 status: LoginScene now calls the real POST /auth/signup and
+ * POST /auth/login endpoints (see src/api/client.ts) instead of the old
+ * localStorage-hashed fake auth, and hydrates this class from the server's
+ * response (or GET /me on a silent session restore) via
+ * `hydrateFromServer()` below - balances/skins/position/playthrough/
+ * attendant-claim cooldown are now server-authoritative for a logged-in
+ * session. Position saves, skin buy/equip, and the attendant claim are
+ * likewise wired to their real endpoints from OverworldScene.ts.
  *
- * The "login" system below is the same story: it's a username/password
- * screen that checks against a hash stored in this browser's own
- * localStorage - there is no server, so it is NOT real authentication.
- * Anyone with devtools access to this browser can read or edit every
- * profile. It exists purely so coins/skins survive a page reload and so
- * a couple of people sharing one device don't stomp on each other's
- * progress. Do not reuse this pattern for anything that matters.
+ * What's still local/placeholder: the legacy `login()`/`purchaseSkin()`/
+ * `claimAttendantBonus()` methods and the economy/*.ts ledger they call
+ * still exist below, still fully functional, and are still covered by
+ * GameState.test.ts etc - they're kept as-is (not removed) because (a) the
+ * 14 game scenes still wager/pay out locally via the legacy `goldCoins`
+ * setter until "games" lands each backend game endpoint (task #36) and
+ * this class is their bridge in the meantime, and (b) removing them would
+ * break the existing unit tests that intentionally still exercise the
+ * pre-server behavior. Once every game is migrated, this class can drop
+ * the local ledger entirely in favor of always reading server state.
+ *
+ * IMPORTANT: for any interaction NOT yet wired to the server (the
+ * remaining local game scenes), balances/outcomes are still computed
+ * client-side and are not authoritative - see repo-root CLAUDE.md and the
+ * warnings historically in this file for why that's not acceptable beyond
+ * a POC.
  *
  * Economy note: GC and SC balances live behind the transaction ledger in
  * src/economy/ledger.ts - see that module and repo-root CLAUDE.md for the
@@ -62,6 +75,8 @@ import {
   placeBet as placeBetInternal,
   resolveBet as resolveBetInternal
 } from "./economy/betting";
+import { clearToken } from "./api/client";
+import type { MeResponse } from "./api/types";
 
 export type { Currency, GcMultiplier };
 
@@ -510,10 +525,40 @@ class GameState {
     return { ok: true, isNew: true };
   }
 
-  /** Clears the active session. Local profile data in localStorage is untouched. */
+  /**
+   * Task #37: loads this class's in-memory/read cache from a server
+   * MeResponse (the `user` field of POST /auth/signup, POST /auth/login,
+   * POST /skins/buy|equip, POST /claim-bonus, or a plain GET /me) instead
+   * of a localStorage profile. Call this after every one of those calls
+   * succeeds so every getter below (goldCoins, stakeCoins, unlockedSkins,
+   * currentSkin, lastPlayerPosition, playthrough*, attendantClaim*)
+   * reflects the server's authoritative state.
+   *
+   * Deliberately does NOT call `save()` - there is no more local profile to
+   * write; the server is the source of truth for a hydrated session. The
+   * local ledger is still populated (via createLedger, not applyTransaction
+   * - these are absolute values, not deltas) purely so unmigrated game
+   * scenes' legacy `gameState.goldCoins -= bet` / `+= payout` calls keep
+   * working against a real starting balance until they're migrated (task
+   * #36) - those local mutations are NOT sent back to the server.
+   */
+  hydrateFromServer(me: MeResponse) {
+    this.activeUsername = me.username;
+    this._ledger = createLedger(me.goldCoins, me.stakeCoins);
+    this._playthrough = { required: me.playthrough.required, wagered: me.playthrough.wagered };
+    this.unlockedSkins = [...me.skinsOwned];
+    this._currentSkin = me.equippedSkin;
+    this.lastPlayerPosition = me.lastPosition ? { x: me.lastPosition.x, y: me.lastPosition.y } : null;
+    this._attendantClaimedAt = me.attendantClaim.lastClaimedAt
+      ? Date.parse(me.attendantClaim.lastClaimedAt)
+      : null;
+  }
+
+  /** Clears the active session (including the stored JWT - see src/api/client.ts). Local profile data in localStorage is untouched. */
   logout() {
     this.activeUsername = null;
     this.lastPlayerPosition = null;
+    clearToken();
   }
 
   /** Persists the active profile's current state to localStorage. No-op if not logged in. */

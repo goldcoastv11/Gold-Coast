@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.env
+.pgdata/
+.pgdata-test/
+.pgdata-test-*/
+*.log

@@ -1,0 +1,201 @@
+// Prisma schema for casino-poc's server-authoritative backend.
+//
+// Mirrors the client's economy shapes (src/economy/*.ts) - see that code and
+// repo-root CLAUDE.md for the rules this schema exists to support:
+//   - GC and SC are separate ledgers (balances.gold_coins / balances.stake_coins)
+//   - every balance change is one row in `transactions` (currency/type mirror
+//     ledger.ts's Currency/TransactionType unions) - nothing else may write
+//     gold_coins/stake_coins
+//   - SC redemption is gated on playthrough_progress + a minimum threshold
+//   - skins are GC-only and structurally separate (skins_owned/equipped_skin
+//     never reference sc/playthrough tables)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique
+  email        String?
+  passwordHash String   @map("password_hash")
+  // Explicit timestamptz - Prisma's default DateTime mapping on Postgres is
+  // `timestamp(3)` (timezone-naive), which silently reinterprets stored UTC
+  // instants through the DB session's local timezone on comparison/read-back
+  // (embedded-postgres defaults to the host's local zone). Bit the
+  // attendant-claim cooldown badly in testing (see AttendantClaim below) -
+  // every DateTime column here uses @db.Timestamptz(3) to avoid it.
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  balance             Balance?
+  transactions        Transaction[]
+  skinsOwned          SkinOwned[]
+  equippedSkin        EquippedSkin?
+  lastPosition        LastPosition?
+  playthroughProgress PlaythroughProgress?
+  attendantClaim      AttendantClaim?
+  gameRounds          GameRound[]
+
+  @@map("users")
+}
+
+// One row per user. Two independent balances - never conflated, never
+// mutated directly outside the ledger core (see src/economy/ledger.ts on
+// the server, which is the only code allowed to touch these two columns).
+model Balance {
+  userId     String @id @map("user_id")
+  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goldCoins  Int    @default(0) @map("gold_coins")
+  stakeCoins Int    @default(0) @map("stake_coins")
+
+  @@map("balances")
+}
+
+enum Currency {
+  GC
+  SC
+}
+
+// Closed set of transaction types, mirroring ledger.ts's TransactionType
+// union on the client 1:1 so the audit trail is comparable and QA can grep
+// for a type to find every code path that can move money.
+enum TransactionType {
+  SIGNUP_BONUS_SC
+  PACKAGE_BONUS_SC
+  SIGNUP_BONUS_GC
+  PACKAGE_GC
+  SKIN_PURCHASE_GC
+  AD_REWARD_GC
+  REDEMPTION_SC
+  WAGER_GC
+  WAGER_SC
+  PAYOUT_GC
+  PAYOUT_SC
+  ADJUST_GC
+  ADJUST_SC
+  // UNUSED - reserved, do not wire up without fresh sign-off. Added for a
+  // proposed #42 follow-up (auto-refund an abandoned round's wager if
+  // discovered still active at next login, instead of always forfeiting)
+  // that was reversed before any route/code referenced these: a login-
+  // triggered refund is exploitable regardless of how the "was this really
+  // an accidental disconnect" signal is computed server-side, because a
+  // player can just deliberately manufacture that exact signal (log out on
+  // a board they don't like instead of clicking walk away, then log back
+  // in) to always get a refund instead of ever accepting a forfeit -
+  // defeating the point of forfeiting at all. Decision: POST /games/abandon
+  // stays always-forfeit, no exceptions (see that route in routes/games.ts).
+  // Left as unused enum values rather than doing a destructive enum-type
+  // recreation to remove them, since nothing has ever written a transaction
+  // with these types - genuinely inert, not a behavior difference.
+  ROUND_REFUND_GC
+  ROUND_REFUND_SC
+}
+
+// Append-only. EVERY balance change must insert exactly one of these in the
+// same DB transaction as the balance update - see src/economy/ledger.ts.
+model Transaction {
+  id           String          @id @default(uuid())
+  userId       String          @map("user_id")
+  user         User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  currency     Currency
+  type         TransactionType
+  amount       Int
+  balanceAfter Int             @map("balance_after")
+  meta         Json?
+  createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([userId, createdAt])
+  @@map("transactions")
+}
+
+model SkinOwned {
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skinId String @map("skin_id")
+
+  @@id([userId, skinId])
+  @@map("skins_owned")
+}
+
+// One equipped skin per user - PK on userId enforces that directly.
+model EquippedSkin {
+  userId String @id @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skinId String @map("skin_id")
+
+  @@map("equipped_skin")
+}
+
+model LastPosition {
+  userId String @id @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  x      Float
+  y      Float
+
+  @@map("last_position")
+}
+
+// Mirrors src/economy/playthrough.ts's PlaythroughState (required/wagered)
+// 1:1 - see that file for the semantics.
+model PlaythroughProgress {
+  userId    String @id @map("user_id")
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scRequired Int   @default(0) @map("sc_required")
+  scWagered  Int   @default(0) @map("sc_wagered")
+
+  @@map("playthrough_progress")
+}
+
+// Server-enforced version of the client's persisted attendantClaimedAt -
+// see src/economy/attendantClaim.ts. One row per user; null/absent means
+// "never claimed". last_claimed_at MUST be timestamptz (see User.createdAt's
+// comment) - the 30s cooldown check compares it against `now() - 30s` in raw
+// SQL, and a timezone-naive column made that comparison silently wrong by
+// whatever offset the DB session's local timezone happened to be.
+model AttendantClaim {
+  userId        String    @id @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastClaimedAt DateTime? @map("last_claimed_at") @db.Timestamptz(3)
+
+  @@map("attendant_claim")
+}
+
+// #36: server-authoritative round state for multi-step games (Mines, Dragon
+// Tower, Hi-Lo, Blackjack, Video Poker - anything that isn't a single
+// bet-in/resolve-out request). Single-shot games (Slots, Roulette, CoinFlip,
+// Dice, Limbo, Plinko, Keno, Wheel, Baccarat) don't use this table at all -
+// their whole round happens inside one request/response and the existing
+// `transactions.meta` JSON is their audit trail.
+//
+// `state` holds whatever hidden data that specific game needs to keep
+// server-side between requests (mine positions, the undealt portion of a
+// deck, the dealer's hole card, etc.) - shape is game-specific and defined
+// per-game server-side (see server/src/games/<name>.ts), never typed at the
+// schema level since every game's shape differs. The public (client-safe)
+// slice of it is computed fresh per response - `state` itself is never sent
+// to the client wholesale.
+//
+// Exactly one *active* round per user is enforced at the application layer
+// (the `start` handler for each game checks-then-creates inside the same
+// transaction) rather than a DB constraint, since "active" is a status
+// value rather than something a unique index can express cleanly here.
+model GameRound {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  game      String
+  status    String   @default("active")
+  betAmount Int      @map("bet_amount")
+  currency  Currency
+  state     Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@index([userId, game, status])
+  @@map("game_rounds")
+}

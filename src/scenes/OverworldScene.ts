@@ -1,11 +1,13 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { listSkins, SkinDef } from "../economy/skinShop";
-import type { AttendantClaimOutcome } from "../economy/attendantClaim";
-import { GC_MULTIPLIER_BASE, GcMultiplier } from "../economy/gcMultiplier";
+import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, UIButton } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
+import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 const TILE = 16; // real tileset is 16x16 pixels per tile
 const MAP_COLS = 80;
@@ -336,6 +338,7 @@ export class OverworldScene extends Phaser.Scene {
     this.physics.add.collider(this.player, exitDoor);
     this.registerStation(exitDoor, "Exit", "Press E to exit to the title screen", () => {
       gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
+      this.savePositionRemote(this.player.x, this.player.y);
       this.scene.start("StartMenuScene");
     });
 
@@ -631,7 +634,22 @@ export class OverworldScene extends Phaser.Scene {
   /** Remembers where the player was standing, then hands off to a game scene. */
   private goToGame(sceneKey: string) {
     gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
+    this.savePositionRemote(this.player.x, this.player.y);
     this.scene.start(sceneKey);
+  }
+
+  /**
+   * Task #37: POST /position, matching the pre-existing lastPlayerPosition
+   * save/restore behavior but now persisted server-side instead of only in
+   * this session's local `gameState.lastPlayerPosition`. Fire-and-forget on
+   * purpose - a scene transition should never block (or fail) on this
+   * call; a dropped save just means the next login restores an older spot,
+   * which is the same failure mode localStorage had.
+   */
+  private savePositionRemote(x: number, y: number) {
+    api.savePosition(x, y).catch(() => {
+      // Best-effort - see doc comment above.
+    });
   }
 
   /**
@@ -805,12 +823,39 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * Runs the shuffle-cup mini-game (#28) for the attendant claim's GC leg,
-   * then grants the claim with whatever multiplier the player landed on.
-   * Called only after createAttendantClaimButton has already confirmed the
-   * cooldown is clear.
+   * Task #37: calls POST /claim-bonus FIRST - the server resolves the
+   * cooldown check and the GC multiplier atomically and authoritatively
+   * (see server/src/routes/economy.ts; it never trusts a client-picked
+   * multiplier) - THEN plays the shuffle-cup mini-game (#28) reconciled to
+   * whatever the server already decided (`forcedMultiplier` - see
+   * ShuffleCupReveal.ts). The grant has already happened by the time the
+   * animation runs; the animation is purely presentational. A COOLDOWN
+   * response (createAttendantClaimButton's pre-check is optimistic/local
+   * only) skips the animation entirely and just surfaces the real
+   * remaining time.
    */
-  private runAttendantClaimShuffle() {
+  private async runAttendantClaimShuffle() {
+    let result: Awaited<ReturnType<typeof api.claimBonus>>;
+    try {
+      result = await api.claimBonus();
+    } catch (err) {
+      this.panelOpen = false;
+      this.updateHud();
+      if (err instanceof ApiError && err.code === "COOLDOWN") {
+        const remainingMs = typeof err.body === "object" && err.body && "remainingMs" in err.body
+          ? Number((err.body as { remainingMs: unknown }).remainingMs)
+          : 0;
+        this.showToast(`Try again in ${Math.ceil(remainingMs / 1000)}s.`, Theme.textDanger);
+      } else if (err instanceof ApiError) {
+        this.showToast(err.message, Theme.textDanger);
+      } else if (err instanceof NetworkError) {
+        this.showToast(err.message, Theme.textDanger);
+      } else {
+        this.showToast("Something went wrong - try again.", Theme.textDanger);
+      }
+      return;
+    }
+
     const panel = makePanel(this, 400, 300, 420, 260, 200).setScrollFactor(0);
     const title = this.add
       .text(400, 195, "🪙 Chip Attendant's Shuffle", {
@@ -822,43 +867,56 @@ export class OverworldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
 
-    const handle = createShuffleCupReveal(this, 400, 302, GC_MULTIPLIER_BASE, ({ multiplier }) => {
-      handle.destroy();
-      panel.destroy();
-      title.destroy();
-      this.completeAttendantClaim(multiplier as GcMultiplier);
-    });
+    const handle = createShuffleCupReveal(
+      this,
+      400,
+      302,
+      GC_MULTIPLIER_BASE,
+      () => {
+        handle.destroy();
+        panel.destroy();
+        title.destroy();
+        gameState.hydrateFromServer(result.user);
+        this.runTripleChanceOffer(result.granted.gcAmount).then((outcome) => {
+          this.showClaimResultFromServer(result.granted.gcAmount, result.granted.scAmount, outcome);
+        });
+      },
+      result.granted.gcMultiplier
+    );
     handle.container.setScrollFactor(0).setDepth(201);
     handle.start();
   }
 
   /**
-   * Actually grants the attendant claim via gameState.claimAttendantBonus(),
-   * passing the shuffle-cup's resolved multiplier straight through. A
-   * COOLDOWN failure here would mean the 30s window started elsewhere
-   * between createAttendantClaimButton's pre-check and now - not reachable
-   * in normal single-tab play (nothing else in this session can trigger a
-   * claim), but handled rather than assumed impossible: closes the panel
-   * and surfaces a toast instead of leaving the screen stuck.
+   * #46: offers the "Triple Chance" bonus round on the attendant claim's GC
+   * leg, right after the shuffle-cup reveal finishes and before showing the
+   * claim result panel. See ui/TripleChanceOffer.ts for the full
+   * offer/play/chain mechanic.
+   *
+   * #48: passes `onBalanceChange` so the corner HUD (`this.hudText`)
+   * refreshes after each round of the chain resolves, not just once the
+   * whole sequence ends - gameState itself was always correct at every
+   * step (hydrateFromServer runs inside TripleChanceOffer.ts's playRound
+   * regardless), this was purely the visible counter lagging behind it.
    */
-  private completeAttendantClaim(multiplier: GcMultiplier) {
-    const outcome = gameState.claimAttendantBonus(multiplier);
-    if (outcome.ok) {
-      this.showClaimResult(outcome);
-    } else {
-      this.panelOpen = false;
-      this.updateHud();
-      this.showToast(`Try again in ${Math.ceil(outcome.remainingMs / 1000)}s.`, Theme.textDanger);
-    }
+  private runTripleChanceOffer(startingAmount: number): Promise<TripleChanceOutcome> {
+    return new Promise((resolve) => {
+      offerTripleChance(this, 400, 300, startingAmount, resolve, () => this.updateHud());
+    });
   }
 
-  /** Shows the result panel for a successful attendant claim, formatting both the GC and SC granted. */
-  private showClaimResult(outcome: Extract<AttendantClaimOutcome, { ok: true }>) {
+  /** Shows the result panel for a successful (server-confirmed) attendant claim - `tripleChance` (#46) reflects whether/how the GC leg changed after the bonus round, if the player played it. */
+  private showClaimResultFromServer(gcGained: number, scGained: number, tripleChance?: TripleChanceOutcome) {
     this.updateHud();
-    const gcGained = outcome.gcTransaction.amount;
-    const scGained = outcome.scBonusTransaction.amount;
+    let gcMessage = `+${gcGained} Gold Coins!`;
+    if (tripleChance?.played) {
+      gcMessage =
+        tripleChance.finalAmount > 0
+          ? `Tripled to +${tripleChance.finalAmount} Gold Coins!`
+          : `Lost the ${gcGained} Gold Coins to Triple Chance!`;
+    }
     this.showResultPanel(
-      `+${gcGained} Gold Coins!`,
+      gcMessage,
       scGained > 0 ? `+${scGained} Stake Coin${scGained === 1 ? "" : "s"}!` : undefined
     );
   }
@@ -924,6 +982,24 @@ export class OverworldScene extends Phaser.Scene {
 
   private updateHud() {
     this.hudText.setText(`🪙 ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
+  }
+
+  /** Turns a /skins/buy or /skins/equip failure into a short user-facing toast message. */
+  private describeSkinError(err: unknown, action: string): string {
+    if (err instanceof ApiError) {
+      switch (err.code) {
+        case "INSUFFICIENT_GC":
+          return "Not enough Gold Coins.";
+        case "ALREADY_OWNED":
+          return "You already own that.";
+        case "NOT_FOUND":
+          return "That skin doesn't exist - try again.";
+        default:
+          return err.message;
+      }
+    }
+    if (err instanceof NetworkError) return err.message;
+    return `Couldn't ${action} - try again.`;
   }
 
   private activeToast?: Phaser.GameObjects.Text;
@@ -1090,20 +1166,23 @@ export class OverworldScene extends Phaser.Scene {
             canAfford ? Theme.accent : Theme.neutral,
             canAfford ? Theme.accentHover : Theme.neutral,
             () => {
-              // GC-only purchase - gameState.purchaseSkin() routes through
-              // economy/skinShop.ts's purchaseSkin(), which debits GC via
-              // the ledger and never touches SC. The canAfford/ownership
-              // checks above already prevent the failure cases, so a false
-              // return here would mean a race (e.g. GC spent elsewhere
-              // while this panel was open) - surfaced rather than silent.
-              if (gameState.purchaseSkin(def.id)) {
-                this.updateHud();
-                this.showToast(`✓ Bought ${def.name}!`, Theme.textAccent);
-                render();
-              } else {
-                this.showToast(`Couldn't buy ${def.name} - try again.`, Theme.textDanger);
-                render();
-              }
+              // Task #37: POST /skins/buy - GC-only, server-authoritative.
+              // The canAfford/ownership checks above are optimistic UI only;
+              // the server re-checks both (INSUFFICIENT_GC/ALREADY_OWNED)
+              // and is the one that actually decides.
+              buyBtn.setEnabled(false);
+              api
+                .buySkin(def.id)
+                .then((res) => {
+                  gameState.hydrateFromServer(res.user);
+                  this.updateHud();
+                  this.showToast(`✓ Bought ${def.name}!`, Theme.textAccent);
+                  render();
+                })
+                .catch((err) => {
+                  this.showToast(this.describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
+                  render();
+                });
             }
           );
           if (!canAfford) buyBtn.setEnabled(false);
@@ -1120,14 +1199,25 @@ export class OverworldScene extends Phaser.Scene {
             isEquipped ? Theme.neutral : Theme.accent,
             isEquipped ? Theme.neutral : Theme.accentHover,
             () => {
-              gameState.currentSkin = def.id;
-              this.player.setTexture(def.textureKey, this.player.frame.name);
-              // Re-tune the collision body and on-screen scale for
-              // whichever rig this skin uses (16x16 Kenney vs 21x32
-              // legacy) - see applyPlayerBody's/applyPlayerScale's comments.
-              this.applyPlayerBody();
-              this.applyPlayerScale();
-              render();
+              // Task #37: POST /skins/equip - server-authoritative; only
+              // touch the player's texture/body once the server confirms.
+              wearBtn.setEnabled(false);
+              api
+                .equipSkin(def.id)
+                .then((res) => {
+                  gameState.hydrateFromServer(res.user);
+                  this.player.setTexture(def.textureKey, this.player.frame.name);
+                  // Re-tune the collision body and on-screen scale for
+                  // whichever rig this skin uses (16x16 Kenney vs 21x32
+                  // legacy) - see applyPlayerBody's/applyPlayerScale's comments.
+                  this.applyPlayerBody();
+                  this.applyPlayerScale();
+                  render();
+                })
+                .catch((err) => {
+                  this.showToast(this.describeSkinError(err, `wear ${def.name}`), Theme.textDanger);
+                  render();
+                });
             }
           );
           if (isEquipped) wearBtn.setEnabled(false);
@@ -1203,10 +1293,8 @@ export class OverworldScene extends Phaser.Scene {
         const inRug = x > 16 && x < 64 && y > 10 && y < 46;
         let key = "floor_tan";
         if (inRug) {
-          // Central "plaza path" through the social hub - alternates between
-          // the sand and stone plaza tiles (task #23; these keys used to be
-          // literal red/blue casino carpet, now a Kenney plaza path - see
-          // BootScene.ts's preload comments for the tile source).
+          // Task #41: reverted from the #23 Kenney plaza-path tiles back to
+          // the original Jephed pack's literal red/blue casino carpet.
           key = (x + y) % 5 === 0 ? "carpet_blue" : "carpet_red";
         }
         this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key);
@@ -1219,15 +1307,21 @@ export class OverworldScene extends Phaser.Scene {
    * woven into a social hub, not wilderness"). Every piece here is purely
    * decorative (no collider registered) so placement only has to dodge
    * GAME_STATIONS/NPC/attendant sprites and their name labels visually - it
-   * can't break interaction radii. Native tile art is 16x16; scaled up a
-   * little (setScale) so it still reads as furniture next to the 48x64
-   * cabinet-scale game stations, without touching any station's own scale.
+   * can't break interaction radii.
+   *
+   * Task #41 note: "plant" reverted to the original 48x64 Jephed image (see
+   * BootScene.ts preload) so its setScale(2) - added in #23 to make the
+   * small 16x16 Kenney tree tile read as a canopy - was removed here to
+   * match; leaving it would have rendered the restored Jephed plant at
+   * 96x128, badly oversized. tree_accent/lamp_post/bench_prop/market_stall/
+   * hedge are untouched Kenney pieces, out of #41's explicit scope (floor/
+   * wall/ground tiles + furniture textures only) - flagged separately as a
+   * possible bright-prop-on-dark-floor mismatch rather than reverted here.
    */
   private buildDecorations() {
-    // Trees - kept at the same spots as the old plants (still clear of
-    // "games"' Baccarat cabinet at (10,8), see prior nudge-from-(8,8) note),
-    // just re-themed to the new mint-green tree art. Scaled 2x so a single
-    // 16x16 tile still reads as a small tree canopy rather than a speck.
+    // Plants - back to the original Jephed art/scale (no setScale - see
+    // note above), same spots as before (still clear of "games"' Baccarat
+    // cabinet at (10,8), see prior nudge-from-(8,8) note).
     const treeSpots: Array<[number, number]> = [
       [4, 9],
       [8, 48],
@@ -1236,10 +1330,11 @@ export class OverworldScene extends Phaser.Scene {
       [52, 46]
     ];
     for (const [col, row] of treeSpots) {
-      this.add.image(col * TILE, row * TILE, "plant").setOrigin(0.5).setScale(2);
+      this.add.image(col * TILE, row * TILE, "plant").setOrigin(0.5);
     }
     // One autumn-toned tree for a bit of the pack's color variety, tucked
-    // beside the existing top-right tree cluster.
+    // beside the existing top-right tree cluster. Kenney-sourced, out of
+    // #41's scope - see buildDecorations()'s doc comment.
     this.add.image(70 * TILE, 6 * TILE, "tree_accent").setOrigin(0.5).setScale(2);
 
     // Lamp posts flanking the main north-south path down to the exit door

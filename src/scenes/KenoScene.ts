@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 const TOTAL_NUMBERS = 40; // board is numbers 1-40
 const DRAWN_COUNT = 10; // 10 numbers get drawn each round
@@ -15,6 +17,11 @@ const CELL_SIZE = 34;
 const CELL_GAP = 5;
 const GRID_CENTER_X = 400;
 const GRID_CENTER_Y = 262;
+
+// #36: the actual draw/hits/payout are now resolved server-side (POST
+// /games/keno/play, mirrored 1:1 in server/src/games/keno.ts) - everything
+// below is kept here only to drive the live paytable preview before the
+// player draws, never to settle a round.
 
 /** n-choose-k, computed iteratively so it stays exact in floating point for n<=40. */
 function comb(n: number, k: number): number {
@@ -44,38 +51,78 @@ function minPayHits(picks: number): number {
   return Math.max(1, Math.ceil(picks * 0.4));
 }
 
-/** How many distinct hit-counts actually pay out for a given number of picks. */
-function payingTierCount(picks: number): number {
-  return Math.max(0, picks - minPayHits(picks) + 1);
+/**
+ * #45: mirrors server/src/games/keno.ts's buildPayoutTable() byte-for-byte
+ * (iterative water-filling instead of a flat equal split) - MUST stay in
+ * sync by hand, same as every other cosmetic client-side copy in this file.
+ *
+ * The naive "equal share per tier, multiplier = share/P" approach (this
+ * function's previous version) breaks down at picks 7-10: the top
+ * ("hit everything") tier is astronomically rare there (picks=10,hits=10 is
+ * ~1-in-850-million), so its fair equal share needs a multiplier far past
+ * MAX_MULTIPLIER. Silently capping it without recovering the shortfall
+ * elsewhere quietly drags real RTP for those pick counts down to 67-82%
+ * instead of the documented ~94% - this was a real bug (#45, caught by QA),
+ * not just a client/server preview mismatch, and is now fixed on both
+ * sides: any tier that would need to exceed MAX_MULTIPLIER gets capped
+ * there instead, and the RTP budget that tier couldn't use is redistributed
+ * across the remaining uncapped tiers so total expected return still lands
+ * on ~94% for every pick count. Converges in at most `tiers` iterations.
+ */
+function buildPayoutTable(picks: number): Map<number, number> {
+  const minHits = minPayHits(picks);
+  const tierHits: number[] = [];
+  for (let h = minHits; h <= picks; h++) tierHits.push(h);
+
+  const probs = tierHits.map((h) => hyperProb(h, picks));
+  const mult = new Array<number>(tierHits.length).fill(0);
+  const capped = new Array<boolean>(tierHits.length).fill(false);
+  let remainingBudget = 1 - HOUSE_EDGE;
+
+  for (let iter = 0; iter < tierHits.length; iter++) {
+    const uncappedIdx: number[] = [];
+    for (let i = 0; i < tierHits.length; i++) if (!capped[i]) uncappedIdx.push(i);
+    if (uncappedIdx.length === 0) break;
+
+    const share = remainingBudget / uncappedIdx.length;
+    let cappedSomethingThisPass = false;
+
+    for (const i of uncappedIdx) {
+      const raw = probs[i] > 0 ? share / probs[i] : Infinity;
+      if (raw > MAX_MULTIPLIER) {
+        mult[i] = MAX_MULTIPLIER;
+        capped[i] = true;
+        remainingBudget -= probs[i] * MAX_MULTIPLIER;
+        cappedSomethingThisPass = true;
+      }
+    }
+
+    if (!cappedSomethingThisPass) {
+      for (const i of uncappedIdx) mult[i] = share / probs[i];
+      break;
+    }
+  }
+
+  const table = new Map<number, number>();
+  tierHits.forEach((h, i) => table.set(h, Math.max(0, Math.round(mult[i] * 100) / 100)));
+  return table;
 }
 
-/**
- * Fair multiplier for landing exactly `hits` out of `picks`, shaved by HOUSE_EDGE and capped.
- *
- * A round has several mutually-exclusive paying outcomes (hit counts from minPayHits(picks) up
- * to picks). Naively pricing each one as if it were the *only* winning outcome
- * (multiplier = (1-edge)/P) would make the sum of (probability * multiplier) across all paying
- * tiers add up to (1-edge) * numberOfTiers instead of (1-edge) - the house would hemorrhage money
- * the more paying tiers there are. Dividing by payingTierCount spreads the edge-adjusted value
- * evenly across tiers so the whole paytable's expected return is exactly (1-HOUSE_EDGE), same as
- * a single bet * multiplier formula, just generalized to many outcomes.
- */
+const payoutTableCache = new Map<number, Map<number, number>>();
+
+function getPayoutTable(picks: number): Map<number, number> {
+  let table = payoutTableCache.get(picks);
+  if (!table) {
+    table = buildPayoutTable(picks);
+    payoutTableCache.set(picks, table);
+  }
+  return table;
+}
+
+/** Preview-only multiplier for landing exactly `hits` out of `picks` - matches what the server will actually pay (see buildPayoutTable's doc comment), never used to settle a round itself. */
 function multiplierFor(picks: number, hits: number): number {
   if (picks <= 0 || hits < minPayHits(picks)) return 0;
-  const p = hyperProb(hits, picks);
-  const tiers = payingTierCount(picks);
-  if (p <= 0 || tiers <= 0) return 0;
-  const raw = (1 - HOUSE_EDGE) / (tiers * p);
-  return Math.min(MAX_MULTIPLIER, Math.round(raw * 100) / 100);
-}
-
-function drawNumbers(): Set<number> {
-  const indices = Array.from({ length: TOTAL_NUMBERS }, (_, i) => i);
-  for (let i = indices.length - 1; i > 0; i--) {
-    const j = Phaser.Math.Between(0, i);
-    [indices[i], indices[j]] = [indices[j], indices[i]];
-  }
-  return new Set(indices.slice(0, DRAWN_COUNT));
+  return getPayoutTable(picks).get(hits) ?? 0;
 }
 
 interface CellVisual {
@@ -340,6 +387,7 @@ export class KenoScene extends Phaser.Scene {
     this.paytableText.setText(parts.join("   "));
   }
 
+  /** #36: the draw and payout are resolved server-side (POST /games/keno/play) before any animation starts - the reveal-one-at-a-time sequence here just replays the server's real `drawn` order visually. */
   private play() {
     if (this.drawing) return;
     if (this.picks.size === 0) {
@@ -352,20 +400,28 @@ export class KenoScene extends Phaser.Scene {
     }
 
     this.currentBet = gameState.betAmount;
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
+    const pickList = Array.from(this.picks);
 
     this.drawing = true;
-    this.drawn = drawNumbers();
     this.revealedSoFar = new Set();
     this.drawBtn?.setEnabled(false);
     this.quickPickBtn?.setEnabled(false);
     this.clearBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Drawing...").setColor(Theme.textMuted);
-    this.repaintAll();
 
-    const order = Array.from(this.drawn);
+    api
+      .playKeno(this.currentBet, "GC", pickList)
+      .then((res) => {
+        this.drawn = new Set(res.result.drawn);
+        this.repaintAll();
+        this.animateReveal(res);
+      })
+      .catch((err) => this.handlePlayError(err));
+  }
+
+  private animateReveal(res: Awaited<ReturnType<typeof api.playKeno>>) {
+    const order = res.result.drawn;
     let step = 0;
     this.drawTimer = this.time.addEvent({
       delay: 160,
@@ -377,23 +433,18 @@ export class KenoScene extends Phaser.Scene {
         if (this.cellState(idx) === "hit") popIn(this, this.cells[idx].container);
         step++;
         if (step >= order.length) {
-          this.resolveRound();
+          this.resolveRound(res);
         }
       }
     });
   }
 
-  private resolveRound() {
-    const picksCount = this.picks.size;
-    let hits = 0;
-    this.picks.forEach((idx) => {
-      if (this.drawn.has(idx)) hits++;
-    });
+  private resolveRound(res: Awaited<ReturnType<typeof api.playKeno>>) {
+    gameState.hydrateFromServer(res.user);
 
-    const multiplier = multiplierFor(picksCount, hits);
-    const payout = Math.round(this.currentBet * multiplier);
+    const { hits, multiplier, payout } = res.result;
+    const picksCount = res.result.picks.length;
     if (payout > 0) {
-      gameState.goldCoins += payout;
       this.messageText
         .setText(`${hits}/${picksCount} matched - ${multiplier}x! +${payout} GC`)
         .setColor(Theme.textAccent);
@@ -409,6 +460,22 @@ export class KenoScene extends Phaser.Scene {
     this.quickPickBtn?.setEnabled(true);
     this.clearBtn?.setEnabled(true);
     this.betControl?.setEnabled(true);
+  }
+
+  private handlePlayError(err: unknown) {
+    this.drawing = false;
+    this.drawBtn?.setEnabled(true);
+    this.quickPickBtn?.setEnabled(true);
+    this.clearBtn?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
   }
 
   private updateBalance() {

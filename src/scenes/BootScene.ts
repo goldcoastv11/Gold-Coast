@@ -5,14 +5,18 @@ import { SKIN_CATALOG } from "../GameState";
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
  * character spritesheets and every purchasable skin.
  *
- * "Bright Social-Hub" reskin (task #23, per STYLE_GUIDE.md / task #21):
- * floor/wall/nature tiles now come from Kenney's "RPG Urban Pack" (CC0,
- * public/assets/kenney_rpg_urban_pack) - 16x16 tiles, already the native
- * scale `OverworldScene`'s TILE constant assumes, so no station spacing
- * changes were needed. Table/machine furniture (roulette, slots, blackjack,
- * coinflip, dragon pedestal) has no equivalent in that pack - per
- * STYLE_GUIDE.md's scope note these stay on the old Jephed-pack art for now.
- * See STYLE_GUIDE.md for the tile-index reference and palette.
+ * Task #41: reverted the #23/#40 environment reskin (floor/wall/ground
+ * tiles + the procedurally-drawn furniture texture palette) back to the
+ * original pre-reskin Jephed tileset / dark-casino colors, per explicit
+ * user request after seeing the bright reskin live. This is a floor/wall/
+ * furniture-texture-only revert - Theme.ts/uiHelpers.ts (chrome's bright UI
+ * palette) and the player/NPC/dealer character spritesheets below
+ * (characters' Kenney rig) are deliberately left as the new look; they
+ * weren't part of this request. The new Kenney-sourced decorative props
+ * (bench_prop/lamp_post/market_stall/hedge/tree_accent, still loaded below)
+ * were similarly left alone - not explicitly in scope for #41 - but note
+ * they're bright pack pieces now sitting on the reverted dark floor; see
+ * the #41 report for the mismatch flag raised about that.
  */
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -20,25 +24,14 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    // Ground/wall/nature tiles - Kenney RPG Urban Pack (CC0), 16x16 native.
-    // Picked by measuring per-tile pixel stddev across the pack's ground/
-    // plaza candidates and favoring the flattest ones - user feedback during
-    // #23 flagged the first pass (tile_0087/0064/0009) as too busy underfoot;
-    // those turned out to have a baked-in edge-highlight border on specific
-    // sides (a sharp ~20-unit brightness jump, invisible at a glance but
-    // measurable) rather than being genuinely flat interior fills. Swapped
-    // for tiles confirmed low-variance (stddev ~5-7 out of a 0-33 range
-    // across ~230 candidate tiles, vs. ~32 for the ones they replaced).
-    // tile_0028: plain mint-teal grass fill, stddev 5.2 (matches STYLE_GUIDE Primary #3BD2AB)
-    this.load.image("floor_tan", "assets/kenney_rpg_urban_pack/Tiles/tile_0028.png");
-    // tile_0109: warm sand/tan plaza-path interior fill, stddev 7.2, no baked-in border
-    this.load.image("carpet_red", "assets/kenney_rpg_urban_pack/Tiles/tile_0109.png");
-    // tile_0117: cool gray-blue plaza-path interior fill, stddev 5.3, no baked-in border
-    this.load.image("carpet_blue", "assets/kenney_rpg_urban_pack/Tiles/tile_0117.png");
-    // tile_0036: flat lavender-gray stone fill, stddev 0 (perfectly solid), used as the perimeter wall
-    this.load.image("wall", "assets/kenney_rpg_urban_pack/Tiles/tile_0036.png");
-    // tile_0260: single mint-green tree, standalone (no ground base baked in)
-    this.load.image("plant", "assets/kenney_rpg_urban_pack/Tiles/tile_0260.png");
+    // Environment tiles - task #41 reverted these back to the original
+    // Jephed pack (public/assets/tiles/), the pre-#23 art. See git history
+    // (commit edeeb23, pre-reskin) for the exact prior state this restores.
+    this.load.image("floor_tan", "assets/tiles/floor_tan.png");
+    this.load.image("carpet_red", "assets/tiles/carpet_red.png");
+    this.load.image("carpet_blue", "assets/tiles/carpet_blue.png");
+    this.load.image("wall", "assets/tiles/wall.png");
+    this.load.image("plant", "assets/tiles/plant.png");
 
     // New social-hub dressing for OverworldScene's buildDecorations() -
     // benches/lamp posts/market stalls/hedges (STYLE_GUIDE direction note 4:
@@ -117,45 +110,23 @@ export class BootScene extends Phaser.Scene {
     this.scene.start("LoginScene");
   }
 
-  /**
-   * Shared recolor palette for every drawn placeholder texture below, pulled
-   * straight from STYLE_GUIDE.md's sampled UI color table so the cabinet art
-   * matches Theme.ts (task #22) instead of the old dark-neon-casino hexes.
-   * Direction note 2: warm dark brown/maroon outlines, never pure black.
-   */
-  private static readonly PALETTE = {
-    cabinetBody: 0xfdf3e1, // warm off-white (STYLE_GUIDE "Panel / card fill")
-    cabinetBorder: 0x5c2e22, // warm dark-brown outline (direction note 2)
-    screenBg: 0x2b2340, // deep plum-navy (STYLE_GUIDE "Text - primary") - inset "screen" fill
-    structure: 0xdc8652, // terracotta (direction note 5, "warm wood + cheerful roofs")
-    coral: 0xff7143, // accent (STYLE_GUIDE "Accent")
-    gold: 0xf5aa57, // accent-warm gold-orange (STYLE_GUIDE "Accent-warm")
-    success: 0x42dfab, // STYLE_GUIDE "Success / positive"
-    danger: 0xc2504d, // STYLE_GUIDE "Danger / warning"
-    mint: 0x3bd2ab, // STYLE_GUIDE "Primary"
-    sky: 0x59b6d8, // STYLE_GUIDE "Secondary"
-    sand: 0xc6bc9f, // STYLE_GUIDE "Neutral sand"
-    cardFace: 0xfdf9f0
-  } as const;
-
-  /** A simple drawn door, recolored to the bright social-hub palette. */
+  /** A simple drawn door - replaces the earlier placeholder "sign" look. */
   private createExitDoorTexture() {
     const w = 40;
     const h = 48;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
     // door frame
-    g.fillStyle(P.cabinetBorder, 1);
+    g.fillStyle(0x3a2418, 1);
     g.fillRoundedRect(0, 0, w, h, 4);
     // door panel
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x6b4226, 1);
     g.fillRoundedRect(4, 4, w - 8, h - 8, 3);
     // panel inset lines
-    g.lineStyle(2, P.cabinetBorder, 0.6);
+    g.lineStyle(2, 0x4a2e18, 1);
     g.strokeRoundedRect(9, 9, w - 18, h / 2 - 10, 2);
     g.strokeRoundedRect(9, h / 2 + 1, w - 18, h / 2 - 10, 2);
     // doorknob
-    g.fillStyle(P.gold, 1);
+    g.fillStyle(0xffd54f, 1);
     g.fillCircle(w - 11, h / 2, 2.5);
     g.generateTexture("exit_door", w, h);
     g.destroy();
@@ -170,14 +141,13 @@ export class BootScene extends Phaser.Scene {
   private createMinesTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x0b0d12, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
     const cell = 7;
@@ -188,12 +158,12 @@ export class BootScene extends Phaser.Scene {
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
         const isMine = r === 1 && c === 1;
-        g.fillStyle(isMine ? P.danger : P.success, 1);
+        g.fillStyle(isMine ? 0xff5252 : 0x00e676, 1);
         g.fillRoundedRect(startX + c * (cell + gap), startY + r * (cell + gap), cell, cell, 1.5);
       }
     }
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("mines_machine", w, h);
     g.destroy();
@@ -202,14 +172,13 @@ export class BootScene extends Phaser.Scene {
   private createDiceTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x3a2418, 1);
     g.fillRoundedRect(10, h - 18, w - 20, 14, 3);
-    g.fillStyle(0x1f8f6d, 1); // darker mint felt, keeps contrast with white dice
+    g.fillStyle(0x1b5e3a, 1);
     g.fillRoundedRect(2, h - 42, w - 4, 26, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(2, h - 42, w - 4, 26, 6);
 
     this.drawDie(g, 12, h - 36, 14, 5);
@@ -219,15 +188,14 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  /** Draws a single white die with dark pips for the given face value (3 or 5 used here). */
+  /** Draws a single white die with black pips for the given face value (3 or 5 used here). */
   private drawDie(g: Phaser.GameObjects.Graphics, x: number, y: number, size: number, value: number) {
-    const P = BootScene.PALETTE;
-    g.fillStyle(P.cardFace, 1);
+    g.fillStyle(0xffffff, 1);
     g.fillRoundedRect(x, y, size, size, 3);
-    g.lineStyle(1, P.sand, 1);
+    g.lineStyle(1, 0x999999, 1);
     g.strokeRoundedRect(x, y, size, size, 3);
 
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x1a1d24, 1);
     const cx = x + size / 2;
     const cy = y + size / 2;
     const o = size * 0.25;
@@ -253,27 +221,26 @@ export class BootScene extends Phaser.Scene {
   private createLimboTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
 
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x0b0d12, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
-    g.lineStyle(3, P.gold, 1);
+    g.lineStyle(3, 0xffd54f, 1);
     g.beginPath();
     g.moveTo(13, 42);
     g.lineTo(24, 30);
     g.lineTo(33, 20);
     g.strokePath();
-    g.fillStyle(P.gold, 1);
+    g.fillStyle(0xffd54f, 1);
     g.fillTriangle(33, 18, 27, 22, 33, 26);
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("limbo_machine", w, h);
     g.destroy();
@@ -282,15 +249,14 @@ export class BootScene extends Phaser.Scene {
   private createPlinkoTexture() {
     const w = 64;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
 
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x171a22, 1);
     g.fillRoundedRect(2, 4, w - 4, h - 18, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x2a2f3a, 1);
     g.strokeRoundedRect(2, 4, w - 4, h - 18, 6);
 
-    g.fillStyle(P.cabinetBorder, 1);
+    g.fillStyle(0x8a92a3, 1);
     const rows = 5;
     for (let r = 0; r < rows; r++) {
       const count = r + 2;
@@ -302,14 +268,14 @@ export class BootScene extends Phaser.Scene {
       }
     }
 
-    const slotColors = [P.danger, P.gold, P.success, P.gold, P.danger];
+    const slotColors = [0xff5252, 0xffd54f, 0x00e676, 0xffd54f, 0xff5252];
     const slotW = (w - 8) / slotColors.length;
     slotColors.forEach((color, i) => {
       g.fillStyle(color, 1);
       g.fillRect(4 + i * slotW, h - 24, slotW - 1, 6);
     });
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(w / 2 - 10, h - 10, 20, 8, 3);
     g.generateTexture("plinko_board", w, h);
     g.destroy();
@@ -319,14 +285,13 @@ export class BootScene extends Phaser.Scene {
   private createKenoTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x0b0d12, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
     const cell = 5;
@@ -341,13 +306,13 @@ export class BootScene extends Phaser.Scene {
     let i = 0;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        g.fillStyle(highlighted.has(i) ? P.gold : P.success, 1);
+        g.fillStyle(highlighted.has(i) ? 0xffd54f : 0x00e676, 1);
         g.fillRoundedRect(startX + c * (cell + gap), startY + r * (cell + gap), cell, cell, 1);
         i++;
       }
     }
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("keno_machine", w, h);
     g.destroy();
@@ -357,17 +322,16 @@ export class BootScene extends Phaser.Scene {
   private createWheelTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
     const cx = w / 2;
     const cy = 30;
     const radius = 14;
-    const colors = [P.success, P.gold, P.danger, P.cardFace, P.sky, P.coral, P.mint, P.cardFace];
+    const colors = [0x00e676, 0xffd54f, 0xff5252, 0xffffff, 0x00e676, 0xffd54f, 0xff5252, 0xffffff];
     const slice = (Math.PI * 2) / colors.length;
     colors.forEach((color, i) => {
       g.fillStyle(color, 1);
@@ -377,12 +341,12 @@ export class BootScene extends Phaser.Scene {
       g.closePath();
       g.fillPath();
     });
-    g.lineStyle(1.5, P.cabinetBorder, 1);
+    g.lineStyle(1.5, 0x0e1015, 1);
     g.strokeCircle(cx, cy, radius);
-    g.fillStyle(P.cardFace, 1);
+    g.fillStyle(0xffffff, 1);
     g.fillTriangle(cx - 3, cy - radius - 6, cx + 3, cy - radius - 6, cx, cy - radius + 1);
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("wheel_machine", w, h);
     g.destroy();
@@ -396,31 +360,30 @@ export class BootScene extends Phaser.Scene {
   private createHiLoTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x0b0d12, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
     // two overlapping mini playing cards
-    g.fillStyle(P.cardFace, 1);
+    g.fillStyle(0xf5f2ea, 1);
     g.fillRoundedRect(14, 20, 14, 20, 2);
     g.fillRoundedRect(21, 24, 14, 20, 2);
-    g.lineStyle(1, P.cabinetBorder, 1);
+    g.lineStyle(1, 0x0e1015, 1);
     g.strokeRoundedRect(14, 20, 14, 20, 2);
     g.strokeRoundedRect(21, 24, 14, 20, 2);
 
     // up/down arrow between them
-    g.fillStyle(P.success, 1);
+    g.fillStyle(0x00e676, 1);
     g.fillTriangle(40, 22, 36, 28, 44, 28);
-    g.fillStyle(P.danger, 1);
+    g.fillStyle(0xff5252, 1);
     g.fillTriangle(40, 44, 36, 38, 44, 38);
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("hilo_table", w, h);
     g.destroy();
@@ -430,32 +393,31 @@ export class BootScene extends Phaser.Scene {
   private createBaccaratTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
-    // mint felt playing surface
-    g.fillStyle(0x1f8f6d, 1);
+    // green felt playing surface
+    g.fillStyle(0x0f3d24, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
-    g.lineStyle(1, P.gold, 0.6);
+    g.lineStyle(1, 0xffd54f, 0.6);
     g.strokeRoundedRect(9, 16, w - 18, 30, 4);
 
     // two mini cards (player/banker)
-    g.fillStyle(P.cardFace, 1);
+    g.fillStyle(0xf5f2ea, 1);
     g.fillRoundedRect(13, 22, 10, 15, 2);
     g.fillRoundedRect(25, 22, 10, 15, 2);
-    g.lineStyle(1, P.cabinetBorder, 1);
+    g.lineStyle(1, 0x0e1015, 1);
     g.strokeRoundedRect(13, 22, 10, 15, 2);
     g.strokeRoundedRect(25, 22, 10, 15, 2);
-    g.fillStyle(P.danger, 1);
+    g.fillStyle(0xc62828, 1);
     g.fillCircle(18, 29, 1.6);
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x1a1a1a, 1);
     g.fillCircle(30, 29, 1.6);
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("baccarat_table", w, h);
     g.destroy();
@@ -465,15 +427,14 @@ export class BootScene extends Phaser.Scene {
   private createVideoPokerTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
-    g.fillStyle(P.cabinetBody, 1);
+    g.fillStyle(0x2a2f3a, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
 
     // screen
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x0b0d12, 1);
     g.fillRoundedRect(9, 15, w - 18, 24, 4);
 
     // five tiny cards on the screen
@@ -483,12 +444,12 @@ export class BootScene extends Phaser.Scene {
     const totalW = 5 * cardW + 4 * cardGap;
     const startX = w / 2 - totalW / 2;
     for (let i = 0; i < 5; i++) {
-      g.fillStyle(P.cardFace, 1);
+      g.fillStyle(0xf5f2ea, 1);
       g.fillRoundedRect(startX + i * (cardW + cardGap), 20, cardW, cardH, 1);
     }
 
     // control buttons row
-    const btnColors = [P.danger, P.success, P.success, P.success, P.gold];
+    const btnColors = [0xff5252, 0x00e676, 0x00e676, 0x00e676, 0xffd54f];
     const btnW = 4;
     const btnGap = 1.5;
     const btnTotal = 5 * btnW + 4 * btnGap;
@@ -498,7 +459,7 @@ export class BootScene extends Phaser.Scene {
       g.fillRoundedRect(btnStartX + i * (btnW + btnGap), 42, btnW, 4, 1);
     });
 
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
     g.generateTexture("video_poker_machine", w, h);
     g.destroy();
@@ -513,21 +474,20 @@ export class BootScene extends Phaser.Scene {
   private createComingSoonTexture() {
     const w = 48;
     const h = 64;
-    const P = BootScene.PALETTE;
     const g = this.add.graphics();
 
     // signpost
-    g.fillStyle(P.structure, 1);
+    g.fillStyle(0x3a2418, 1);
     g.fillRect(w / 2 - 4, 34, 8, 26);
 
     // sign board
-    g.fillStyle(P.gold, 1);
+    g.fillStyle(0xffd54f, 1);
     g.fillRoundedRect(4, 6, w - 8, 32, 6);
-    g.lineStyle(2, P.cabinetBorder, 1);
+    g.lineStyle(2, 0x0e1015, 1);
     g.strokeRoundedRect(4, 6, w - 8, 32, 6);
 
     // exclamation mark
-    g.fillStyle(P.screenBg, 1);
+    g.fillStyle(0x1a1d24, 1);
     g.fillRoundedRect(w / 2 - 3, 12, 6, 15, 3);
     g.fillCircle(w / 2, 32, 3.2);
 

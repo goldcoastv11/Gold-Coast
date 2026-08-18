@@ -2,10 +2,12 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 const ROWS = 6;
 const TILES_PER_ROW = 4;
-// Cumulative payout multiplier after successfully clearing row i (0-indexed)
+// Cumulative payout multiplier after successfully clearing row i (0-indexed) - must match server/src/games/dragontower.ts's DRAGON_TOWER_MULTIPLIERS (cosmetic copy only; the server is authoritative and always returns the real number).
 const MULTIPLIERS = [1.3, 1.8, 2.7, 4, 7, 12];
 
 const TILE_SIZE = 38;
@@ -20,9 +22,13 @@ interface TileVisual {
 }
 
 export class DragonTowerScene extends Phaser.Scene {
-  private badIndexPerRow: number[] = [];
   private currentRow = 0;
   private active = false;
+  /** True while a start/pick/cash-out request is in flight - blocks further input without ending the run. */
+  private busy = false;
+  private roundId: string | null = null;
+  /** Column picked at each cleared row so far - remembered client-side purely to redraw a "safe" mark on those tiles once the round ends and badIndexPerRow is revealed (the server never needs this back). */
+  private pickedColPerRow: number[] = [];
   private tiles: TileVisual[][] = [];
 
   private messageText!: Phaser.GameObjects.Text;
@@ -30,8 +36,8 @@ export class DragonTowerScene extends Phaser.Scene {
   private balanceText!: Phaser.GameObjects.Text;
   private startBtn?: UIButton;
   private cashOutBtn?: UIButton;
+  private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
-  private currentBet = 0;
 
   constructor() {
     super("DragonTowerScene");
@@ -39,8 +45,10 @@ export class DragonTowerScene extends Phaser.Scene {
 
   create() {
     this.active = false;
+    this.busy = false;
     this.currentRow = 0;
-    this.badIndexPerRow = [];
+    this.roundId = null;
+    this.pickedColPerRow = [];
     this.tiles = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
@@ -97,8 +105,8 @@ export class DragonTowerScene extends Phaser.Scene {
     this.cashOutBtn.setEnabled(false);
     this.cashOutBtn.container.setVisible(false);
 
-    makeButton(this, 400, 550, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+    this.walkAwayBtn = makeButton(this, 400, 550, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
+      this.leaveGame()
     );
 
     this.buildEmptyTowerVisuals();
@@ -166,34 +174,93 @@ export class DragonTowerScene extends Phaser.Scene {
     else label.setText("").setColor(Theme.textMuted);
   }
 
+  /**
+   * #36: the bad tile per row and the climb/cash-out math are resolved
+   * server-side (POST /games/dragontower/start|pick|cashout) - this scene
+   * only ever learns which tile was bad once the server's response says so
+   * (a bad pick, or the round ending via cash-out/reaching the top).
+   */
   private startRun() {
-    if (this.active) return;
+    if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
       return;
     }
 
-    this.currentBet = gameState.betAmount;
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
-
-    this.active = true;
-    this.currentRow = 0;
-    this.badIndexPerRow = Array.from({ length: ROWS }, () =>
-      Phaser.Math.Between(0, TILES_PER_ROW - 1)
-    );
-
-    this.messageText.setText("Pick a tile in the glowing row").setColor(Theme.textMuted);
-    this.multiplierText.setText("Multiplier: 1.0x");
-
-    this.startBtn?.container.setVisible(false);
+    const bet = gameState.betAmount;
+    this.busy = true;
     this.startBtn?.setEnabled(false);
-    this.cashOutBtn?.container.setVisible(false);
-    this.cashOutBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
+    this.messageText.setText("Starting...").setColor(Theme.textMuted);
 
-    this.renderTowerState();
+    this.attemptStart(bet, true);
+  }
+
+  /** Task #43: see MinesScene.attemptStart's doc comment - same one-retry ROUND_ALREADY_ACTIVE recovery pattern. */
+  private attemptStart(bet: number, allowRecovery: boolean) {
+    api
+      .startDragonTower(bet, "GC")
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.roundId = res.roundId;
+        this.active = true;
+        this.busy = false;
+        this.currentRow = 0;
+        this.pickedColPerRow = [];
+
+        this.messageText.setText("Pick a tile in the glowing row").setColor(Theme.textMuted);
+        this.multiplierText.setText("Multiplier: 1.0x");
+
+        this.startBtn?.container.setVisible(false);
+        this.startBtn?.setEnabled(false);
+        this.cashOutBtn?.container.setVisible(false);
+        this.cashOutBtn?.setEnabled(false);
+
+        this.updateBalance();
+        this.renderTowerState();
+      })
+      .catch((err) => {
+        if (allowRecovery && err instanceof ApiError && err.code === "ROUND_ALREADY_ACTIVE") {
+          api
+            .abandonRound()
+            .then((abandonRes) => {
+              gameState.hydrateFromServer(abandonRes.user);
+              this.attemptStart(bet, false);
+            })
+            .catch(() => {
+              this.busy = false;
+              this.startBtn?.setEnabled(true);
+              this.betControl?.setEnabled(true);
+              this.messageText
+                .setText("Couldn't recover an unfinished round - please try again.")
+                .setColor(Theme.textDanger);
+            });
+          return;
+        }
+        this.busy = false;
+        this.startBtn?.setEnabled(true);
+        this.betControl?.setEnabled(true);
+        this.showApiError(err, "Not enough Gold Coins!");
+      });
+  }
+
+  /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern. */
+  private leaveGame() {
+    if (!this.active) {
+      this.scene.start("OverworldScene");
+      return;
+    }
+    this.walkAwayBtn?.setEnabled(false);
+    this.startBtn?.setEnabled(false);
+    this.cashOutBtn?.setEnabled(false);
+    api
+      .abandonRound()
+      .then((res) => gameState.hydrateFromServer(res.user))
+      .catch(() => {
+        // Best-effort - see MinesScene.leaveGame's doc comment.
+      })
+      .finally(() => this.scene.start("OverworldScene"));
   }
 
   /** Repaints every tile according to current run state, and wires up clicks for the active row. */
@@ -206,11 +273,33 @@ export class DragonTowerScene extends Phaser.Scene {
 
         if (row < this.currentRow) {
           this.paintTile(tile.bg, tile.label, "safe");
-        } else if (row === this.currentRow && this.active) {
+        } else if (row === this.currentRow && this.active && !this.busy) {
           this.paintTile(tile.bg, tile.label, "active");
           tile.container.setSize(TILE_SIZE, TILE_SIZE);
           tile.container.setInteractive({ useHandCursor: true });
           tile.container.on("pointerdown", () => this.pickTile(col));
+        } else if (row === this.currentRow && this.active) {
+          this.paintTile(tile.bg, tile.label, "active");
+        } else {
+          this.paintTile(tile.bg, tile.label, "locked");
+        }
+      }
+    }
+  }
+
+  /** Reveals the full tower once a run has ended (bust, cash-out, or reached the top) - marks each row's true bad column, and "safe" on whichever column was actually picked for rows successfully cleared. */
+  private revealTower(badIndexPerRow: number[], bustedRow: number | null) {
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < TILES_PER_ROW; col++) {
+        const tile = this.tiles[row][col];
+        tile.container.removeAllListeners();
+        tile.container.disableInteractive();
+
+        const clearedThisRow = row < this.pickedColPerRow.length;
+        const isBustRow = bustedRow !== null && row === bustedRow;
+
+        if (clearedThisRow || isBustRow) {
+          this.paintTile(tile.bg, tile.label, col === badIndexPerRow[row] ? "bad" : "safe");
         } else {
           this.paintTile(tile.bg, tile.label, "locked");
         }
@@ -219,60 +308,90 @@ export class DragonTowerScene extends Phaser.Scene {
   }
 
   private pickTile(col: number) {
-    if (!this.active) return;
+    if (!this.active || this.busy || !this.roundId) return;
 
-    const row = this.currentRow;
-    const isBad = col === this.badIndexPerRow[row];
+    this.busy = true;
+    this.renderTowerState(); // repaint with clicks disabled while the request is in flight
 
-    // Reveal the whole row so the player can see what they avoided/hit
-    for (let c = 0; c < TILES_PER_ROW; c++) {
-      const tile = this.tiles[row][c];
-      tile.container.disableInteractive();
-      this.paintTile(tile.bg, tile.label, c === this.badIndexPerRow[row] ? "bad" : "safe");
-    }
+    api
+      .pickDragonTowerTile(this.roundId, col)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
 
-    if (isBad) {
-      this.active = false;
-      this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
-      this.endRun();
-      return;
-    }
+        if (res.isBad) {
+          this.active = false;
+          this.revealTower(res.badIndexPerRow ?? [], this.currentRow);
+          this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          this.updateBalance();
+          this.endRun();
+          return;
+        }
 
-    this.currentRow++;
-    const multiplier = MULTIPLIERS[this.currentRow - 1];
-    this.multiplierText.setText(`Multiplier: ${multiplier}x`);
-    popIn(this, this.multiplierText);
+        this.pickedColPerRow.push(col);
+        this.currentRow = res.currentRow ?? this.currentRow + 1;
+        this.multiplierText.setText(`Multiplier: ${res.multiplier}x`);
+        popIn(this, this.multiplierText);
 
-    if (this.currentRow >= ROWS) {
-      // reached the top - auto cash out
-      this.active = false;
-      const payout = Math.round(this.currentBet * multiplier);
-      gameState.goldCoins += payout;
-      this.messageText.setText(`Reached the top! +${payout} GC`).setColor(Theme.textAccent);
-      this.updateBalance();
-      this.endRun();
-      return;
-    }
+        if (res.reachedTop) {
+          this.active = false;
+          this.revealTower(res.badIndexPerRow ?? [], null);
+          this.messageText.setText(`Reached the top! +${res.payout ?? 0} GC`).setColor(Theme.textAccent);
+          this.updateBalance();
+          this.endRun();
+          return;
+        }
 
-    this.messageText.setText("Cash out or keep climbing").setColor(Theme.textMuted);
-    this.cashOutBtn?.container.setVisible(true);
-    this.cashOutBtn?.setEnabled(true);
-    this.renderTowerState();
+        this.messageText.setText("Cash out or keep climbing").setColor(Theme.textMuted);
+        this.cashOutBtn?.container.setVisible(true);
+        this.cashOutBtn?.setEnabled(true);
+        this.renderTowerState();
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.renderTowerState();
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
   }
 
   private cashOut() {
-    if (!this.active || this.currentRow < 1) return;
+    if (!this.active || this.busy || this.currentRow < 1 || !this.roundId) return;
 
-    const multiplier = MULTIPLIERS[this.currentRow - 1];
-    const payout = Math.round(this.currentBet * multiplier);
-    gameState.goldCoins += payout;
-    this.updateBalance();
-    this.messageText.setText(`Cashed out! +${payout} GC`).setColor(Theme.textAccent);
-    this.active = false;
-    this.endRun();
+    this.busy = true;
+    this.cashOutBtn?.setEnabled(false);
+    this.renderTowerState();
+
+    api
+      .cashOutDragonTower(this.roundId)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+        this.active = false;
+        this.revealTower(res.badIndexPerRow, null);
+        this.messageText.setText(`Cashed out! +${res.payout} GC`).setColor(Theme.textAccent);
+        this.updateBalance();
+        this.endRun();
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.cashOutBtn?.setEnabled(true);
+        this.renderTowerState();
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
+  }
+
+  private showApiError(err: unknown, insufficientBalanceMessage: string) {
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
   }
 
   private endRun() {
+    this.roundId = null;
     this.cashOutBtn?.container.setVisible(false);
     this.cashOutBtn?.setEnabled(false);
     this.startBtn?.container.setVisible(true);
@@ -280,7 +399,6 @@ export class DragonTowerScene extends Phaser.Scene {
     this.startBtn?.setLabel("NEW RUN");
     this.betControl?.setEnabled(true);
 
-    // lock out any remaining interactive tiles
     this.tiles.forEach((row) =>
       row.forEach((t) => {
         t.container.removeAllListeners();

@@ -2,38 +2,44 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 /**
  * Standard "9/6 Jacks or Better" paytable - the classic full-pay video
  * poker table (named for its Full House=9x/Flush=6x payouts), real
- * published numbers, not invented. With mathematically optimal play this
- * table returns ~99.54% RTP; actual return here depends on the player's
- * own hold choices, same as a real machine - we don't implement an
- * optimal-strategy solver, just the real deal/draw/evaluate mechanics and
- * the real paytable. Multipliers are TOTAL return per unit bet, matching
- * this codebase's `payout = bet * multiplier` convention (e.g. "Jacks or
- * Better" pays 1x = your stake back, a push - matches how a real machine
- * lists it).
+ * published numbers, not invented. Kept here purely to render the paytable
+ * strip - the server (server/src/games/videopoker.ts's
+ * VIDEO_POKER_PAYTABLE) holds the authoritative copy that actually decides
+ * payouts; this local copy MUST stay in sync with it by hand (no shared
+ * package between client/server - see server/src/games/videopoker.ts).
  */
 interface PaytableEntry {
   rank: string;
   mult: number;
-  test: (h: HandInfo) => boolean;
 }
 
 const PAYTABLE: PaytableEntry[] = [
-  { rank: "Royal Flush", mult: 250, test: (h) => h.isFlush && h.isStraight && h.highCard === 14 && !h.isWheel },
-  { rank: "Straight Flush", mult: 50, test: (h) => h.isFlush && h.isStraight },
-  { rank: "Four of a Kind", mult: 25, test: (h) => h.counts[0] === 4 },
-  { rank: "Full House", mult: 9, test: (h) => h.counts[0] === 3 && h.counts[1] === 2 },
-  { rank: "Flush", mult: 6, test: (h) => h.isFlush },
-  { rank: "Straight", mult: 4, test: (h) => h.isStraight },
-  { rank: "Three of a Kind", mult: 3, test: (h) => h.counts[0] === 3 },
-  { rank: "Two Pair", mult: 2, test: (h) => h.counts[0] === 2 && h.counts[1] === 2 },
-  { rank: "Jacks or Better", mult: 1, test: (h) => h.counts[0] === 2 && h.pairValue >= 11 },
-  { rank: "Nothing", mult: 0, test: () => true }
+  { rank: "Royal Flush", mult: 250 },
+  { rank: "Straight Flush", mult: 50 },
+  { rank: "Four of a Kind", mult: 25 },
+  { rank: "Full House", mult: 9 },
+  { rank: "Flush", mult: 6 },
+  { rank: "Straight", mult: 4 },
+  { rank: "Three of a Kind", mult: 3 },
+  { rank: "Two Pair", mult: 2 },
+  { rank: "Jacks or Better", mult: 1 },
+  { rank: "Nothing", mult: 0 }
 ];
 
+// #36: the deck, the dealt/drawn hand, and hand evaluation/payout are all
+// resolved server-side (POST /games/videopoker/deal|draw) - the server only
+// ever sends a card's rank (2-14, Ace high) and suit as a plain integer
+// (0-3, never a Unicode glyph - same "no Unicode in round state" precaution
+// as Hi-Lo/Blackjack). Unlike those two though, Video Poker's server DOES
+// track suit (it needs it for flush/straight-flush detection) - it's just
+// never rendered as-is; the client still assigns its own cosmetic suit
+// glyph purely for display, independent of the server's integer.
 const RANK_LABELS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
 const SUITS: Array<{ symbol: string; isRed: boolean }> = [
   { symbol: "♠", isRed: false },
@@ -49,56 +55,10 @@ interface Card {
   isRed: boolean;
 }
 
-interface HandInfo {
-  isFlush: boolean;
-  isStraight: boolean;
-  isWheel: boolean;
-  highCard: number;
-  counts: number[]; // group sizes, sorted descending (e.g. [3,2] for a full house)
-  pairValue: number; // value of the largest group (used for the Jacks-or-Better check)
-}
-
-function buildDeck(): Card[] {
-  const deck: Card[] = [];
-  for (let value = 2; value <= 14; value++) {
-    for (const suit of SUITS) {
-      deck.push({ value, label: RANK_LABELS[value - 2], suit: suit.symbol, isRed: suit.isRed });
-    }
-  }
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Phaser.Math.Between(0, i);
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-  return deck;
-}
-
-function evaluateHand(cards: Card[]): PaytableEntry {
-  const values = cards.map((c) => c.value).sort((a, b) => a - b);
-  const isFlush = cards.every((c) => c.suit === cards[0].suit);
-
-  const isWheel = values.join(",") === "2,3,4,5,14"; // A-2-3-4-5, the low "wheel" straight
-  let isStraight: boolean;
-  let highCard = values[4];
-  if (isWheel) {
-    isStraight = true;
-    highCard = 5;
-  } else {
-    isStraight = values.every((v, i) => i === 0 || v === values[i - 1] + 1);
-  }
-
-  const countMap = new Map<number, number>();
-  for (const v of values) countMap.set(v, (countMap.get(v) ?? 0) + 1);
-  const entries = Array.from(countMap.entries())
-    .map(([value, count]) => ({ value, count }))
-    .sort((a, b) => b.count - a.count || b.value - a.value);
-  const counts = entries.map((e) => e.count);
-  const pairValue = entries.length > 0 ? entries[0].value : 0;
-
-  const info: HandInfo = { isFlush, isStraight, isWheel, highCard, counts, pairValue };
-  for (const entry of PAYTABLE) {
-    if (entry.test(info)) return entry;
-  }
-  return PAYTABLE[PAYTABLE.length - 1];
+/** Wraps a server-given rank in a randomly-chosen cosmetic suit for display - never affects scoring. */
+function displayCard(value: number): Card {
+  const suit = SUITS[Phaser.Math.Between(0, SUITS.length - 1)];
+  return { value, label: RANK_LABELS[value - 2], suit: suit.symbol, isRed: suit.isRed };
 }
 
 interface CardSlot {
@@ -113,17 +73,19 @@ interface CardSlot {
 type Stage = "idle" | "holding";
 
 export class VideoPokerScene extends Phaser.Scene {
-  private deck: Card[] = [];
   private hand: Card[] = [];
   private held: boolean[] = [false, false, false, false, false];
   private stage: Stage = "idle";
-  private currentBet = 0;
+  /** True while a deal/draw request is in flight - blocks further input without ending the hand. */
+  private busy = false;
+  private roundId: string | null = null;
   private slots: CardSlot[] = [];
 
   private balanceText!: Phaser.GameObjects.Text;
   private paytableText!: Phaser.GameObjects.Text;
   private messageText!: Phaser.GameObjects.Text;
   private actionBtn?: UIButton;
+  private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
 
   constructor() {
@@ -131,10 +93,11 @@ export class VideoPokerScene extends Phaser.Scene {
   }
 
   create() {
-    this.deck = [];
     this.hand = [];
     this.held = [false, false, false, false, false];
     this.stage = "idle";
+    this.busy = false;
+    this.roundId = null;
     this.slots = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
@@ -173,8 +136,8 @@ export class VideoPokerScene extends Phaser.Scene {
       this.onActionButton()
     );
 
-    makeButton(this, 400, 436, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+    this.walkAwayBtn = makeButton(this, 400, 436, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
+      this.leaveGame()
     );
 
     this.updateBalance();
@@ -240,12 +203,13 @@ export class VideoPokerScene extends Phaser.Scene {
   }
 
   private toggleHold(index: number) {
-    if (this.stage !== "holding") return;
+    if (this.stage !== "holding" || this.busy) return;
     this.held[index] = !this.held[index];
     this.renderHand();
   }
 
   private onActionButton() {
+    if (this.busy) return;
     if (this.stage === "idle") this.deal();
     else this.draw();
   }
@@ -256,49 +220,123 @@ export class VideoPokerScene extends Phaser.Scene {
       return;
     }
 
-    this.currentBet = gameState.betAmount;
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
-
-    this.deck = buildDeck();
-    this.hand = this.deck.splice(0, 5);
-    this.held = [false, false, false, false, false];
-    this.stage = "holding";
-
-    this.renderHand();
-    this.messageText.setText("Tap cards to HOLD, then draw").setColor(Theme.textMuted);
-    this.actionBtn?.setLabel("DRAW");
+    const bet = gameState.betAmount;
+    this.busy = true;
+    this.actionBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
+    this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+
+    this.attemptDeal(bet, true);
+  }
+
+  /** Task #43: see MinesScene.attemptStart's doc comment - same one-retry ROUND_ALREADY_ACTIVE recovery pattern. */
+  private attemptDeal(bet: number, allowRecovery: boolean) {
+    api
+      .dealVideoPoker(bet, "GC")
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+        this.roundId = res.roundId;
+        this.hand = res.hand.map(displayCard);
+        this.held = [false, false, false, false, false];
+        this.stage = "holding";
+
+        this.renderHand();
+        this.messageText.setText("Tap cards to HOLD, then draw").setColor(Theme.textMuted);
+        this.actionBtn?.setLabel("DRAW");
+        this.actionBtn?.setEnabled(true);
+        this.updateBalance();
+      })
+      .catch((err) => {
+        if (allowRecovery && err instanceof ApiError && err.code === "ROUND_ALREADY_ACTIVE") {
+          api
+            .abandonRound()
+            .then((abandonRes) => {
+              gameState.hydrateFromServer(abandonRes.user);
+              this.attemptDeal(bet, false);
+            })
+            .catch(() => {
+              this.busy = false;
+              this.actionBtn?.setEnabled(true);
+              this.betControl?.setEnabled(true);
+              this.messageText
+                .setText("Couldn't recover an unfinished round - please try again.")
+                .setColor(Theme.textDanger);
+            });
+          return;
+        }
+        this.busy = false;
+        this.actionBtn?.setEnabled(true);
+        this.betControl?.setEnabled(true);
+        this.showApiError(err, "Not enough Gold Coins!");
+      });
+  }
+
+  /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern ("holding" = cards dealt, round in progress, equivalent to the other 4 scenes' `active`). */
+  private leaveGame() {
+    if (this.stage !== "holding") {
+      this.scene.start("OverworldScene");
+      return;
+    }
+    this.walkAwayBtn?.setEnabled(false);
+    this.actionBtn?.setEnabled(false);
+    api
+      .abandonRound()
+      .then((res) => gameState.hydrateFromServer(res.user))
+      .catch(() => {
+        // Best-effort - see MinesScene.leaveGame's doc comment.
+      })
+      .finally(() => this.scene.start("OverworldScene"));
   }
 
   private draw() {
-    for (let i = 0; i < 5; i++) {
-      if (!this.held[i]) {
-        this.hand[i] = this.deck.shift()!;
-      }
-    }
-    this.held = [false, false, false, false, false];
-    this.renderHand();
+    if (!this.roundId) return;
 
-    const result = evaluateHand(this.hand);
-    const payout = Math.round(this.currentBet * result.mult);
+    this.busy = true;
+    this.actionBtn?.setEnabled(false);
 
-    if (payout > 0) {
-      gameState.goldCoins += payout;
-      if (result.mult === 1) {
-        this.messageText.setText(`${result.rank} - push, bet returned`).setColor(Theme.textGold);
-      } else {
-        this.messageText.setText(`${result.rank}! +${payout} GC`).setColor(Theme.textAccent);
-        popIn(this, this.messageText);
-      }
+    api
+      .drawVideoPoker(this.roundId, this.held)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+        this.roundId = null;
+        this.hand = res.hand.map(displayCard);
+        this.held = [false, false, false, false, false];
+        this.renderHand();
+
+        if (res.payout > 0) {
+          if (res.multiplier === 1) {
+            this.messageText.setText(`${res.rank} - push, bet returned`).setColor(Theme.textGold);
+          } else {
+            this.messageText.setText(`${res.rank}! +${res.payout} GC`).setColor(Theme.textAccent);
+            popIn(this, this.messageText);
+          }
+        } else {
+          this.messageText.setText("No winning hand - you lose").setColor(Theme.textDanger);
+        }
+
+        this.updateBalance();
+        this.stage = "idle";
+        this.actionBtn?.setLabel("DEAL");
+        this.actionBtn?.setEnabled(true);
+        this.betControl?.setEnabled(true);
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.actionBtn?.setEnabled(true);
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
+  }
+
+  private showApiError(err: unknown, insufficientBalanceMessage: string) {
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
-      this.messageText.setText("No winning hand - you lose").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
     }
-
-    this.updateBalance();
-    this.stage = "idle";
-    this.actionBtn?.setLabel("DEAL");
-    this.betControl?.setEnabled(true);
   }
 
   private updateBalance() {

@@ -2,17 +2,26 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 const TARGET_MIN = 5;
 const TARGET_MAX = 95;
 const TARGET_STEP = 5;
 const DEFAULT_TARGET = 50;
-const HOUSE_EDGE_NUMERATOR = 99; // 99 instead of 100 -> ~1% house edge baked into the multiplier
+const HOUSE_EDGE_NUMERATOR = 99; // 99 instead of 100 -> ~1% house edge baked into the multiplier - mirrors server/src/games/dice.ts exactly, used here only for the live win-chance/multiplier preview before rolling
 
 const BAR_WIDTH = 340;
 const BAR_X = 400;
 const BAR_Y = 290;
 
+/**
+ * Client-side preview only, for the live "Win Chance / Multiplier" readout
+ * before the player rolls - matches server/src/games/dice.ts's
+ * diceMultiplier() exactly, but the number that actually gets paid out is
+ * always whatever the server computes in the response (#36 - the server is
+ * the trust boundary; this is display-only, never used to settle a round).
+ */
 function multiplierFor(target: number): number {
   return Math.round((HOUSE_EDGE_NUMERATOR / target) * 100) / 100;
 }
@@ -143,6 +152,15 @@ export class DiceScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * #36: the roll and payout are resolved server-side (POST
+   * /games/dice/play) - this only plays a cosmetic "spinning digits"
+   * animation while the request is in flight (real network latency, not a
+   * fixed tick count) and then reconciles to whatever the server actually
+   * returned. The local `gameState.goldCoins < betAmount` check below is
+   * just a fast-fail UX nicety; the server re-checks affordability itself
+   * and is what actually decides whether the bet is accepted.
+   */
   private roll() {
     if (this.rolling) return;
 
@@ -152,56 +170,71 @@ export class DiceScene extends Phaser.Scene {
     }
 
     const bet = gameState.betAmount;
+    const target = this.target;
     this.rolling = true;
     this.rollBtn?.setEnabled(false);
     this.minusBtn?.setEnabled(false);
     this.plusBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    gameState.goldCoins -= bet;
-    this.updateBalance();
     this.messageText.setText("Rolling...").setColor(Theme.textMuted);
 
-    let ticks = 0;
     this.rollTimer = this.time.addEvent({
       delay: 70,
-      repeat: 9,
+      loop: true,
       callback: () => {
-        if (!this.rollText.active) {
-          this.rollTimer?.remove(false);
-          return;
-        }
-        this.rollText.setText(String(Phaser.Math.Between(0, 99)));
-        ticks++;
-        if (ticks >= 9) {
-          this.resolveRoll(bet);
+        if (this.rollText.active) {
+          this.rollText.setText(String(Phaser.Math.Between(0, 99)));
         }
       }
     });
+
+    api
+      .playDice(bet, "GC", target)
+      .then((res) => this.resolveRoll(res))
+      .catch((err) => this.handleRollError(err));
   }
 
-  private resolveRoll(bet: number) {
-    const roll = Phaser.Math.Between(0, 99);
+  private resolveRoll(res: Awaited<ReturnType<typeof api.playDice>>) {
+    this.rollTimer?.remove(false);
+    this.rollTimer = undefined;
+
+    gameState.hydrateFromServer(res.user);
+
+    const { roll, target, won, payout } = res.result;
     this.lastRoll = roll;
     this.rollText.setText(String(roll));
     this.redrawZoneBar();
 
-    if (roll < this.target) {
-      const mult = multiplierFor(this.target);
-      const payout = Math.round(bet * mult);
-      gameState.goldCoins += payout;
+    if (won) {
       this.rollText.setColor(Theme.textAccent);
-      this.messageText.setText(`${roll} - under ${this.target}! +${payout} GC`).setColor(
-        Theme.textAccent
-      );
+      this.messageText.setText(`${roll} - under ${target}! +${payout} GC`).setColor(Theme.textAccent);
       popIn(this, this.rollText);
     } else {
       this.rollText.setColor(Theme.textDanger);
-      this.messageText.setText(`${roll} - not under ${this.target}, you lose`).setColor(
-        Theme.textDanger
-      );
+      this.messageText.setText(`${roll} - not under ${target}, you lose`).setColor(Theme.textDanger);
     }
 
     this.updateBalance();
+    this.rolling = false;
+    this.rollBtn?.setEnabled(true);
+    this.minusBtn?.setEnabled(true);
+    this.plusBtn?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+  }
+
+  private handleRollError(err: unknown) {
+    this.rollTimer?.remove(false);
+    this.rollTimer = undefined;
+    this.rollText.setText("--");
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
+
     this.rolling = false;
     this.rollBtn?.setEnabled(true);
     this.minusBtn?.setEnabled(true);

@@ -2,9 +2,19 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
+import type { BlackjackOutcome } from "../api/types";
 
+// #36: the deck, dealer AI, and win/payout math are all resolved
+// server-side (POST /games/blackjack/start|hit|stand) - the server only
+// ever sends a card's rank (1=A, 11=J, 12=Q, 13=K), never a suit (same
+// "no Unicode in round state" precaution as Hi-Lo, see
+// server/src/games/hilo.ts's header comment). Suit here is purely a
+// cosmetic, client-chosen-at-random display detail with no bearing on the
+// outcome.
 const SUITS = ["♠", "♥", "♦", "♣"];
-const RANKS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"];
+const RANK_LABELS = ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]; // index 0..12 for server rank 1..13
 
 interface Card {
   rank: string;
@@ -15,33 +25,24 @@ function isRed(card: Card): boolean {
   return card.suit === "♥" || card.suit === "♦";
 }
 
-function cardValue(card: Card): number {
-  if (card.rank === "A") return 11;
-  if (["J", "Q", "K"].includes(card.rank)) return 10;
-  return parseInt(card.rank, 10);
+/** Wraps a server-given rank (1-13) in a randomly-chosen cosmetic suit for display - never affects scoring. */
+function displayCard(rank: number): Card {
+  return { rank: RANK_LABELS[rank - 1], suit: SUITS[Phaser.Math.Between(0, SUITS.length - 1)] };
 }
-
-function handValue(hand: Card[]): number {
-  let total = hand.reduce((sum, c) => sum + cardValue(c), 0);
-  let aces = hand.filter((c) => c.rank === "A").length;
-  while (total > 21 && aces > 0) {
-    total -= 10; // count an Ace as 1 instead of 11
-    aces--;
-  }
-  return total;
-}
-
-type HandState = "playing" | "player_bust" | "dealer_turn" | "resolved";
 
 const CARD_W = 40;
 const CARD_H = 56;
 const CARD_GAP = 8;
 
 export class BlackjackScene extends Phaser.Scene {
-  private deck: Card[] = [];
   private playerHand: Card[] = [];
+  /** Index 0 is always the up-card, cached from the initial deal response so it never visually changes suit when the rest of the hand is revealed later. */
   private dealerHand: Card[] = [];
-  private state: HandState = "playing";
+  private dealerHoleHidden = true;
+  private active = false;
+  /** True while a start/hit/stand request is in flight - blocks further input without ending the hand. */
+  private busy = false;
+  private roundId: string | null = null;
 
   private dealerCardObjects: Phaser.GameObjects.GameObject[] = [];
   private playerCardObjects: Phaser.GameObjects.GameObject[] = [];
@@ -53,14 +54,20 @@ export class BlackjackScene extends Phaser.Scene {
   private hitBtn?: UIButton;
   private standBtn?: UIButton;
   private newHandBtn?: UIButton;
+  private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
-  private currentBet = 0;
 
   constructor() {
     super("BlackjackScene");
   }
 
   create() {
+    this.playerHand = [];
+    this.dealerHand = [];
+    this.dealerHoleHidden = true;
+    this.active = false;
+    this.busy = false;
+    this.roundId = null;
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
     makePanel(this, 400, 300, 560, 520);
@@ -77,11 +84,6 @@ export class BlackjackScene extends Phaser.Scene {
     this.add.image(400, 300, "blackjack_table").setDisplaySize(560, 320).setAlpha(0.85);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
-    // Scale 4.8 (not the old 2.4) - the #24 character reskin dropped the
-    // sheet's frame size from 21x32 to 16x16 (square), so 2.4 now renders
-    // noticeably too small. 4.8 = old display height (32*2.4=76.8px) / new
-    // frame height (16px), preserving how big the dealer used to look
-    // on-screen rather than guessing a new number from scratch.
     const dealer = this.add.sprite(95, 150, "dealer_sheet", 1).setScale(4.8);
     dealer.play("dealer_walk_down");
 
@@ -125,139 +127,210 @@ export class BlackjackScene extends Phaser.Scene {
       540,
       150,
       44,
-      "NEW HAND",
+      "DEAL",
       Theme.accent,
       Theme.accentHover,
       () => this.startNewHand()
     );
 
-    makeButton(this, 130, 540, 150, 38, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+    this.walkAwayBtn = makeButton(this, 130, 540, 150, 38, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
+      this.leaveGame()
     );
 
     this.betControl = makeBetControl(this, 400, 580, () => {});
 
-    this.startNewHand();
-  }
-
-  private buildShuffledDeck(): Card[] {
-    const deck: Card[] = [];
-    for (const suit of SUITS) {
-      for (const rank of RANKS) {
-        deck.push({ rank, suit });
-      }
-    }
-    // simple Fisher-Yates shuffle
-    for (let i = deck.length - 1; i > 0; i--) {
-      const j = Phaser.Math.Between(0, i);
-      [deck[i], deck[j]] = [deck[j], deck[i]];
-    }
-    return deck;
+    this.messageText.setText("Press DEAL to start a hand");
+    this.setActionButtonsVisible(false);
+    this.renderHands();
+    this.updateBalance();
   }
 
   private startNewHand() {
+    if (this.active || this.busy) return;
+
     if (gameState.goldCoins < gameState.betAmount) {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
-      this.setActionButtonsVisible(false);
-      this.updateBalance();
       return;
     }
 
-    this.currentBet = gameState.betAmount;
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
-
-    this.deck = this.buildShuffledDeck();
-    this.playerHand = [this.drawCard(), this.drawCard()];
-    this.dealerHand = [this.drawCard(), this.drawCard()];
-    this.state = "playing";
-
-    this.messageText.setText("");
-    this.setActionButtonsVisible(true);
-    this.newHandBtn?.container.setVisible(false);
+    const bet = gameState.betAmount;
+    this.busy = true;
     this.newHandBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
+    this.messageText.setText("Dealing...").setColor(Theme.textMuted);
 
-    this.renderHands();
-
-    // Natural blackjack check
-    if (handValue(this.playerHand) === 21) {
-      this.stand();
-    }
+    this.attemptStart(bet, true);
   }
 
-  private drawCard(): Card {
-    const card = this.deck.pop();
-    if (!card) {
-      // extremely unlikely with a single 52-card deck in one hand, but stay safe
-      this.deck = this.buildShuffledDeck();
-      return this.deck.pop()!;
+  /** Task #43: see MinesScene.attemptStart's doc comment - same one-retry ROUND_ALREADY_ACTIVE recovery pattern. */
+  private attemptStart(bet: number, allowRecovery: boolean) {
+    api
+      .startBlackjack(bet, "GC")
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+        this.roundId = res.roundId;
+
+        this.playerHand = res.state.playerHand.map(displayCard);
+        this.dealerHand = [displayCard(res.state.dealerUpCard)];
+        this.dealerHoleHidden = res.state.status === "playing";
+
+        if (res.state.status === "resolved") {
+          // Natural blackjack - the round auto-stood, dealer's hole card is
+          // already revealed.
+          this.dealerHand = this.revealDealerHand(res.state.dealerHand ?? []);
+          this.active = false;
+          this.resolveMessage(res.state.outcome, res.payout ?? 0);
+          this.endHand();
+        } else {
+          this.active = true;
+          this.messageText.setText("");
+          this.setActionButtonsVisible(true);
+          this.newHandBtn?.container.setVisible(false);
+          this.newHandBtn?.setEnabled(false);
+        }
+
+        this.updateBalance();
+        this.renderHands();
+      })
+      .catch((err) => {
+        if (allowRecovery && err instanceof ApiError && err.code === "ROUND_ALREADY_ACTIVE") {
+          api
+            .abandonRound()
+            .then((abandonRes) => {
+              gameState.hydrateFromServer(abandonRes.user);
+              this.attemptStart(bet, false);
+            })
+            .catch(() => {
+              this.busy = false;
+              this.newHandBtn?.setEnabled(true);
+              this.betControl?.setEnabled(true);
+              this.messageText
+                .setText("Couldn't recover an unfinished round - please try again.")
+                .setColor(Theme.textDanger);
+            });
+          return;
+        }
+        this.busy = false;
+        this.newHandBtn?.setEnabled(true);
+        this.betControl?.setEnabled(true);
+        this.showApiError(err, "Not enough Gold Coins!");
+      });
+  }
+
+  /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern. */
+  private leaveGame() {
+    if (!this.active) {
+      this.scene.start("OverworldScene");
+      return;
     }
-    return card;
+    this.walkAwayBtn?.setEnabled(false);
+    this.setActionButtonsVisible(false);
+    api
+      .abandonRound()
+      .then((res) => gameState.hydrateFromServer(res.user))
+      .catch(() => {
+        // Best-effort - see MinesScene.leaveGame's doc comment.
+      })
+      .finally(() => this.scene.start("OverworldScene"));
+  }
+
+  /** Reveals the dealer's full hand once the server sends it - reuses the already-displayed up-card (index 0) so it never visually changes suit, and picks fresh cosmetic suits for the rest. */
+  private revealDealerHand(fullRanks: number[]): Card[] {
+    const upCard = this.dealerHand[0];
+    return [upCard, ...fullRanks.slice(1).map(displayCard)];
   }
 
   private hit() {
-    if (this.state !== "playing") return;
-    this.playerHand.push(this.drawCard());
+    if (!this.active || this.busy || !this.roundId) return;
 
-    const total = handValue(this.playerHand);
-    if (total > 21) {
-      this.state = "player_bust";
-      this.renderHands();
-      this.messageText.setText("Bust! You lose.").setColor(Theme.textDanger);
-      this.endHand();
-    } else {
-      this.renderHands();
-    }
+    this.busy = true;
+    this.setActionButtonsVisible(false);
+
+    api
+      .hitBlackjack(this.roundId)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+
+        const newRank = res.state.playerHand[res.state.playerHand.length - 1];
+        this.playerHand.push(displayCard(newRank));
+
+        if (res.state.status === "resolved") {
+          this.active = false;
+          this.dealerHand = this.revealDealerHand(res.state.dealerHand ?? []);
+          this.dealerHoleHidden = false;
+          this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          this.updateBalance();
+          this.endHand();
+        } else {
+          this.setActionButtonsVisible(true);
+        }
+
+        this.renderHands();
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.setActionButtonsVisible(this.active);
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
   }
 
   private stand() {
-    if (this.state !== "playing") return;
-    this.state = "dealer_turn";
+    if (!this.active || this.busy || !this.roundId) return;
 
-    while (handValue(this.dealerHand) < 17) {
-      this.dealerHand.push(this.drawCard());
-    }
+    this.busy = true;
+    this.setActionButtonsVisible(false);
 
-    this.resolveHand();
+    api
+      .standBlackjack(this.roundId)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+        this.active = false;
+
+        this.dealerHand = this.revealDealerHand(res.state.dealerHand ?? []);
+        this.dealerHoleHidden = false;
+        this.resolveMessage(res.state.outcome, res.payout);
+        this.updateBalance();
+        this.endHand();
+        this.renderHands();
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.setActionButtonsVisible(this.active);
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
   }
 
-  private resolveHand() {
-    const playerTotal = handValue(this.playerHand);
-    const dealerTotal = handValue(this.dealerHand);
-
-    let outcome: "win" | "lose" | "push";
-    if (dealerTotal > 21 || playerTotal > dealerTotal) {
-      outcome = "win";
-    } else if (playerTotal === dealerTotal) {
-      outcome = "push";
-    } else {
-      outcome = "lose";
-    }
-
+  private resolveMessage(outcome: BlackjackOutcome | null, payout: number) {
     if (outcome === "win") {
-      const payout = this.currentBet * 2;
-      gameState.goldCoins += payout;
       this.messageText.setText(`You win! +${payout} GC`).setColor(Theme.textAccent);
       popIn(this, this.messageText);
     } else if (outcome === "push") {
-      gameState.goldCoins += this.currentBet;
       this.messageText.setText("Push - bet returned").setColor(Theme.textMuted);
     } else {
       this.messageText.setText("Dealer wins").setColor(Theme.textDanger);
     }
+  }
 
-    this.state = "resolved";
-    this.renderHands();
-    this.endHand();
+  private showApiError(err: unknown, insufficientBalanceMessage: string) {
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
   }
 
   private endHand() {
+    this.roundId = null;
     this.setActionButtonsVisible(false);
     this.newHandBtn?.container.setVisible(true);
     this.newHandBtn?.setEnabled(true);
+    this.newHandBtn?.setLabel("NEW HAND");
     this.betControl?.setEnabled(true);
-    this.updateBalance();
   }
 
   private setActionButtonsVisible(visible: boolean) {
@@ -268,13 +341,20 @@ export class BlackjackScene extends Phaser.Scene {
   }
 
   private renderHands() {
-    const showDealerHole = this.state === "playing";
-
-    this.drawHand(this.dealerCardObjects, this.dealerHand, 400, 190, showDealerHole);
+    this.drawHand(this.dealerCardObjects, this.dealerHand, 400, 190, this.dealerHoleHidden);
     this.drawHand(this.playerCardObjects, this.playerHand, 400, 400, false);
 
-    this.dealerTotalText.setText(showDealerHole ? "Dealer" : `Dealer: ${handValue(this.dealerHand)}`);
-    this.playerTotalText.setText(`You: ${handValue(this.playerHand)}`);
+    this.dealerTotalText.setText(this.dealerHoleHidden ? "Dealer" : `Dealer: ${this.dealerTotal()}`);
+    this.playerTotalText.setText(this.playerHand.length > 0 ? `You: ${this.playerTotal()}` : "");
+  }
+
+  /** Client-side display-only total (server always computes the authoritative one for payout) - fine here since suit never affects value and rank labels round-trip cleanly. */
+  private playerTotal(): number {
+    return handValueFromDisplay(this.playerHand);
+  }
+
+  private dealerTotal(): number {
+    return handValueFromDisplay(this.dealerHand);
   }
 
   /** Draws a hand as a row of real card visuals, replacing any previous cards for that hand. */
@@ -287,6 +367,8 @@ export class BlackjackScene extends Phaser.Scene {
   ) {
     existing.forEach((obj) => obj.destroy());
     existing.length = 0;
+
+    if (hand.length === 0) return;
 
     const totalWidth = hand.length * CARD_W + (hand.length - 1) * CARD_GAP;
     const startX = centerX - totalWidth / 2 + CARD_W / 2;
@@ -326,4 +408,25 @@ export class BlackjackScene extends Phaser.Scene {
       `Gold Coins: ${gameState.goldCoins}   Stake Coins: ${gameState.stakeCoins}`
     );
   }
+}
+
+/** Standard blackjack hand value (Ace-adjusting) from display cards - display-only, the server holds the authoritative total used for every payout decision. */
+function handValueFromDisplay(hand: Card[]): number {
+  let total = 0;
+  let aces = 0;
+  for (const card of hand) {
+    if (card.rank === "A") {
+      total += 11;
+      aces++;
+    } else if (card.rank === "J" || card.rank === "Q" || card.rank === "K") {
+      total += 10;
+    } else {
+      total += parseInt(card.rank, 10);
+    }
+  }
+  while (total > 21 && aces > 0) {
+    total -= 10;
+    aces--;
+  }
+  return total;
 }

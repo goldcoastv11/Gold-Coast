@@ -2,9 +2,19 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
+import type { HiLoGuess } from "../api/types";
 
-const HOUSE_EDGE = 0.02; // 2%, same edge as Mines, folded into the multiplier once at cash-out/loss time
-const MAX_MULTIPLIER = 100000; // safety cap - a 52-card deck makes astronomical streaks vanishingly rare but not impossible
+// #36: the deck, the current card, and the win/multiplier math are all
+// resolved server-side (POST /games/hilo/start|guess|cashout) - the server
+// only ever sends a card's rank (2-14, Ace high), never a suit (see
+// server/src/games/hilo.ts's header comment for why: Unicode suit glyphs
+// can't round-trip through the dev/test cluster's JSONB encoding). Suit
+// here is purely a cosmetic, client-chosen-at-random display detail with no
+// bearing on the outcome, same pattern as BaccaratScene's displayCard().
+const HOUSE_EDGE = 0.02; // display-only mirror of server/src/games/hilo.ts's HOUSE_EDGE, used to reconstruct a "would-become" preview multiplier - never used to compute an actual payout, the server always returns that number directly
+const MAX_MULTIPLIER = 100000;
 
 const RANK_LABELS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"];
 const SUITS: Array<{ symbol: string; isRed: boolean }> = [
@@ -14,53 +24,30 @@ const SUITS: Array<{ symbol: string; isRed: boolean }> = [
   { symbol: "♣", isRed: false }
 ];
 
-interface Card {
+interface DisplayCard {
   value: number; // 2-14, Ace high
   label: string;
   suit: string;
   isRed: boolean;
 }
 
-function buildDeck(): Card[] {
-  const deck: Card[] = [];
-  for (let value = 2; value <= 14; value++) {
-    for (const suit of SUITS) {
-      deck.push({ value, label: RANK_LABELS[value - 2], suit: suit.symbol, isRed: suit.isRed });
-    }
-  }
-  for (let i = deck.length - 1; i > 0; i--) {
-    const j = Phaser.Math.Between(0, i);
-    [deck[i], deck[j]] = [deck[j], deck[i]];
-  }
-  return deck;
+/** Wraps a server-given rank in a randomly-chosen cosmetic suit for display - never affects scoring. */
+function displayCard(value: number): DisplayCard {
+  const suit = SUITS[Phaser.Math.Between(0, SUITS.length - 1)];
+  return { value, label: RANK_LABELS[value - 2], suit: suit.symbol, isRed: suit.isRed };
 }
-
-/**
- * Counts how many of the still-undrawn cards would beat ("higher") or lose
- * to ("lower") the current card. Cards of the same rank count toward
- * neither - a tie loses either guess, same as most real Hi-Lo
- * implementations - so total always equals deck.length (higher+lower+ties).
- */
-function countOutcomes(current: Card, deck: Card[]): { higher: number; lower: number; total: number } {
-  let higher = 0;
-  let lower = 0;
-  for (const c of deck) {
-    if (c.value > current.value) higher++;
-    else if (c.value < current.value) lower++;
-  }
-  return { higher, lower, total: deck.length };
-}
-
-type Guess = "higher" | "lower";
 
 export class HiLoScene extends Phaser.Scene {
-  private deck: Card[] = [];
-  private currentCard: Card | null = null;
-  private history: Card[] = [];
+  private currentCard: DisplayCard | null = null;
+  private history: DisplayCard[] = [];
   private correctGuesses = 0;
-  private cumulativeFair = 1; // running product of fair (1/P) factors, house edge applied only at display/payout time
+  private multiplier = 1; // authoritative, from the server's state
+  private higherCount = 0;
+  private lowerCount = 0;
   private active = false;
-  private currentBet = 0;
+  /** True while a start/guess/cash-out request is in flight - blocks further input without ending the run. */
+  private busy = false;
+  private roundId: string | null = null;
 
   private balanceText!: Phaser.GameObjects.Text;
   private multiplierText!: Phaser.GameObjects.Text;
@@ -73,6 +60,7 @@ export class HiLoScene extends Phaser.Scene {
   private lowerBtn?: UIButton;
   private startBtn?: UIButton;
   private cashOutBtn?: UIButton;
+  private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
 
   constructor() {
@@ -80,12 +68,15 @@ export class HiLoScene extends Phaser.Scene {
   }
 
   create() {
-    this.deck = [];
     this.currentCard = null;
     this.history = [];
     this.correctGuesses = 0;
-    this.cumulativeFair = 1;
+    this.multiplier = 1;
+    this.higherCount = 0;
+    this.lowerCount = 0;
     this.active = false;
+    this.busy = false;
+    this.roundId = null;
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
     makePanel(this, 400, 300, 480, 540);
@@ -165,8 +156,8 @@ export class HiLoScene extends Phaser.Scene {
       () => this.cashOut()
     );
 
-    makeButton(this, 400, 488, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+    this.walkAwayBtn = makeButton(this, 400, 488, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
+      this.leaveGame()
     );
 
     this.setGuessButtonsVisible(false);
@@ -181,7 +172,7 @@ export class HiLoScene extends Phaser.Scene {
     this.lowerBtn?.container.setVisible(visible);
   }
 
-  private paintCard(card: Card | null) {
+  private paintCard(card: DisplayCard | null) {
     const w = 90;
     const h = 122;
     this.cardBg.clear();
@@ -232,143 +223,239 @@ export class HiLoScene extends Phaser.Scene {
       this.readoutText.setText("");
       return;
     }
-    const { higher, lower, total } = countOutcomes(this.currentCard, this.deck);
-    const higherPct = total > 0 ? ((higher / total) * 100).toFixed(1) : "0.0";
-    const lowerPct = total > 0 ? ((lower / total) * 100).toFixed(1) : "0.0";
-    const higherMult = higher > 0 ? (this.displayMultiplierFor(higher, total)).toFixed(2) : "-";
-    const lowerMult = lower > 0 ? (this.displayMultiplierFor(lower, total)).toFixed(2) : "-";
+    // Percentages are purely cosmetic context (out of higher+lower - ties on
+    // the same rank are excluded from both, same as the server's own
+    // countOutcomes) - the buttons' enabled state and the actual payout are
+    // both server-authoritative, this is display-only.
+    const remaining = this.higherCount + this.lowerCount;
+    const higherPct = remaining > 0 ? ((this.higherCount / remaining) * 100).toFixed(1) : "0.0";
+    const lowerPct = remaining > 0 ? ((this.lowerCount / remaining) * 100).toFixed(1) : "0.0";
+    const higherMult = this.higherCount > 0 ? this.displayMultiplierFor(this.higherCount, remaining).toFixed(2) : "-";
+    const lowerMult = this.lowerCount > 0 ? this.displayMultiplierFor(this.lowerCount, remaining).toFixed(2) : "-";
     this.readoutText.setText(
       `Higher: ${higherPct}% (${higherMult}x)      Lower: ${lowerPct}% (${lowerMult}x)`
     );
 
-    this.higherBtn?.setEnabled(higher > 0);
-    this.lowerBtn?.setEnabled(lower > 0);
+    this.higherBtn?.setEnabled(this.higherCount > 0);
+    this.lowerBtn?.setEnabled(this.lowerCount > 0);
   }
 
-  /** What the *cumulative* multiplier would become if this single guess (favorable count `count` out of `total`) hits. */
+  /** Cosmetic "would-become" preview if this guess (favorable `count` out of `total`) hits - reconstructs the server's cumulative fair-odds product from the current authoritative multiplier, so it stays in sync without the client needing to track it incrementally itself. */
   private displayMultiplierFor(count: number, total: number): number {
-    if (count <= 0) return 0;
-    const fair = this.cumulativeFair * (total / count);
+    if (count <= 0 || total <= 0) return 0;
+    const cumulativeFair = this.multiplier / (1 - HOUSE_EDGE);
+    const fair = cumulativeFair * (total / count);
     return Math.min(MAX_MULTIPLIER, fair * (1 - HOUSE_EDGE));
   }
 
-  private currentDisplayMultiplier(): number {
-    return Math.min(MAX_MULTIPLIER, Math.round(this.cumulativeFair * (1 - HOUSE_EDGE) * 100) / 100);
-  }
-
+  /**
+   * #36: the deck and win/multiplier math are resolved server-side (POST
+   * /games/hilo/start|guess|cashout) - this scene only ever knows a card's
+   * rank once the server's response says so.
+   */
   private startRun() {
-    if (this.active) return;
+    if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
       return;
     }
 
-    this.currentBet = gameState.betAmount;
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
-
-    this.deck = buildDeck();
-    this.currentCard = this.deck.pop() ?? null;
-    this.history = [];
-    this.correctGuesses = 0;
-    this.cumulativeFair = 1;
-    this.active = true;
-
-    this.paintCard(this.currentCard);
-    this.renderHistory();
-    this.multiplierText.setText("Multiplier: 1.00x");
-    this.messageText.setText("Higher or lower than this card?").setColor(Theme.textMuted);
-
-    this.startBtn?.container.setVisible(false);
+    const bet = gameState.betAmount;
+    this.busy = true;
     this.startBtn?.setEnabled(false);
-    this.cashOutBtn?.container.setVisible(false);
-    this.cashOutBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.setGuessButtonsVisible(true);
+    this.messageText.setText("Starting...").setColor(Theme.textMuted);
 
-    this.updateReadout();
+    this.attemptStart(bet, true);
   }
 
-  private guess(direction: Guess) {
-    if (!this.active || !this.currentCard) return;
+  /** Task #43: see MinesScene.attemptStart's doc comment - same one-retry ROUND_ALREADY_ACTIVE recovery pattern. */
+  private attemptStart(bet: number, allowRecovery: boolean) {
+    api
+      .startHiLo(bet, "GC")
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.roundId = res.roundId;
+        this.active = true;
+        this.busy = false;
+        this.correctGuesses = res.state.correctGuesses;
+        this.multiplier = res.state.multiplier;
+        this.higherCount = res.state.higherCount;
+        this.lowerCount = res.state.lowerCount;
+        this.currentCard = displayCard(res.state.currentCard);
+        this.history = [this.currentCard];
 
-    const { higher, lower, total } = countOutcomes(this.currentCard, this.deck);
-    const favorable = direction === "higher" ? higher : lower;
-    if (favorable <= 0 || total <= 0) return; // guarded by button enable state, but double-check
+        this.paintCard(this.currentCard);
+        this.renderHistory();
+        this.multiplierText.setText(`Multiplier: ${this.multiplier.toFixed(2)}x`);
+        this.messageText.setText("Higher or lower than this card?").setColor(Theme.textMuted);
 
-    const p = favorable / total;
-    const fairFactor = 1 / p;
+        this.startBtn?.container.setVisible(false);
+        this.startBtn?.setEnabled(false);
+        this.cashOutBtn?.container.setVisible(false);
+        this.cashOutBtn?.setEnabled(false);
+        this.setGuessButtonsVisible(true);
 
-    const nextCard = this.deck.pop();
-    if (!nextCard || !this.currentCard) return;
+        this.updateBalance();
+        this.updateReadout();
+      })
+      .catch((err) => {
+        if (allowRecovery && err instanceof ApiError && err.code === "ROUND_ALREADY_ACTIVE") {
+          api
+            .abandonRound()
+            .then((abandonRes) => {
+              gameState.hydrateFromServer(abandonRes.user);
+              this.attemptStart(bet, false);
+            })
+            .catch(() => {
+              this.busy = false;
+              this.startBtn?.setEnabled(true);
+              this.betControl?.setEnabled(true);
+              this.messageText
+                .setText("Couldn't recover an unfinished round - please try again.")
+                .setColor(Theme.textDanger);
+            });
+          return;
+        }
+        this.busy = false;
+        this.startBtn?.setEnabled(true);
+        this.betControl?.setEnabled(true);
+        this.showApiError(err, "Not enough Gold Coins!");
+      });
+  }
 
-    const won =
-      direction === "higher" ? nextCard.value > this.currentCard.value : nextCard.value < this.currentCard.value;
-
-    this.history.push(nextCard);
-
-    if (!won) {
-      this.currentCard = nextCard;
-      this.paintCard(this.currentCard);
-      this.renderHistory();
-      this.messageText.setText(`${nextCard.label}${nextCard.suit} - wrong guess. You lose your bet.`).setColor(
-        Theme.textDanger
-      );
-      this.active = false;
-      this.endRun();
+  /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern. */
+  private leaveGame() {
+    if (!this.active) {
+      this.scene.start("OverworldScene");
       return;
     }
+    this.walkAwayBtn?.setEnabled(false);
+    this.startBtn?.setEnabled(false);
+    this.cashOutBtn?.setEnabled(false);
+    this.setGuessButtonsVisible(false);
+    api
+      .abandonRound()
+      .then((res) => gameState.hydrateFromServer(res.user))
+      .catch(() => {
+        // Best-effort - see MinesScene.leaveGame's doc comment.
+      })
+      .finally(() => this.scene.start("OverworldScene"));
+  }
 
-    this.cumulativeFair *= fairFactor;
-    this.correctGuesses++;
-    this.currentCard = nextCard;
-    this.paintCard(this.currentCard);
-    this.renderHistory();
+  private guess(direction: HiLoGuess) {
+    if (!this.active || this.busy || !this.roundId) return;
+    if (direction === "higher" && this.higherCount <= 0) return; // guarded by button enable state, but double-check
+    if (direction === "lower" && this.lowerCount <= 0) return;
 
-    const displayMult = this.currentDisplayMultiplier();
-    this.multiplierText.setText(`Multiplier: ${displayMult.toFixed(2)}x`);
-    popIn(this, this.multiplierText);
+    this.busy = true;
+    this.setGuessButtonsVisible(false);
+    this.cashOutBtn?.setEnabled(false);
 
-    if (this.deck.length === 0) {
-      // deck exhausted - auto cash out, nothing left to guess against
-      this.active = false;
-      const payout = Math.round(this.currentBet * displayMult);
-      gameState.goldCoins += payout;
-      this.messageText.setText(`Deck cleared! +${payout} GC`).setColor(Theme.textAccent);
-      this.updateBalance();
-      this.endRun();
-      return;
-    }
+    api
+      .guessHiLo(this.roundId, direction)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
 
-    this.cashOutBtn?.container.setVisible(true);
-    this.cashOutBtn?.setEnabled(true);
-    this.messageText.setText(`Correct! ${nextCard.label}${nextCard.suit} - cash out or keep guessing`).setColor(
-      Theme.textAccent
-    );
-    this.updateReadout();
+        if (!res.won) {
+          this.active = false;
+          const nextCard = displayCard(res.nextCard!);
+          this.currentCard = nextCard;
+          this.history.push(nextCard);
+          this.paintCard(nextCard);
+          this.renderHistory();
+          this.messageText
+            .setText(`${nextCard.label}${nextCard.suit} - wrong guess. You lose your bet.`)
+            .setColor(Theme.textDanger);
+          this.updateBalance();
+          this.endRun();
+          return;
+        }
 
-    // No more valid guesses left (only same-rank cards remain) - force a cash out
-    const next = countOutcomes(this.currentCard, this.deck);
-    if (next.higher === 0 && next.lower === 0 && this.deck.length > 0) {
-      this.setGuessButtonsVisible(false);
-      this.messageText.setText("No more winning guesses left - cash out!").setColor(Theme.textGold);
-    }
+        const state = res.state!;
+        this.correctGuesses = state.correctGuesses;
+        this.multiplier = state.multiplier;
+        this.higherCount = state.higherCount;
+        this.lowerCount = state.lowerCount;
+        const nextCard = displayCard(state.currentCard);
+        this.currentCard = nextCard;
+        this.history.push(nextCard);
+        this.paintCard(nextCard);
+        this.renderHistory();
+
+        this.multiplierText.setText(`Multiplier: ${this.multiplier.toFixed(2)}x`);
+        popIn(this, this.multiplierText);
+
+        if (res.deckExhausted) {
+          this.active = false;
+          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} GC`).setColor(Theme.textAccent);
+          this.updateBalance();
+          this.endRun();
+          return;
+        }
+
+        this.cashOutBtn?.container.setVisible(true);
+        this.cashOutBtn?.setEnabled(true);
+        this.messageText
+          .setText(`Correct! ${nextCard.label}${nextCard.suit} - cash out or keep guessing`)
+          .setColor(Theme.textAccent);
+        this.setGuessButtonsVisible(true);
+        this.updateReadout();
+
+        if (this.higherCount === 0 && this.lowerCount === 0) {
+          // No more valid guesses left (only same-rank cards remain, or the
+          // server would reject any guess here) - force a cash out.
+          this.setGuessButtonsVisible(false);
+          this.messageText.setText("No more winning guesses left - cash out!").setColor(Theme.textGold);
+        }
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.setGuessButtonsVisible(this.active);
+        this.cashOutBtn?.setEnabled(this.active && this.correctGuesses >= 1);
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
   }
 
   private cashOut() {
-    if (!this.active || this.correctGuesses < 1) return;
+    if (!this.active || this.busy || this.correctGuesses < 1 || !this.roundId) return;
 
-    const multiplier = this.currentDisplayMultiplier();
-    const payout = Math.round(this.currentBet * multiplier);
-    gameState.goldCoins += payout;
-    this.updateBalance();
-    this.messageText.setText(`Cashed out! +${payout} GC`).setColor(Theme.textAccent);
-    this.active = false;
-    this.endRun();
+    this.busy = true;
+    this.cashOutBtn?.setEnabled(false);
+    this.setGuessButtonsVisible(false);
+
+    api
+      .cashOutHiLo(this.roundId)
+      .then((res) => {
+        gameState.hydrateFromServer(res.user);
+        this.busy = false;
+        this.active = false;
+        this.messageText.setText(`Cashed out! +${res.payout} GC`).setColor(Theme.textAccent);
+        this.updateBalance();
+        this.endRun();
+      })
+      .catch((err) => {
+        this.busy = false;
+        this.cashOutBtn?.setEnabled(true);
+        this.setGuessButtonsVisible(true);
+        this.showApiError(err, "Something went wrong - please try again.");
+      });
+  }
+
+  private showApiError(err: unknown, insufficientBalanceMessage: string) {
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
   }
 
   private endRun() {
+    this.roundId = null;
     this.setGuessButtonsVisible(false);
     this.cashOutBtn?.container.setVisible(false);
     this.cashOutBtn?.setEnabled(false);

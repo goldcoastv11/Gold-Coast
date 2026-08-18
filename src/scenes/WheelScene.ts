@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
@@ -33,6 +35,12 @@ interface RiskConfig {
  *   segment gets a disproportionate jackpot instead of just "1/count" more)
  * Segment counts were hand-picked (like Plinko's slot layout); the
  * multiplier for each tier is *derived*, not picked - see tierMultipliers.
+ *
+ * #36: this file's copy of the math (mirrored exactly in
+ * server/src/games/wheel.ts) is used for the initial wheel drawing/legend
+ * before the player has spun; every actual spin's landing segment comes
+ * from the server's response instead (see spin()), so a drift between the
+ * two copies could never mismatch what a round actually pays.
  */
 const RISK_CONFIGS: Record<RiskKey, RiskConfig> = {
   low: { key: "low", label: "Low", zeroCount: 2, tiers: [{ count: 12 }, { count: 6 }] },
@@ -261,6 +269,7 @@ export class WheelScene extends Phaser.Scene {
     this.legendText.setText(parts.join("   "));
   }
 
+  /** #36: the landing segment is resolved server-side (POST /games/wheel/play) - the spin tween just rotates toward whatever index the server picked, it doesn't decide the outcome. `result.segments` also comes straight from the server so the drawn wheel and the payout can never disagree, even if the client's own buildSegmentValues ever drifted from the server's copy. */
   private spin() {
     if (this.spinning) return;
 
@@ -274,34 +283,35 @@ export class WheelScene extends Phaser.Scene {
     this.spinBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     Object.values(this.riskButtons).forEach((b) => b?.setEnabled(false));
-    gameState.goldCoins -= bet;
-    this.updateBalance();
     this.messageText.setText("Spinning...").setColor(Theme.textMuted);
 
-    // Every physical segment is equally likely (1/SEGMENT_COUNT) - matches
-    // the probability model tierMultipliers was solved against.
-    const landingIndex = Phaser.Math.Between(0, SEGMENT_COUNT - 1);
-    const anglePer = 360 / SEGMENT_COUNT;
-    const segmentCenterDeg = -90 + (landingIndex + 0.5) * anglePer;
-    const extraSpins = 6;
-    // Rotate so segmentCenterDeg ends up at the pointer (-90deg / top).
-    const targetAngle = extraSpins * 360 - 90 - segmentCenterDeg;
+    api
+      .playWheel(bet, "GC", this.risk)
+      .then((res) => {
+        this.segments = res.result.segments;
+        const { landingIndex } = res.result;
+        const anglePer = 360 / SEGMENT_COUNT;
+        const segmentCenterDeg = -90 + (landingIndex + 0.5) * anglePer;
+        const extraSpins = 6;
+        // Rotate so segmentCenterDeg ends up at the pointer (-90deg / top).
+        const targetAngle = extraSpins * 360 - 90 - segmentCenterDeg;
 
-    this.tweens.add({
-      targets: this.wheelContainer,
-      angle: targetAngle,
-      duration: 2600,
-      ease: "Cubic.Out",
-      onComplete: () => this.resolveSpin(bet, landingIndex)
-    });
+        this.tweens.add({
+          targets: this.wheelContainer,
+          angle: targetAngle,
+          duration: 2600,
+          ease: "Cubic.Out",
+          onComplete: () => this.resolveSpin(res)
+        });
+      })
+      .catch((err) => this.handleSpinError(err));
   }
 
-  private resolveSpin(bet: number, landingIndex: number) {
-    const multiplier = this.segments[landingIndex];
-    const payout = Math.round(bet * multiplier);
+  private resolveSpin(res: Awaited<ReturnType<typeof api.playWheel>>) {
+    gameState.hydrateFromServer(res.user);
+    const { multiplier, payout } = res.result;
 
     if (payout > 0) {
-      gameState.goldCoins += payout;
       this.messageText.setText(`Landed on ${multiplier}x! +${payout} GC`).setColor(Theme.textAccent);
       popIn(this, this.legendText);
     } else {
@@ -313,6 +323,21 @@ export class WheelScene extends Phaser.Scene {
     this.spinBtn?.setEnabled(true);
     this.betControl?.setEnabled(true);
     Object.values(this.riskButtons).forEach((b) => b?.setEnabled(true));
+  }
+
+  private handleSpinError(err: unknown) {
+    this.spinning = false;
+    this.spinBtn?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+    Object.values(this.riskButtons).forEach((b) => b?.setEnabled(true));
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
   }
 
   private updateBalance() {

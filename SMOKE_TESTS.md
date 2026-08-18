@@ -583,13 +583,30 @@ couldn't be confirmed this time:**
 
 ## Bright Social-Hub reskin (#21-25, 2026-08-11)
 
-Full reskin: art-director sourced Kenney's "RPG Urban Pack" (CC0) and wrote
-`STYLE_GUIDE.md` (#21), chrome reworked `Theme.ts`/`uiHelpers.ts` + a
-scene-wide hardcoded-color cleanup (#22), environment swapped
-floor/wall/nature tiles + recolored BootScene's drawn cabinet placeholders +
-OverworldScene's tooltip chips (#23), characters landed new player/NPC/dealer
-spritesheets on a non-standard 4-col x 3-row frame layout (#24). This is QA's
-#25 independent verification pass.
+**Partially superseded 2026-08-13 by #41 (environment) - see note at the top
+of this section before trusting the sign-off below as describing current
+behavior.** #41 reverted the casino floor/wall/carpet/furniture art back to
+the original pre-reskin Jephed assets. `Theme.ts`/`uiHelpers.ts` (#22),
+character/NPC/dealer sprites (#24), and #23's decorative props
+(bench/lamp post/market stall/hedge/tree) were left on the Kenney assets -
+so `BootScene.ts`/`OverworldScene.ts`'s floor/furniture rendering no longer
+matches what was verified below (there's now a deliberate-for-now partial
+mismatch: bright Kenney props sitting on the reverted dark floor). Flagged
+by coordinator as an open question to main, not yet resolved, and I haven't
+been asked to re-verify - flagging here defensively so this section isn't
+read as still-accurate for the floor/furniture rendering specifically. The
+frame-index math, mixed-rig skin system, and station-spacing findings below
+are about character/furniture-hitbox code that #41 didn't touch, and remain
+valid.
+
+Full reskin (original scope before #41's partial revert): art-director
+sourced Kenney's "RPG Urban Pack" (CC0) and wrote `STYLE_GUIDE.md` (#21),
+chrome reworked `Theme.ts`/`uiHelpers.ts` + a scene-wide hardcoded-color
+cleanup (#22), environment swapped floor/wall/nature tiles + recolored
+BootScene's drawn cabinet placeholders + OverworldScene's tooltip chips
+(#23), characters landed new player/NPC/dealer spritesheets on a
+non-standard 4-col x 3-row frame layout (#24). This is QA's #25 independent
+verification pass.
 
 - [x] `npm test` (74/74), `npx tsc --noEmit`, and `npm run build` all clean
       with the full reskin in place.
@@ -671,3 +688,651 @@ spritesheets on a non-standard 4-col x 3-row frame layout (#24). This is QA's
       independently re-verify that specific claim pixel-by-pixel in this
       environment (see the browser-pane-limitation note up top). Everything
       else in this section was verified functionally/structurally instead.
+
+## Real backend (#33-43, 2026-08-15, in progress) - task #38
+
+Full migration off client-side-only balances/RNG to a real Node/Express/
+Postgres backend (`casino-poc/server/`, Prisma, JWT auth). backend-lead built
+the scaffold/auth/economy port/deployment prep, games ported all 14 game's
+RNG+payout math server-side (single-shot: one `/play` endpoint each;
+stateful - Mines/Dragon Tower/Hi-Lo/Blackjack/Video Poker - start/action/
+cashout sequences backed by `game_rounds`), client-integration rewired every
+scene to call the real API instead of local math. This is QA's #38 pass,
+in progress - not all of it is closed yet, see open items at the bottom.
+
+### Confirmed clean (independently re-run, not just trusted from reports)
+
+- [x] `npm test` in `server/` - 104/104, real ephemeral Postgres test DB
+      (`casino_poc_test`), not mocked. `npm run typecheck` and `npm run
+      build` both clean.
+- [x] `npm test` in `casino-poc/` (client) - 91/91, `npx tsc --noEmit` clean.
+- [x] **Every one of the 14 game scenes is genuinely wired to the real API**,
+      not just some: grepped all 14 scene files for `import * as api from
+      "../api/client"` (14/14 present) and for any leftover
+      `gameState.goldCoins -=`/`+=` local mutation (0/14 present). Didn't
+      trust the "10 of 14, then the last 4" progress narrative - checked the
+      end state directly once the "done" message came in.
+      *(Housekeeping note, not a bug: `GameState.ts`'s file-header comment
+      still describes the pre-migration state as if some scenes might still
+      be doing local math - now stale given the above, worth a quick doc
+      pass whenever convenient.)*
+
+### Security/tamper testing (live, via real HTTP requests against the running server - not unit tests)
+
+- [x] **Cross-user round access is blocked.** Created two real users via
+      `POST /auth/signup`, started a Mines round as user A, attempted
+      `POST /games/mines/pick` for that same roundId as user B - got 404
+      `NO_ACTIVE_ROUND`, not a 403 or a leak of "this round exists but isn't
+      yours" (matches `loadActiveRound`'s doc comment - not-found/not-yours/
+      already-resolved/wrong-game all look identical to the client, by
+      design).
+- [x] **Negative/tampered bet amounts are rejected** by the Zod schema
+      (400 `INVALID_INPUT`) before touching the ledger.
+- [x] **Insufficient balance is rejected safely** - attempted a 500 SC bet
+      with a 25 SC balance, got a clear 400 with the real current balance in
+      the message (own balance, own authenticated request - not a leak).
+- [x] **Invalid/malformed JWT is rejected** - 401 `UNAUTHORIZED`, confirmed
+      via `requireAuth`'s catch-all around `verifyToken`.
+- [x] **Round lifecycle + replay protection**, live, full cycle on a real
+      Mines round: start (debits bet) -> pick (updates state) -> cashout
+      (credits payout, closes round) -> replay pick attempt on the
+      now-closed round (404) -> replay cashout attempt (404, no
+      double-payout).
+- [x] **The `POST /games/abandon` soft-lock fix (#42)**, live: started Mines,
+      confirmed DragonTower blocked with 409 `ROUND_ALREADY_ACTIVE` (the
+      original bug - one active round blocks *every* stateful game, not
+      just its own), called abandon, confirmed the bet is genuinely
+      forfeited (balance does NOT refund), confirmed DragonTower could then
+      start normally, abandoned that too, confirmed a third abandon attempt
+      cleanly 404s (`NO_ACTIVE_ROUND`) rather than double-forfeiting.
+      **Forfeit-always is the final, deliberate design** - a refund-on-
+      discovered-via-session-restore alternative was considered and
+      rejected by main specifically because it's exploitable (a player can
+      deliberately manufacture the "accident" - e.g. logging out on purpose
+      on a bad board instead of clicking WALK AWAY - to convert what should
+      be a loss into a refund). Applying that same lens elsewhere in #38 as
+      a general check: any recovery/session-restore path that grants or
+      restores something the normal-loss path wouldn't is worth the same
+      scrutiny, regardless of which feature it's in.
+- [x] `GET /me`'s `activeRound: {game, roundId} | null` field (added
+      alongside #42) means a client that lost its local roundId - reload,
+      crash, or re-authenticating after the 401 auto-logout path - can
+      always discover an orphaned round rather than being stuck with no
+      diagnostic info anywhere in the API surface. Confirmed present and
+      correct in live responses (`null` when no round, populated during an
+      active one, `null` again immediately after abandon/cashout).
+- [x] Read `prisma/schema.prisma`'s `ROUND_REFUND_GC`/`ROUND_REFUND_SC`
+      enum values - confirmed genuinely unused (zero references anywhere in
+      `server/src/`) leftovers from the rejected refund-split design,
+      correctly commented as "do not wire up without fresh sign-off," not
+      an unexplained loose end.
+
+### Economy-rule compliance (server-side port)
+
+- [x] Read `server/src/economy/{ledger,packages,playthrough,redemption,
+      signupBonus,attendantClaim,skinShop,gcMultiplier}.ts` in full - all
+      faithful ports of the client rules (GC/SC separation, the #16
+      crediting-ADJUST_SC guard ported verbatim, non-linear package SC
+      scaling, 1x playthrough gate, minimum redemption threshold, skin
+      purchases GC-only and isolated from SC/playthrough).
+- [x] Two real security improvements over the client-only version, both
+      things I'd flagged as accepted-limitations earlier in this project and
+      are now genuinely closed: the shuffle-cup GC multiplier is resolved
+      server-side via `node:crypto`'s CSPRNG (`pickRandomGcMultiplier`) -
+      the client can no longer claim "I picked the 2x cup" via `/claim-bonus`
+      or `/auth/signup`, it doesn't even take a multiplier parameter. And
+      the attendant-claim cooldown is now a single atomic UPSERT with a
+      conditional `WHERE` (DB-enforced, can't be reset via
+      client-localStorage-clearing, and closes a check-then-write race
+      between two concurrent claim requests).
+- [x] Confirmed no real payment gateway exists yet server-side either
+      (`packages.ts`'s own comment says so) - the CLAUDE.md attendant-claim
+      exception's sunset condition hasn't been prematurely triggered.
+
+### Live end-to-end (real browser, real backend, real network round-trips)
+
+- [x] Full signup flow through the actual `LoginScene` UI (real keyboard
+      events, not devtools shortcuts) against the live server: typed a new
+      username/password, confirmed a genuine `POST /auth/signup` round-trip
+      happened (not mocked - the shuffle-cup reveal only appears after it
+      resolves), advanced through the shuffle, picked a cup, confirmed the
+      *server's* resolved multiplier (not a client-guessed one) is what got
+      reconciled and credited (0.5x -> 500 GC this run), landed on
+      `StartMenuScene`. `ShuffleCupReveal`'s `forcedMultiplier` param means
+      the animation is purely cosmetic now regardless of which cup is
+      clicked - confirmed structurally, not just from the code comment.
+
+### Still open
+
+- [ ] **401/session-expiry UX live check** - in progress, blocked mid-check
+      by the server being briefly unreachable (unrelated `prisma generate`
+      pause from another teammate, not a bug) - will finish once it's back.
+      Checklist: does an authenticated call with a corrupted/expired token
+      actually invoke the client's `unauthorizedHandler` and land back on
+      `LoginScene`; does `/auth/signup`/`/auth/login`'s own 401
+      (bad credentials) correctly NOT trigger that same handler.
+- [ ] Slow/hung server -> `NetworkError`/timeout UX (the 15s
+      `AbortController` in `src/api/client.ts`) - not yet live-tested (hard
+      to simulate a genuine hang against a real server without instrumenting
+      it - may end up being a code-review-only confirmation rather than a
+      live repro).
+- [ ] Per-game payout math spot-checks beyond Dice/Mines (the two reference
+      implementations, both covered above) - haven't independently
+      re-derived the odds/multiplier math for the other 12 games yet (games'
+      own 104 server tests cover this at the unit level; whether to redo
+      that independently or treat it as sufficiently covered is a judgment
+      call for the rest of this pass).
+- [ ] Client-side `#43` WALK AWAY -> `/games/abandon` wiring - confirmed not
+      yet landed as of this pass (grepped scene files, only the button
+      exists, no call to the endpoint yet). Re-check once it lands:
+      button actually calls abandon (not just navigating away), and the
+      "exploit pattern" lens above applies to however the auto-recovery
+      end of it gets built too.
+- [x] **Applying the "recovery path grants what the loss path wouldn't" lens
+      to the other games - general structural argument, not just Mines.**
+      Read `blackjack.ts` and `videopoker.ts` in full (both match the math I
+      already independently re-derived/verified against the client version
+      earlier in this project - Blackjack win/push/lose = 2x/1x/0x with the
+      dealer still playing out a natural, Video Poker's paytable and the
+      tricky wheel/low-pair edge cases). The general argument for why
+      forfeit-always is exploit-safe across *every* stateful game, not
+      coincidentally safe per-game: abandon always yields exactly 0 payout,
+      which is also the worst possible outcome of playing a round out
+      normally (a bust, a loss, a bad final hand all also pay 0) - so
+      abandon can never be *strictly better* than continuing for a rational
+      player, at best it ties the worst normal outcome. There's no game
+      here where continuing has a *guaranteed-worse-than-abandon* path (every
+      game retains some nonzero win probability until it actually resolves),
+      so "abandon before a bad outcome lands" is never +EV relative to just
+      playing it out. This is a structural property of forfeit-always, not
+      something that needs a fresh proof per game.
+- [x] **#43 live-verified end to end through the real UI** (real signup,
+      real button clicks via the scene-driving technique, real network
+      round-trips - confirmed via `read_network_requests`, not inferred):
+      - WALK AWAY on an active Mines round: network trace shows
+        `POST /games/abandon → 200`; balance unchanged before/after
+        (forfeit confirmed, not refund); navigated to Overworld; starting
+        DragonTower immediately afterward succeeded with no 409 - the round
+        is genuinely closed server-side, not just abandoned client-side.
+      - Auto-recovery, precisely: force-orphaned a DragonTower round
+        (abrupt scene switch bypassing `leaveGame()`, simulating a crash),
+        then attempted to start Mines. Full trace:
+        `mines/start → 409`, `abandon → 200`, `mines/start → 200`. Exactly
+        one abandon call, exactly one retry, the new round's bet debited
+        exactly once - genuinely one-shot, not a loop that happened to
+        resolve quickly.
+      - No new exploit shape found in *when* the client calls
+        abandon - it's only ever reachable via an explicit WALK AWAY click
+        or the automatic 409-triggered recovery, both of which forfeit
+        identically; there's no client-controlled parameter that changes
+        the outcome.
+- [x] **401/session-expiry UX - mostly confirmed, one new finding.**
+      Corrupted the stored token while an authenticated round was active,
+      triggered a 401 on a real API call: confirmed `ApiError{status:401,
+      code:"UNAUTHORIZED"}`, confirmed the token is cleared
+      (`getToken()` → `null` after), confirmed `/auth/signup` and
+      `/auth/login`'s own 401s (bad credentials) do NOT route through this
+      same handler (verified via `describeSignupValidationError`'s code
+      path and the `auth:false` flag on those two calls - a real signup
+      earlier in this session hit real validation without ever
+      auto-logging-out).
+      **New finding**: `main.ts`'s `setUnauthorizedHandler` callback calls
+      `game.scene.start("LoginScene")` from the *global* scene manager, not
+      from inside a scene - so it does NOT implicitly stop whatever scene
+      the player was on (that implicit-stop behavior only happens when
+      `.start()` is called from *within* a scene, as every other
+      scene-to-scene transition in this codebase does). Live-verified: the
+      previously-active scene (`MinesScene`, mid-round) stays genuinely
+      `isActive() === true` after the 401 fires, alongside the freshly-
+      started `LoginScene` - its `roundId`/`active` fields are still set
+      and its update loop/tile-click handlers are still live, not just
+      visually stale underneath the login panel. Probably not exploitable
+      (the orphaned scene's own handlers would just fail their API calls
+      against the now-cleared token, same as any other 401), but it
+      contradicts the code comment's own stated intent ("drops the player
+      back to LoginScene instead of leaving whatever scene they were on")
+      and is real wasted-resource/confusing-state sloppiness worth a fix -
+      reported to the team.
+- [x] **15s timeout/`NetworkError` UX - live-verified with a genuine real-time
+      wait, not just code review** (per main's explicit direction - this is
+      the corrected version of the earlier "code looks right, not
+      live-tested" note). Technique: faithfully simulated a genuinely hung
+      connection by swapping `window.fetch` for a promise that never
+      resolves on its own and only rejects with a real `AbortError`
+      `DOMException` when the request's `AbortSignal` fires - exactly what a
+      real browser's `fetch()` does on a real hung connection being
+      aborted. This exercises the actual unmodified `request()`/
+      `AbortController`/timeout code in `src/api/client.ts`; only the
+      transport primitive is stood in for, since arranging a genuine 15s+
+      network hang against the shared dev server isn't practical. Called
+      the real `getMe()` and waited it out for real (18 real seconds via
+      the tool, not simulated/fast-forwarded time). Result: rejected at
+      **15,993ms** - essentially exactly the configured 15,000ms threshold
+      plus a small real overhead margin - with `NetworkError` and the exact
+      message `"The server is taking too long to respond - please try
+      again."`, correctly distinct from the generic `NetworkError` message
+      used for other failure types. Confirms the mechanism genuinely works
+      in real time, not just that the code shape looks right.
+- [x] **Baccarat/Keno independent payout math re-derivation** (per main's
+      direction: spot-check the highest-complexity 2-3 games for extra
+      confidence rather than redo all 10 remaining games from scratch;
+      trust the rest on games' own unit-test coverage - see the explicit
+      per-game breakdown at the end of this section).
+      - **Baccarat: clean.** Wrote an independent implementation of the
+        standard baccarat third-card tableau from QA's own knowledge of the
+        real rules (not copied from `baccarat.ts`), ran 3,000,000 simulated
+        rounds. Outcome frequencies matched published real-baccarat odds
+        within noise: Player 44.605% (ref ~44.62%), Banker 45.861%
+        (ref ~45.86%), Tie 9.534% (ref ~9.52%). House edges computed from
+        those frequencies against the server's actual payout multipliers
+        (2.0x/1.95x/9.0x) also matched real-world reference figures closely:
+        Player 1.26% (ref ~1.24%), Banker 1.04% (ref ~1.06%), Tie 14.19%
+        (ref ~14.36% for a 9x tie payout). Real, non-invented odds,
+        confirmed independently.
+      - **Keno: real finding, not a security bug.** Independently
+        re-derived the hypergeometric combinatorics from scratch (own
+        `comb`/`hyperProb` implementation) and verified `C(40,10) =
+        847,660,528` (known-correct value) and that per-pick-count hit
+        probabilities sum to exactly 1.0. Then checked the specific
+        invariant the client's own code comments claim
+        ("the whole paytable's expected return is exactly (1-HOUSE_EDGE)"
+        - i.e. RTP should be ~94% for every `picks` count 1-10): true for
+        picks 1-6 (93.9-94.1%, confirmed both theoretically and via a
+        2,000,000-round empirical simulation), but **RTP drops sharply for
+        picks 7-10** - 81.7%, 75.8%, 67.6%, 67.5% respectively - because
+        `MAX_MULTIPLIER = 10,000` caps the rare top-hit jackpot tiers,
+        silently breaking the tier-distribution formula's assumption that
+        multipliers are uncapped. This is **not a security/exploit issue**
+        (a lower-than-documented RTP favors the house, not the player - the
+        opposite of a money-printing bug) and it's **not something the
+        server port introduced** - confirmed the client's `KenoScene.ts`
+        has byte-identical constants (`MAX_MULTIPLIER=10000`,
+        `HOUSE_EDGE=0.06`, etc.) and the exact same "expected return is
+        exactly (1-HOUSE_EDGE)" claim in its own comments, so this is a
+        **pre-existing characteristic of the original client-side design
+        that predates this project's #38 backend work** and apparently
+        wasn't caught by this project's earlier client-side-only testing
+        either (my own earlier Keno smoke-testing checked functional
+        correctness, not a full per-pick-count RTP audit). Worth a decision
+        from the team: is a sharply higher effective house edge on
+        high-pick Keno bets an acceptable, semi-realistic "real Keno
+        jackpot-cap" characteristic (real-world Keno does have this same
+        shape), or should the multiplier formula account for the cap when
+        redistributing edge-adjusted value so RTP stays consistent across
+        all pick counts as the comment claims? Not blocking #38 on this -
+        flagging as a design question, not a defect to fix before ship.
+
+### #45 (2026-08-16) - Keno RTP fix, independently re-verified
+
+games fixed the above as #45: root cause confirmed exactly as diagnosed
+(equal-split RTP allocation didn't account for `MAX_MULTIPLIER` clipping the
+rare top tiers, so a capped tier still got *counted* as if it paid its full
+uncapped share). Fix: iterative water-filling in `buildPayoutTable()` - cap
+any tier whose fair share exceeds the max, subtract its actual (smaller)
+contribution from the RTP budget, redistribute the remainder across
+whatever's left, repeat until stable. Same fix mirrored byte-for-byte in the
+client's preview-only copy (`KenoScene.ts` - cosmetic only, never settles a
+real round).
+
+- [x] Read the actual fix in full (`server/src/games/keno.ts`) - matches the
+      described algorithm exactly, well-commented, references this finding
+      by name.
+- [x] **Independently re-implemented water-filling from scratch** (own code,
+      different shape from `buildPayoutTable`, not a copy) to cross-check
+      both the resulting tables and - most importantly - the safety-critical
+      property that RTP must never exceed 100% for any pick count (unlike
+      the original bug, which was RTP too *low*, a much-worse-than-100%-RTP
+      table would be a genuine money-losing exploit for the house). Result
+      for all 10 pick counts: RTP lands 93.92-94.08% for every one of them
+      (max observed 94.078%), zero pick counts exceed 100%, zero tier
+      multipliers exceed the documented cap. Cross-checked with a fresh
+      2,000,000-round empirical simulation for the three worst pre-fix cases
+      (picks 7/9/10, previously 81.7%/67.6%/67.5%) - empirical RTP now lands
+      93.85-96.44% (the 9-picks figure runs a bit hot at 2M trials purely
+      from rare-tier sampling variance at that picks-count's low hit-rate,
+      not a formula problem - the theoretical/exact value for picks=9 is
+      93.955%).
+- [x] Confirmed the client's `KenoScene.ts` mirrors the same fix (grepped
+      for `buildPayoutTable`/water-filling markers - present, and the file's
+      own comment states it matches the server "byte-for-byte").
+- [x] Client suite re-run independently: 91/91, `tsc --noEmit` clean.
+- [x] **Server suite - independently re-run, port blocker now resolved.**
+      backend-lead's fix (`test/globalSetup.ts`) replaces the hardcoded port
+      constant with `findFreePort()` (binds to port 0, lets the OS assign a
+      genuinely free ephemeral port, reads it back, releases it, then starts
+      embedded-Postgres on that port) - read the fix in full, it's the
+      standard "ask the OS for whatever's free right now" pattern and
+      correctly sidesteps the whole class of stale-listener-entry failures
+      (there's no fixed number to get stuck anymore). Ran `npm test` 5 times
+      back-to-back: 4/5 clean at 117/117, no port errors at all across any
+      of the 5 - the port fix itself is confirmed solid.
+
+### New finding while re-running: a real (pre-existing, unrelated) test flake
+
+1 of the 5 `npm test` runs (and a 2nd one in an earlier batch of 3, so 2
+failures in 7 total runs) failed with:
+```
+test/games4.test.ts > POST /games/blackjack/* (stateful: start / hit / stand)
+  > start debits the wager, deals 2+2 cards, and hides the dealer's hole card
+    unless it's a natural
+AssertionError: expected 1020 to be 980
+```
+Root cause (confirmed by reading `server/src/games/blackjack.ts`): a natural
+blackjack (2-card 21) auto-resolves **inside the same `/start` call** - dealer
+plays out immediately, win/push/lose settles, payout is paid - so
+`res.body.user.goldCoins` at that point already reflects both the wager debit
+*and* the resolution payout. The test's assertion at `games4.test.ts:21`
+(`expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20)`) runs
+*before* the natural/non-natural branch and is unconditional, so it's only
+correct for the non-natural and natural-push cases. On a natural **win**
+(pays 40 on a 20 wager per line 29), the real balance is
+`before - 20 + 40 = before + 20`, e.g. `1000 - 20 + 40 = 1020` - exactly the
+observed mismatch. This is a **test bug** (missing case in the assertion),
+not a backend/economy bug: the server's payout math and settlement timing
+are correct per the game's own documented rules; the test just didn't
+account for the rare branch. Natural-blackjack-win is roughly a
+4-5%-per-deal event, consistent with the ~1-in-3.5 observed flake rate this
+pass.
+- Not a port-fix regression, not a Keno-fix regression, not an economy-rule
+  violation - flagging to games (owner of `blackjack.ts` and its tests) to
+  fix the assertion (branch on `res.body.state.playerTotal === 21 &&
+  res.body.state.outcome === "win"` and expect `before - 20 +
+  res.body.payout` in that case, same as the later "standing..." test at
+  line 129 already does correctly).
+- Separately worth a look: one of the runs that hit this failure reported
+  shell `exit: 0` from `npm test` despite `1 failed | 116 passed` in its own
+  summary output - i.e. the process exit code didn't reflect the failure.
+  Didn't dig into whether that's a vitest/npm-script/Windows quirk; flagging
+  since a CI gate keyed off exit code alone would have silently passed a
+  failing run.
+
+### Exit-code finding - traced and fixed by backend-lead, independently re-verified
+
+backend-lead confirmed the exit-code oddity above was real and root-caused
+it (not a fluke, not a tooling artifact on my end): `embedded-postgres`
+transitively pulls in `async-exit-hook`, which registers a
+`process.on('beforeExit', () => process.exit(0))` handler on the *vitest CLI
+process itself* (globalSetup runs there, not in a forked worker). Node's
+`beforeExit` fires as the event loop goes idle - i.e. right as `vitest run`
+is about to exit with its real computed code - and that handler wins the
+race and forces exit 0 regardless of actual results. A first surgical fix
+(unhooking only `beforeExit`) uncovered a second, worse bug: with that gone,
+Node's plain `'exit'` event became the next thing to trigger
+async-exit-hook's dispatch, which for `'exit'` runs hooks synchronously with
+no callback - but the registered hook is async and expects one, so it threw
+("done is not a function") as an unhandled rejection right at process exit,
+flipping even a clean 117/117 run to exit 1 (confirmed by reproduction - a
+false-failure signal, worse than the original false-success one). Final fix:
+unhook every event `async-exit-hook` registered (`asyncExitHook.unhookEvent`
+in a loop over `hookedEvents()`) and rely entirely on `teardown()`'s own
+explicit `pg.stop()` for cleanup - nothing else needed it. They also caught
+and fixed a related latent bug from their own earlier port-fix: DB
+connection info used to pass through a shared, fixed-path file
+(`test/.test-db-url.json`); two `npm test` invocations overlapping in time
+could stomp on each other's file mid-run. Fixed by setting
+`process.env.DATABASE_URL` directly on the parent (vitest) process instead -
+Vitest doesn't fork its worker pool until `setup()` resolves, so workers
+inherit it at fork time same as any other env var, no shared mutable state
+on disk at all.
+
+Independently re-verified all three claims, not trusted from the report:
+- [x] Read `test/globalSetup.ts` in full - the fix matches the above
+      description exactly, thoroughly commented, references the
+      investigation.
+- [x] **3 clean `npm test` runs**: exit 0 all 3, 117/117 all 3.
+- [x] **2 deliberately-failing runs**: added a temporary throwaway test file
+      (`test/__qa_temp_fail.test.ts`, one test, `expect(1).toBe(2)`), ran
+      `npm test` twice - both correctly exited 1 (`1 failed | 117 passed`
+      both times) - then deleted the file and confirmed a follow-up clean
+      run was back to exit 0 / 117/117. Exit code now reliably reflects real
+      results in both directions, matching backend-lead's own "verified
+      both directions x2" claim.
+- [x] **Concurrency race fix**: launched two `npm test` invocations at the
+      same time (backgrounded, `wait`ed on both). Both completed
+      independently at 117/117, exit 0, no cross-run interference - the
+      `process.env`-based fix holds under genuine concurrent invocation, not
+      just in theory.
+
+This closes out both the exit-code oddity and the concurrency race as
+independently confirmed fixed. Combined with the port-fix re-verification
+above, the port/exit-code/concurrency thread is closed - but see below, the
+"whole thread ... fully closed" claim relayed via coordinator was premature
+on the blackjack piece specifically.
+
+### Correction (2026-08-17): the blackjack natural-win fix is real, but a sibling test has the identical unaddressed bug
+
+coordinator relayed a claim that the `games4.test.ts` natural-win assertion
+bug was "fixed and verified... nothing outstanding from the whole test-infra
+thread... now fully closed." Independently checked rather than accepted:
+
+- [x] **The originally-flagged fix is real and correct.** Read the updated
+      `games4.test.ts` - the assertion is now properly branched
+      (`before - 20 + res.body.payout` on a natural win, unchanged flat
+      `before - 20` otherwise). Ran it in isolation and as part of the full
+      suite ~10 times total; that specific assertion never failed again.
+- [ ] **But the "fully closed" claim is wrong**: the very next test in the
+      same `describe` block, `"rejects a second start while a round is
+      active"` (`games4.test.ts:40-45`), has the *identical* root-cause
+      vulnerability and was not touched by the fix. It starts a blackjack
+      round, immediately starts a second one, and unconditionally expects
+      `409` (round-already-active). But if the *first* start happens to
+      deal a natural blackjack, that round auto-resolves inside the same
+      `/start` call (same mechanism as the other bug) - so there's no
+      active round left to block the second `start`, which legitimately
+      returns `200`, not `409`. Reproduced this directly, twice, in
+      independent runs:
+      ```
+      test/games4.test.ts > rejects a second start while a round is active
+      AssertionError: expected 200 to be 409
+        ❯ test/games4.test.ts:44:27
+      ```
+      (2 reproductions in 8 isolated single-file runs this pass, consistent
+      with the ~4.8%-per-deal natural-blackjack rate.) This is a test gap,
+      not a backend bug - same category as the original finding, just an
+      untouched sibling. Re-flagging to games: needs the same treatment as
+      the "busting on hit" test elsewhere in this file (retry-until-non-natural
+      on the *first* start before asserting the second start is rejected).
+
+### Incidental finding while re-running (out of current scope, flagging only): new #46 Triple Chance RTP test looks statistically underpowered
+
+Noticed a new game/test file, `test/games5.test.ts` (Triple Chance, #46 -
+bonus round after a shuffle-cup GC win), landed since my last full-suite
+pass (suite grew 117→125 tests). Not assigned to review #46 yet, but hit a
+real failure in it during a routine full-suite re-run:
+```
+test/games5.test.ts:64 > real RTP ... is exactly 100% within statistical tolerance
+AssertionError: expected 0.5454545454545454 to be greater than 0.8
+```
+The test's own comment claims the ±20% band is "~5 SD - astronomically
+unlikely to flake," derived assuming all 1200 trials execute. But the loop
+breaks early ("Balance can't go negative - stop early") whenever the next
+bet would exceed the current balance, and Triple Chance is a deliberate 0%-
+house-edge game (mean net per trial 0, but per-trial SD ≈70.7 on a 50-unit
+bet: -50 w.p. 2/3, +100 w.p. 1/3) - a mean-zero, real-variance random walk
+against a *finite* starting balance (signup grants 500/1000/2000 GC,
+uniform, per `gcMultiplier.ts`) will hit its floor and truncate the loop
+long before 1200 trials in a meaningful fraction of runs, especially at the
+500 GC tier (walk's cumulative SD reaches ~500 by roughly trial 50). That
+invalidates the "assumes n=1200" tolerance math and makes the test
+genuinely flaky under realistic conditions, not astronomically rare -
+matches the observed 1-in-6 fail rate this pass. Test-design issue (small-n
+tolerance band), not necessarily an economy-rule violation on its own -
+flagging to whoever owns Triple Chance (games or economy, unclear from a
+first look) rather than fixing myself since it's outside what I was asked
+to verify this pass.
+
+### #46/#47 (2026-08-17) - Triple Chance bonus round, independently verified end-to-end
+
+games fixed both regressions found above (retry-until-non-natural pattern
+for the blackjack "second start" test; `topUpGold()` via a real
+`applyTransaction(..., "ADJUST_GC", ...)` call for the Triple Chance RTP
+test's early-insolvency flaw), games finished the rest of #46 (server route,
+`games/triplechance.ts`), and client-integration finished #47 (client
+wiring: `ShuffleCupReveal`'s new `possibleMultipliers` param,
+`ui/TripleChanceOffer.ts`, both call sites, `api/client.ts` additions).
+Independently re-verified rather than trusted from either report:
+
+- [x] **Both test fixes read and confirmed correct.** `games4.test.ts`'s
+      "rejects a second start" test now retries the first `start` until
+      `status !== "resolved"` before asserting the second is blocked -
+      matches this file's own established "busting on hit" pattern.
+      `games5.test.ts`'s RTP test now calls a `topUpGold()` helper that goes
+      through the real ledger (`applyTransaction(..., "ADJUST_GC", ...)`,
+      not a raw balance write) to grant 5,000,000 GC bankroll before the
+      1200-trial loop - ~2,000 SDs above the walk's plausible range, so the
+      loop can't truncate early in practice. Ran the full suite 5x after
+      restarting from the blackjack-fix pass, ran `games4.test.ts` and
+      `games5.test.ts` in isolation ~8x more each: no recurrence of either
+      original failure.
+- [x] **Read `server/src/games/triplechance.ts`, its route in
+      `server/src/routes/games.ts`, and `games/shared.ts`'s
+      `settleSingleShotBet` in full.** GC is hardcoded at the route (no
+      `currency` param accepted from the client at all, unlike every other
+      single-shot game) - confirmed this is the actual enforcement point,
+      not just a doc comment. `betAmount` is `z.number().int()`-validated
+      and the win multiplier is always exactly the integer `3`, so
+      `Math.round(betAmount * 3)` has zero rounding leakage at any bet size.
+- [x] **Read `client/src/ui/TripleChanceOffer.ts` and both call sites**
+      (`LoginScene.ts`'s signup-bonus leg, `OverworldScene.ts`'s
+      attendant-claim leg) **in full.** Client never computes its own
+      win/loss - reconciles entirely to the server's `result.multiplier`/
+      `result.payout` via `ShuffleCupReveal`'s forced-outcome mode, same
+      trust-boundary shape as the original shuffle-cup GC multiplier.
+      Chased down one suspected bug (`LoginScene.submit()` calls
+      `reconcileAndEnter(signupRes.user)` - a *pre*-Triple-Chance snapshot -
+      *after* `runTripleChanceOffer()` runs, which looked like it could
+      stomp the fresher post-Triple-Chance `gameState` hydration) but ruled
+      it out on closer read: `reconcileAndEnter` only reads `me.activeRound`
+      from that snapshot (irrelevant here - Triple Chance is stateless, not
+      a round) and never re-hydrates the balance from it directly. Not a
+      bug - noting the chase for the record since it looked real at first
+      glance.
+- [x] **Live end-to-end verification via real HTTP against the actual
+      running dev server** (`server/src/routes/games.ts`'s live instance),
+      not curl-once-and-trust: signed up a fresh account, played 25 real
+      `POST /games/triplechance/play` rounds at betAmount=100, checked the
+      ledger math (`before - 100 + payout`) after every single round via a
+      separate `GET /me` - 25/25 correct, 8 wins/17 losses (close to the
+      1/3 odds), SC balance provably untouched every round. Then a battery
+      of exploit-injection attempts, each confirmed a true no-op (balance
+      unchanged across the whole battery): client-supplied `currency: "SC"`
+      silently ignored (settles GC regardless, SC balance genuinely
+      unchanged - not just unreported), negative/zero/fractional/over-max
+      `betAmount` all correctly 400 `INVALID_INPUT`, no-auth correctly 401.
+- [x] **Exploit-surface question from coordinator, addressed specifically:**
+      "can repeated Triple Chance attempts combine with anything else
+      (redemption, playthrough, etc.) for unintended leverage, given it's a
+      driftless walk not a house-edged game?" Read `economy/playthrough.ts`,
+      `economy/redemption.ts`, and `economy/ledger.ts` in full to check
+      cross-contamination, not just Triple Chance's own file:
+  - Playthrough tracking (`recordScWager`) is only ever called from
+    `settleSingleShotBet`/`placeWager` when `currency === "SC"` - Triple
+    Chance's route hardcodes `"GC"`, so it structurally cannot touch
+    playthrough progress. Confirmed by reading the actual call site, not
+    inferring from the doc comment.
+  - Redemption eligibility (`checkRedemptionEligibility`) checks only SC
+    playthrough state and SC balance - no GC reference anywhere in that
+    file. Triple Chance winnings (GC) cannot influence SC redemption in any
+    way.
+  - `ledger.ts`'s `applyTransaction` confirms GC/SC are structurally
+    separate columns with no conversion path either direction (and
+    `ADJUST_SC` is explicitly blocked from crediting - SC can only be
+    credited via `SIGNUP_BONUS_SC`/`PACKAGE_BONUS_SC`, both unrelated to
+    Triple Chance).
+  - **One real, previously-undocumented structural finding, distinct from a
+    code bug - status: known, deferred (main's call, 2026-08-17)**: within a
+    single account, Triple Chance's math is exactly fair (confirmed above)
+    and fully isolated from SC. But combined with (a) signup granting a
+    free, uncapped, repeatable GC bonus, and (b) zero
+    rate-limiting/CAPTCHA/IP-or-fingerprint checks anywhere in the signup
+    path (grepped `server/src/` for `rateLimit|throttle|captcha|IP address|
+    fingerprint` - nothing), an attacker isn't limited to the odds of a
+    single account's chain: they can create free accounts at will, run the
+    Triple-Chance chain on each, and keep only the accounts that got a
+    lucky streak while abandoning (at zero cost) every account that didn't.
+    Each individual play is fair, but the *selection* step (discard losers,
+    keep winners, repeat) extracts positive expected GC per real-world
+    attempt in a way a single non-repeatable account couldn't. This isn't a
+    Triple Chance bug and doesn't cross into SC/redemption/playthrough
+    directly - it's a question of whether GC itself is worth farming this
+    way (this is a CS:GO-skin-themed casino where GC is the skin-shop
+    currency), and whether multi-accounting is meant to be in scope for
+    this POC at all. Raised to main as a structural/business-logic question
+    rather than fixed unilaterally (not an in-account exploit, and CLAUDE.md
+    doesn't currently address multi-accounting either way). **Decision**:
+    not a priority for this POC - same category as "no real payment gateway
+    yet" (see CLAUDE.md's attendant-claim POC-exception note for the
+    precedent of an explicitly-scoped, revisit-later stopgap). Accepted as a
+    known limitation; revisit if/when this becomes a real product with real
+    users and multi-accounting has actual monetizable consequences. Not an
+    open item - no further action expected unless the product picture
+    changes.
+  - Chain-cap edge case (not a bug, just noting): `TRIPLE_CHANCE_MAX_AMOUNT`
+    (100,000,000) would only ever bind after ~11-12 consecutive wins in a
+    single chain (probability ≈ (1/3)^11, astronomically rare per chain,
+    though not literally impossible at scale) - a chained bet that size
+    would 400 and the client would need to let the player stop rather than
+    continue chaining. Not exploitable (no money is lost or fabricated
+    either way), just a UX edge the client should already handle gracefully
+    via its existing `ApiError` catch path in `playRound()`.
+
+### #48 (2026-08-17) - Triple Chance HUD-refresh gap, code-verified only (accepted, per main)
+
+client-integration fix for a cosmetic gap games found during their own #46/#47
+self-check: `OverworldScene`'s corner HUD coin counter only refreshed once,
+at the very end of the whole Triple Chance offer/play/chain sequence
+(inside `showClaimResultFromServer`), not per round during it - the real
+balance (`gameState`) was always correct at every step since
+`hydrateFromServer` already ran inside `playRound` regardless, this was
+purely the on-screen counter lagging behind it until the sequence ended.
+
+- [x] **Read the fix in full** (`src/ui/TripleChanceOffer.ts`,
+      `src/scenes/OverworldScene.ts`) - matches the reported description
+      exactly: `offerTripleChance` takes a new optional `onBalanceChange`
+      callback, threaded through `showOffer`/`playRound`, fired right after
+      each round's `gameState.hydrateFromServer(res.user)` call (not before
+      - confirmed the ordering, so the callback only ever reads
+      already-hydrated state). `OverworldScene.runTripleChanceOffer` passes
+      `() => this.updateHud()`; `LoginScene`'s call site correctly omits it
+      (no persistent HUD at that point in its flow, matches the doc
+      comment's stated reasoning).
+- [ ] **Live visual click-through (does the HUD number actually visibly
+      tick up mid-chain) - not independently verified.** main's call: given
+      this is cosmetic-only (balance was never actually wrong underneath)
+      and low priority, "code-verified, not visually confirmed" is
+      sufficient to close - not worth a dedicated live-verification pass
+      (this environment's headless-canvas limitation would make that pass
+      slower/less conclusive than the code-read above already is for
+      something this low-stakes anyway). Leaving this checkbox honestly
+      unchecked rather than implying more verification happened than
+      actually did - if a real click-through later shows the counter still
+      lagging, it's a quick fix from here since the callback wiring itself
+      is already confirmed correct by inspection.
+
+### Infra note: shared dev Postgres needed a restart mid-session
+
+While setting up live verification, `POST /auth/signup` against the shared
+dev server (`localhost:8787`) was 500ing. Root cause in `server/pg-dev.log`:
+the dev Postgres daemon (a long-lived process, distinct from the per-test-run
+embedded instance) had been logging `could not reserve shared memory region
+... error code 487` repeatedly since ~13:27 today - a Windows-specific
+ASLR/memory-mapping conflict that prevents Postgres from forking new backend
+processes for new connections, so anything opening a fresh connection (like
+signup) failed while already-open connections may have kept working. Fixed
+via the project's own documented recovery path (`node scripts/dev-db.js
+down` then `up` again - a clean restart, no data lost, persistent volume
+untouched). Confirmed working immediately after (signup succeeded, live
+verification above all ran against the restarted instance). Flagging since
+other teammates' sessions sharing this same persistent dev DB may have hit
+the same 500s before this restart, and it's a Windows-specific failure mode
+that could recur - not something introduced by #46/#47's changes.
+
+**Per-game payout math verification level, made explicit per main's
+direction (not all games got the same treatment):**
+- Independently re-derived/verified this pass: Dice, Mines (#38 baseline
+  pass), Blackjack, Video Poker (read in full, matches earlier independent
+  client-side verification), Baccarat, Keno (both above, this pass).
+- Trusted on games' own unit-test coverage (104→115 server tests) plus
+  everything else already verified in #38 (auth, ledger, round-ownership,
+  tamper-resistance) - not independently re-derived this pass: CoinFlip,
+  Roulette, Limbo, Plinko, Slots, Wheel, Dragon Tower, Hi-Lo.

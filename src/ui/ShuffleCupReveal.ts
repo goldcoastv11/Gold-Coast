@@ -64,7 +64,6 @@ import { GC_MULTIPLIERS } from "../economy/gcMultiplier";
  * reproduced-then-confirmed-fixed the same way.
  */
 
-const MULTIPLIERS = GC_MULTIPLIERS; // cup identity -> multiplier, fixed, one cup per value (see economy/gcMultiplier.ts)
 const SLOT_COUNT = 3;
 const SLOT_SPACING = 110;
 const SWAP_STEPS = 18; // ~1/3 are no-ops, so ~12 real swaps happen on average - fast and plenty to be untrackable
@@ -128,14 +127,42 @@ function paintRevealedCup(bg: Phaser.GameObjects.Graphics, multiplier: number, d
  * animates until `start()` is called, so the caller controls timing (e.g.
  * show a "you won a bonus!" beat first). `onResolve` fires once, after the
  * player picks a cup and the reveal animation finishes.
+ *
+ * `forcedMultiplier` (server-authoritative flows - signup/attendant claim):
+ * when provided, the animation is purely presentational - the player still
+ * picks a cup for the suspense/agency of it, but whichever slot they pick
+ * always reveals `forcedMultiplier`, never the locally-shuffled cup's
+ * "natural" identity. This is how the client stays honest with a backend
+ * that has already resolved the real outcome (see
+ * server/src/routes/auth.ts's/economy.ts's comments: the multiplier is
+ * picked server-side via pickRandomGcMultiplier() BEFORE this component
+ * ever runs, specifically so the client can't influence it). The
+ * "preview what's under each cup" beat is skipped in this mode since
+ * showing cup-identity values that are about to be overridden would be
+ * actively misleading rather than just decorative.
+ *
+ * `possibleMultipliers` (#46 - Triple Chance): the set of values the OTHER
+ * (non-chosen) cups cosmetically reveal alongside `forcedMultiplier` -
+ * defaults to GC_MULTIPLIERS so every pre-#46 call site (signup,
+ * attendant-claim GC reveals) is completely unaffected. Triple Chance's
+ * outcome set (3x win / 0x lose) isn't a GC multiplier reveal at all, so it
+ * passes its own `[0, 0, 3]` here instead - without this, the "other two
+ * cups" reveal would fall back to showing 0.5x/1x, values that were never
+ * actually possible outcomes of that round. Only ever affects `forced`-mode
+ * cosmetics; the resolved win/lose or multiplier itself is untouched either
+ * way. Non-forced mode (still only ever used by GC-multiplier reveals)
+ * doesn't need this - it always uses the real MULTIPLIERS set.
  */
 export function createShuffleCupReveal(
   scene: Phaser.Scene,
   x: number,
   y: number,
   baseAmount: number,
-  onResolve: (result: ShuffleCupResult) => void
+  onResolve: (result: ShuffleCupResult) => void,
+  forcedMultiplier?: number,
+  possibleMultipliers: readonly number[] = GC_MULTIPLIERS
 ): ShuffleCupHandle {
+  const MULTIPLIERS = possibleMultipliers; // cup identity -> multiplier for this reveal - see possibleMultipliers doc above
   const container = scene.add.container(x, y).setScrollFactor(0);
 
   /** e.g. 0.5 -> "500", 1 -> "1000", 2 -> "2000" (or "12.5" for a fractional baseAmount) - see #32. */
@@ -259,35 +286,44 @@ export function createShuffleCupReveal(
     });
   }
 
+  function beginShuffle() {
+    cups.forEach((cup) => {
+      paintClosedCup(cup.bg);
+      cup.label.setVisible(false);
+    });
+    statusText.setText("Shuffling...");
+    runSwapStep(SWAP_STEPS, () => {
+      statusText.setText("Pick a cup!");
+      setZonesEnabled(true);
+      hitZones.forEach((zone, slot) => {
+        zone.on("pointerdown", () => pickSlot(slot));
+      });
+    });
+  }
+
   function start() {
     if (started) return;
     started = true;
 
-    // Preview beat: show what's really under each cup (by identity, not
-    // slot - identity and slot are the same thing at this point since no
-    // swaps have happened yet) before hiding them and shuffling for real.
-    // An actual sequence change, not a relabel - see #32.
-    statusText.setText("Here's what's under each cup...");
-    cups.forEach((cup, cupId) => {
-      paintRevealedCup(cup.bg, MULTIPLIERS[cupId], false);
-      cup.label.setText(formatAmount(MULTIPLIERS[cupId])).setColor(colorForMultiplier(MULTIPLIERS[cupId]).text).setVisible(true);
-    });
-
-    const previewTimer = scene.time.delayedCall(PREVIEW_MS, () => {
-      cups.forEach((cup) => {
-        paintClosedCup(cup.bg);
-        cup.label.setVisible(false);
+    if (forcedMultiplier === undefined) {
+      // Preview beat: show what's really under each cup (by identity, not
+      // slot - identity and slot are the same thing at this point since no
+      // swaps have happened yet) before hiding them and shuffling for real.
+      // An actual sequence change, not a relabel - see #32.
+      statusText.setText("Here's what's under each cup...");
+      cups.forEach((cup, cupId) => {
+        paintRevealedCup(cup.bg, MULTIPLIERS[cupId], false);
+        cup.label.setText(formatAmount(MULTIPLIERS[cupId])).setColor(colorForMultiplier(MULTIPLIERS[cupId]).text).setVisible(true);
       });
-      statusText.setText("Shuffling...");
-      runSwapStep(SWAP_STEPS, () => {
-        statusText.setText("Pick a cup!");
-        setZonesEnabled(true);
-        hitZones.forEach((zone, slot) => {
-          zone.on("pointerdown", () => pickSlot(slot));
-        });
-      });
-    });
-    pendingTimers.push(previewTimer);
+      const previewTimer = scene.time.delayedCall(PREVIEW_MS, beginShuffle);
+      pendingTimers.push(previewTimer);
+    } else {
+      // Forced-outcome mode - see doc comment above. Don't preview cup
+      // identities that are about to be overridden anyway.
+      statusText.setText("Get ready...");
+      const previewTimer = scene.time.delayedCall(400, beginShuffle);
+      pendingTimers.push(previewTimer);
+    }
   }
 
   function pickSlot(slot: number) {
@@ -296,8 +332,21 @@ export function createShuffleCupReveal(
     setZonesEnabled(false);
 
     const chosenCupId = positions[slot];
-    const multiplier = MULTIPLIERS[chosenCupId];
+    const multiplier = forcedMultiplier ?? MULTIPLIERS[chosenCupId];
     const resolvedAmount = Math.round(baseAmount * multiplier * 100) / 100;
+
+    // Forced-outcome mode: the chosen cup must show the server-resolved
+    // value regardless of which cup identity honestly ended up there - the
+    // other two cups just need to display the two remaining values from
+    // MULTIPLIERS (order doesn't matter, cosmetic only) so the reveal still
+    // reads as "one of each," not a real re-shuffle of the outcome.
+    const displayValue = (cupId: number): number => {
+      if (forcedMultiplier === undefined) return MULTIPLIERS[cupId];
+      if (cupId === chosenCupId) return forcedMultiplier;
+      const others = MULTIPLIERS.filter((m) => m !== forcedMultiplier);
+      const otherCupIds = cups.map((_, id) => id).filter((id) => id !== chosenCupId);
+      return others[otherCupIds.indexOf(cupId)] ?? forcedMultiplier;
+    };
 
     statusText.setText(`You got ${formatAmount(multiplier)}!`);
 
@@ -307,8 +356,9 @@ export function createShuffleCupReveal(
     // label - see #32.
     cups.forEach((cup, cupId) => {
       const isChosen = cupId === chosenCupId;
-      paintRevealedCup(cup.bg, MULTIPLIERS[cupId], !isChosen);
-      cup.label.setText(formatAmount(MULTIPLIERS[cupId])).setColor(colorForMultiplier(MULTIPLIERS[cupId]).text).setVisible(true);
+      const value = displayValue(cupId);
+      paintRevealedCup(cup.bg, value, !isChosen);
+      cup.label.setText(formatAmount(value)).setColor(colorForMultiplier(value).text).setVisible(true);
       if (isChosen) popIn(scene, cup.container);
     });
 

@@ -1,0 +1,22 @@
+# Railway service config for casino-poc's server. See DEPLOYMENT.md for the
+# full walkthrough (creating the Railway project, provisioning Postgres,
+# setting variables, connecting this repo, deploying).
+#
+# This file only configures the build/deploy behavior - it does NOT and
+# cannot provision any account or cloud resource; that's done by the human
+# user in the Railway dashboard/CLI per DEPLOYMENT.md.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Railway's startCommand (when set) overrides the Dockerfile's CMD entirely,
+# so this repeats the same "migrate then start" sequence explicitly rather
+# than relying on the Dockerfile alone - keeps behavior identical whichever
+# one Railway actually uses.
+startCommand = "npx prisma migrate deploy && node dist/index.js"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 5
+healthcheckPath = "/health"
+healthcheckTimeout = 30

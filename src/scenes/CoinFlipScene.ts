@@ -2,6 +2,9 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
+import type { CoinSide } from "../api/types";
 
 export class CoinFlipScene extends Phaser.Scene {
   private coinText!: Phaser.GameObjects.Text;
@@ -12,7 +15,6 @@ export class CoinFlipScene extends Phaser.Scene {
   private flipping = false;
   private flipTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
-  private currentBet = 0;
 
   constructor() {
     super("CoinFlipScene");
@@ -87,7 +89,8 @@ export class CoinFlipScene extends Phaser.Scene {
     this.updateBalance();
   }
 
-  private flip(guess: "heads" | "tails") {
+  /** #36: the coin's real outcome is resolved server-side (POST /games/coinflip/play) - the flip animation here is purely cosmetic while the request is in flight. */
+  private flip(guess: CoinSide) {
     if (this.flipping) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
@@ -95,49 +98,66 @@ export class CoinFlipScene extends Phaser.Scene {
       return;
     }
 
-    this.currentBet = gameState.betAmount;
+    const bet = gameState.betAmount;
     this.flipping = true;
     this.headsBtn?.setEnabled(false);
     this.tailsBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
     this.messageText.setText("Flipping...").setColor(Theme.textMuted);
 
     let ticks = 0;
     this.flipTimer = this.time.addEvent({
       delay: 90,
-      repeat: 10,
+      loop: true,
       callback: () => {
-        if (!this.coinText.active) {
-          this.flipTimer?.remove(false);
-          return;
+        if (this.coinText.active) {
+          this.coinText.setText(ticks % 2 === 0 ? "🪙" : "🟡");
         }
-        this.coinText.setText(ticks % 2 === 0 ? "🪙" : "🟡");
         ticks++;
-        if (ticks >= 10) {
-          this.resolveFlip(guess);
-        }
       }
     });
+
+    api
+      .playCoinFlip(bet, "GC", guess)
+      .then((res) => this.resolveFlip(res))
+      .catch((err) => this.handleFlipError(err));
   }
 
-  private resolveFlip(guess: "heads" | "tails") {
-    const result: "heads" | "tails" = Math.random() < 0.5 ? "heads" : "tails";
+  private resolveFlip(res: Awaited<ReturnType<typeof api.playCoinFlip>>) {
+    this.flipTimer?.remove(false);
+    this.flipTimer = undefined;
+
+    gameState.hydrateFromServer(res.user);
     this.coinText.setText("🪙");
 
-    if (result === guess) {
-      const payout = this.currentBet * 2;
-      gameState.goldCoins += payout;
-      this.messageText.setText(`${result.toUpperCase()}! You win +${payout} GC`).setColor(
-        Theme.textAccent
-      );
+    const { result, won, payout } = res.result;
+    if (won) {
+      this.messageText.setText(`${result.toUpperCase()}! You win +${payout} GC`).setColor(Theme.textAccent);
       popIn(this, this.coinText);
     } else {
       this.messageText.setText(`${result.toUpperCase()} - you lose`).setColor(Theme.textDanger);
     }
 
     this.updateBalance();
+    this.flipping = false;
+    this.headsBtn?.setEnabled(true);
+    this.tailsBtn?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+  }
+
+  private handleFlipError(err: unknown) {
+    this.flipTimer?.remove(false);
+    this.flipTimer = undefined;
+    this.coinText.setText("🪙");
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
+
     this.flipping = false;
     this.headsBtn?.setEnabled(true);
     this.tailsBtn?.setEnabled(true);

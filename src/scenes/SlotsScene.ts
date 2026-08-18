@@ -2,40 +2,27 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 /**
- * Paytable, tuned generously for early playtesting - this is intentionally
- * a high payout rate to test whether the core loop is fun. Tighten weights
- * and payouts before this ever touches real money.
- *
- * weight: relative chance this symbol lands on a reel (higher = more common)
- * pay3x / pay2x: payout multiplier of the bet for 3-of-a-kind / 2-of-a-kind
+ * Symbol display metadata + the emoji reel. The paytable itself (weights,
+ * pay3x/pay2x) is resolved server-side now (#36, see
+ * server/src/games/slots.ts) - this map is display-only, keyed by the same
+ * symbol `key` the server returns so the client never has to guess which
+ * emoji a server-picked symbol corresponds to.
  */
-interface SymbolDef {
-  key: string;
-  emoji: string;
-  weight: number;
-  pay3x: number;
-  pay2x: number;
-}
+const SYMBOL_EMOJI: Record<string, string> = {
+  cherry: "🍒",
+  lemon: "🍋",
+  bell: "🔔",
+  diamond: "💎",
+  seven: "7️⃣"
+};
+const SYMBOL_KEYS = Object.keys(SYMBOL_EMOJI);
 
-const SYMBOLS: SymbolDef[] = [
-  { key: "cherry", emoji: "🍒", weight: 35, pay3x: 2, pay2x: 0.6 },
-  { key: "lemon", emoji: "🍋", weight: 28, pay3x: 4, pay2x: 1 },
-  { key: "bell", emoji: "🔔", weight: 20, pay3x: 20, pay2x: 2.4 },
-  { key: "diamond", emoji: "💎", weight: 12, pay3x: 80, pay2x: 6 },
-  { key: "seven", emoji: "7️⃣", weight: 5, pay3x: 400, pay2x: 30 }
-];
-
-const TOTAL_WEIGHT = SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
-
-function pickWeightedSymbol(): SymbolDef {
-  let roll = Phaser.Math.Between(1, TOTAL_WEIGHT);
-  for (const s of SYMBOLS) {
-    if (roll <= s.weight) return s;
-    roll -= s.weight;
-  }
-  return SYMBOLS[0];
+function randomEmoji(): string {
+  return SYMBOL_EMOJI[SYMBOL_KEYS[Phaser.Math.Between(0, SYMBOL_KEYS.length - 1)]];
 }
 
 export class SlotsScene extends Phaser.Scene {
@@ -46,7 +33,6 @@ export class SlotsScene extends Phaser.Scene {
   private spinTimer?: Phaser.Time.TimerEvent;
   private spinButton?: UIButton;
   private betControl?: BetControl;
-  private currentBet = 0;
 
   constructor() {
     super("SlotsScene");
@@ -125,6 +111,7 @@ export class SlotsScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  /** #36: the reel result and paytable are resolved server-side (POST /games/slots/play) - the spinning-reels animation here is purely cosmetic while the request is in flight. */
   private spin() {
     if (this.spinning) return;
 
@@ -133,65 +120,66 @@ export class SlotsScene extends Phaser.Scene {
       return;
     }
 
-    this.currentBet = gameState.betAmount;
+    const bet = gameState.betAmount;
     this.spinning = true;
     this.spinButton?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
     this.messageText.setText("Spinning...").setColor(Theme.textMuted);
 
-    let ticks = 0;
     this.spinTimer = this.time.addEvent({
       delay: 80,
-      repeat: 14,
+      loop: true,
       callback: () => {
         const allActive = this.reelTexts.every((t) => t && t.active);
         if (!allActive) {
           this.spinTimer?.remove(false);
           return;
         }
-
-        this.reelTexts.forEach((t) => t.setText(pickWeightedSymbol().emoji));
-        ticks++;
-        if (ticks >= 14) {
-          this.resolveSpin();
-        }
+        this.reelTexts.forEach((t) => t.setText(randomEmoji()));
       }
     });
+
+    api
+      .playSlots(bet, "GC")
+      .then((res) => this.resolveSpin(res))
+      .catch((err) => this.handleSpinError(err));
   }
 
-  private resolveSpin() {
-    const results = [pickWeightedSymbol(), pickWeightedSymbol(), pickWeightedSymbol()];
-    results.forEach((sym, i) => this.reelTexts[i].setText(sym.emoji));
+  private resolveSpin(res: Awaited<ReturnType<typeof api.playSlots>>) {
+    this.spinTimer?.remove(false);
+    this.spinTimer = undefined;
 
-    // Count occurrences of each symbol among the 3 reels
-    const counts = new Map<string, number>();
-    results.forEach((s) => counts.set(s.key, (counts.get(s.key) ?? 0) + 1));
+    gameState.hydrateFromServer(res.user);
 
-    let payout = 0;
-    let winLabel = "";
+    const { reels, payout, winKey, winCount } = res.result;
+    reels.forEach((key, i) => this.reelTexts[i].setText(SYMBOL_EMOJI[key] ?? "❔"));
 
-    for (const [key, count] of counts.entries()) {
-      const def = SYMBOLS.find((s) => s.key === key)!;
-      if (count === 3) {
-        payout = Math.round(this.currentBet * def.pay3x);
-        winLabel = `3x ${def.emoji} — JACKPOT!`;
-      } else if (count === 2 && payout === 0) {
-        payout = Math.round(this.currentBet * def.pay2x);
-        winLabel = `2x ${def.emoji}`;
-      }
-    }
-
-    if (payout > 0) {
-      gameState.goldCoins += payout;
-      this.messageText.setText(`${winLabel}  +${payout} GC`).setColor(Theme.textAccent);
+    if (payout > 0 && winKey) {
+      const label = winCount === 3 ? `3x ${SYMBOL_EMOJI[winKey]} — JACKPOT!` : `2x ${SYMBOL_EMOJI[winKey]}`;
+      this.messageText.setText(`${label}  +${payout} GC`).setColor(Theme.textAccent);
       popIn(this, this.messageText);
     } else {
       this.messageText.setText("No match, try again").setColor(Theme.textMuted);
     }
 
     this.updateBalance();
+    this.spinning = false;
+    this.spinButton?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+  }
+
+  private handleSpinError(err: unknown) {
+    this.spinTimer?.remove(false);
+    this.spinTimer = undefined;
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
+
     this.spinning = false;
     this.spinButton?.setEnabled(true);
     this.betControl?.setEnabled(true);

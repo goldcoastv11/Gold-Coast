@@ -2,22 +2,22 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
+import type { BaccaratBetType } from "../api/types";
 
 /**
  * Real published baccarat odds - no invented numbers. Standard 8-deck-shoe
  * baccarat probabilities are Player ~44.62%, Banker ~45.86%, Tie ~9.52%,
- * which is what the standard drawing rules below produce (verified against
- * a 3M-round Monte Carlo simulation landing within ~0.1-0.2% of the
- * published figures - see the scratch script used during development).
- * Cards are drawn from an effectively infinite shoe (uniform rank 1-13,
- * no removal) rather than tracking a literal 8-deck (416 card) shoe -
- * removing a handful of cards from that many barely moves the odds, so
- * this is the same "infinite shoe" approximation real baccarat math
- * commonly uses, just without bothering to model 416 physical cards.
+ * produced by the standard drawing rules now ported to
+ * server/src/games/baccarat.ts (#36 - see that file for the full
+ * derivation/Monte-Carlo verification; this scene only renders whatever
+ * hand the server dealt).
  *
  * Payout multipliers below are the actual standard casino baccarat
  * paytable (total return per unit bet, matching this codebase's
- * `payout = bet * multiplier` convention):
+ * `payout = bet * multiplier` convention) - display-only here (labels the
+ * bet buttons), the server's copy is what actually resolves a round:
  *   Player 1:1 -> 2.0x   Banker 1:1 minus 5% commission -> 1.95x
  *   Tie 8:1 -> 9.0x
  * A Player/Banker bet pushes (multiplier 1.0, stake returned) if the
@@ -41,78 +41,15 @@ interface Card {
   label: string;
   suit: string;
   isRed: boolean;
-  value: number; // baccarat point value: A=1, 2-9 face, 10/J/Q/K=0
 }
 
-function drawCard(): Card {
-  const rank = Phaser.Math.Between(1, 13);
+/** The server only tells us card *ranks* (all that baccarat scoring needs) - suit is purely cosmetic, so it's picked client-side for display only and never affects anything the player is paid. */
+function displayCard(rank: number): Card {
   const suit = SUITS[Phaser.Math.Between(0, 3)];
-  return {
-    rank,
-    label: RANK_LABELS[rank - 1],
-    suit: suit.symbol,
-    isRed: suit.isRed,
-    value: rank >= 10 ? 0 : rank
-  };
+  return { rank, label: RANK_LABELS[rank - 1], suit: suit.symbol, isRed: suit.isRed };
 }
 
-function handTotal(cards: Card[]): number {
-  return cards.reduce((sum, c) => sum + c.value, 0) % 10;
-}
-
-type Outcome = "player" | "banker" | "tie";
-
-interface RoundResult {
-  playerCards: Card[];
-  bankerCards: Card[];
-  playerTotal: number;
-  bankerTotal: number;
-  outcome: Outcome;
-}
-
-/** Standard baccarat tableau (third-card drawing rules) - see file header for the probabilities this produces. */
-function playRound(): RoundResult {
-  const playerCards = [drawCard(), drawCard()];
-  const bankerCards = [drawCard(), drawCard()];
-  let playerTotal = handTotal(playerCards);
-  let bankerTotal = handTotal(bankerCards);
-
-  if (playerTotal < 8 && bankerTotal < 8) {
-    let playerThird: Card | null = null;
-    if (playerTotal <= 5) {
-      playerThird = drawCard();
-      playerCards.push(playerThird);
-      playerTotal = handTotal(playerCards);
-    }
-
-    let bankerDraws: boolean;
-    if (playerThird === null) {
-      bankerDraws = bankerTotal <= 5;
-    } else if (bankerTotal <= 2) {
-      bankerDraws = true;
-    } else if (bankerTotal === 3) {
-      bankerDraws = playerThird.value !== 8;
-    } else if (bankerTotal === 4) {
-      bankerDraws = playerThird.value >= 2 && playerThird.value <= 7;
-    } else if (bankerTotal === 5) {
-      bankerDraws = playerThird.value >= 4 && playerThird.value <= 7;
-    } else if (bankerTotal === 6) {
-      bankerDraws = playerThird.value === 6 || playerThird.value === 7;
-    } else {
-      bankerDraws = false; // bankerTotal === 7
-    }
-
-    if (bankerDraws) {
-      bankerCards.push(drawCard());
-      bankerTotal = handTotal(bankerCards);
-    }
-  }
-
-  const outcome: Outcome = playerTotal > bankerTotal ? "player" : bankerTotal > playerTotal ? "banker" : "tie";
-  return { playerCards, bankerCards, playerTotal, bankerTotal, outcome };
-}
-
-type BetType = "player" | "banker" | "tie";
+type BetType = BaccaratBetType;
 
 interface CardSlot {
   bg: Phaser.GameObjects.Graphics;
@@ -271,6 +208,7 @@ export class BaccaratScene extends Phaser.Scene {
     this.bankerTotalText.setText("");
   }
 
+  /** #36: the whole round (both hands' cards, every third-card draw, and the payout) is resolved server-side (POST /games/baccarat/play) in one request - the staggered card reveal here is purely cosmetic, replaying the server's real dealt cards one at a time. */
   private deal() {
     if (this.dealing) return;
 
@@ -284,17 +222,24 @@ export class BaccaratScene extends Phaser.Scene {
     this.dealBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(false));
-    gameState.goldCoins -= bet;
-    this.updateBalance();
     this.clearSlots();
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
 
-    const result = playRound();
+    api
+      .playBaccarat(bet, "GC", this.betType)
+      .then((res) => this.animateDeal(res))
+      .catch((err) => this.handleDealError(err));
+  }
+
+  private animateDeal(res: Awaited<ReturnType<typeof api.playBaccarat>>) {
+    const { playerCards, bankerCards } = res.result;
+    const playerDisplay = playerCards.map(displayCard);
+    const bankerDisplay = bankerCards.map(displayCard);
 
     // Reveal cards with a short staggered delay for a "dealing" feel, then resolve.
     const reveals: Array<() => void> = [];
-    result.playerCards.forEach((card, i) => reveals.push(() => this.paintSlot(this.playerSlots[i], card)));
-    result.bankerCards.forEach((card, i) => reveals.push(() => this.paintSlot(this.bankerSlots[i], card)));
+    playerDisplay.forEach((card, i) => reveals.push(() => this.paintSlot(this.playerSlots[i], card)));
+    bankerDisplay.forEach((card, i) => reveals.push(() => this.paintSlot(this.bankerSlots[i], card)));
 
     let step = 0;
     this.time.addEvent({
@@ -304,48 +249,33 @@ export class BaccaratScene extends Phaser.Scene {
         reveals[step]();
         step++;
         if (step >= reveals.length) {
-          this.playerTotalText.setText(`Total: ${result.playerTotal}`);
-          this.bankerTotalText.setText(`Total: ${result.bankerTotal}`);
-          this.resolveRound(bet, result);
+          this.playerTotalText.setText(`Total: ${res.result.playerTotal}`);
+          this.bankerTotalText.setText(`Total: ${res.result.bankerTotal}`);
+          this.resolveRound(res);
         }
       }
     });
   }
 
-  private resolveRound(bet: number, result: RoundResult) {
-    let multiplier = 0;
-    let outcomeMsg = "";
+  private resolveRound(res: Awaited<ReturnType<typeof api.playBaccarat>>) {
+    gameState.hydrateFromServer(res.user);
 
-    if (this.betType === "player") {
-      if (result.outcome === "player") multiplier = PLAYER_WIN_MULT;
-      else if (result.outcome === "tie") multiplier = PUSH_MULT;
-    } else if (this.betType === "banker") {
-      if (result.outcome === "banker") multiplier = BANKER_WIN_MULT;
-      else if (result.outcome === "tie") multiplier = PUSH_MULT;
-    } else {
-      if (result.outcome === "tie") multiplier = TIE_WIN_MULT;
-    }
-
-    const payout = Math.round(bet * multiplier);
-    const winnerLabel =
-      result.outcome === "player" ? "Player wins" : result.outcome === "banker" ? "Banker wins" : "Tie";
+    const { outcome, multiplier, payout, playerTotal, bankerTotal } = res.result;
+    const winnerLabel = outcome === "player" ? "Player wins" : outcome === "banker" ? "Banker wins" : "Tie";
 
     if (payout > 0) {
-      gameState.goldCoins += payout;
       if (multiplier === PUSH_MULT) {
-        this.messageText.setText(`${winnerLabel} (${result.playerTotal}-${result.bankerTotal}) - push, bet returned`).setColor(
+        this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - push, bet returned`).setColor(
           Theme.textGold
         );
       } else {
         this.messageText
-          .setText(`${winnerLabel} (${result.playerTotal}-${result.bankerTotal})! +${payout} GC`)
+          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} GC`)
           .setColor(Theme.textAccent);
         popIn(this, this.messageText);
       }
     } else {
-      this.messageText
-        .setText(`${winnerLabel} (${result.playerTotal}-${result.bankerTotal}) - you lose`)
-        .setColor(Theme.textDanger);
+      this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - you lose`).setColor(Theme.textDanger);
     }
 
     this.updateBalance();
@@ -353,6 +283,21 @@ export class BaccaratScene extends Phaser.Scene {
     this.dealBtn?.setEnabled(true);
     this.betControl?.setEnabled(true);
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(true));
+  }
+
+  private handleDealError(err: unknown) {
+    this.dealing = false;
+    this.dealBtn?.setEnabled(true);
+    this.betControl?.setEnabled(true);
+    Object.values(this.betButtons).forEach((b) => b?.setEnabled(true));
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
   }
 
   private updateBalance() {

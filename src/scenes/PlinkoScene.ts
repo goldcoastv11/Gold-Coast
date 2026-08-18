@@ -2,6 +2,8 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
 
 const ROWS = 8; // rows of pegs -> 9 landing slots
 const ROW_SPACING = 28;
@@ -10,7 +12,7 @@ const BOARD_TOP_Y = 182;
 const BOARD_CENTER_X = 400;
 const SLOTS_Y = 402;
 
-// Symmetric payout table, one entry per slot (index = number of "right" bounces).
+// Symmetric payout table, one entry per slot (index = number of "right" bounces) - mirrors server/src/games/plinko.ts's PLINKO_MULTIPLIERS exactly (display/preview only; the server is what actually resolves a drop, see drop()).
 const MULTIPLIERS = [16, 9, 2, 1.4, 0.6, 1.4, 2, 9, 16];
 
 function colorForMultiplier(m: number): number {
@@ -104,6 +106,7 @@ export class PlinkoScene extends Phaser.Scene {
     });
   }
 
+  /** #36: the bounce path (and therefore the landing slot) is resolved server-side (POST /games/plinko/play) - `result.path` is the exact per-row "how many right bounces so far" sequence the server used, so the client just replays it visually instead of rolling its own. */
   private drop() {
     if (this.dropping) return;
 
@@ -116,22 +119,30 @@ export class PlinkoScene extends Phaser.Scene {
     this.dropping = true;
     this.dropBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    gameState.goldCoins -= bet;
-    this.updateBalance();
     this.messageText.setText("Dropping...").setColor(Theme.textMuted);
 
-    // Precompute the whole bounce path up front (fair coin flip per row)
-    let rightCount = 0;
-    const waypoints: Array<{ x: number; y: number }> = [];
-    for (let step = 0; step < ROWS; step++) {
-      if (Phaser.Math.Between(0, 1) === 1) rightCount++;
-      const x = BOARD_CENTER_X + (2 * rightCount - (step + 1)) * (PEG_SPACING / 2);
-      const y = BOARD_TOP_Y + (step + 1) * ROW_SPACING;
-      waypoints.push({ x, y });
-    }
-
-    this.ball.setPosition(BOARD_CENTER_X, BOARD_TOP_Y - 16);
-    this.animateStep(waypoints, 0, () => this.resolveDrop(bet, rightCount));
+    api
+      .playPlinko(bet, "GC")
+      .then((res) => {
+        const waypoints = res.result.path.map((rightCount, step) => ({
+          x: BOARD_CENTER_X + (2 * rightCount - (step + 1)) * (PEG_SPACING / 2),
+          y: BOARD_TOP_Y + (step + 1) * ROW_SPACING
+        }));
+        this.ball.setPosition(BOARD_CENTER_X, BOARD_TOP_Y - 16);
+        this.animateStep(waypoints, 0, () => this.resolveDrop(res));
+      })
+      .catch((err) => {
+        this.dropping = false;
+        this.dropBtn?.setEnabled(true);
+        this.betControl?.setEnabled(true);
+        if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+          this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+        } else if (err instanceof NetworkError) {
+          this.messageText.setText(err.message).setColor(Theme.textDanger);
+        } else {
+          this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+        }
+      });
   }
 
   private animateStep(waypoints: Array<{ x: number; y: number }>, index: number, onDone: () => void) {
@@ -149,18 +160,17 @@ export class PlinkoScene extends Phaser.Scene {
     });
   }
 
-  private resolveDrop(bet: number, slotIndex: number) {
-    const mult = MULTIPLIERS[slotIndex];
-    const payout = Math.round(bet * mult);
-    gameState.goldCoins += payout;
+  private resolveDrop(res: Awaited<ReturnType<typeof api.playPlinko>>) {
+    gameState.hydrateFromServer(res.user);
 
+    const { slotIndex, multiplier, payout } = res.result;
     const label = this.slotTexts[slotIndex];
     popIn(this, label);
 
-    if (mult >= 1) {
-      this.messageText.setText(`Landed on ${mult}x! +${payout} GC`).setColor(Theme.textAccent);
+    if (multiplier >= 1) {
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} GC`).setColor(Theme.textAccent);
     } else {
-      this.messageText.setText(`Landed on ${mult}x - only +${payout} GC`).setColor(Theme.textDanger);
+      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} GC`).setColor(Theme.textDanger);
     }
 
     this.updateBalance();

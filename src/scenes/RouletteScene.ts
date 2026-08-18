@@ -2,39 +2,35 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import * as api from "../api/client";
+import { ApiError, NetworkError } from "../api/client";
+import type { RouletteColor } from "../api/types";
 
 const RED_NUMBERS = new Set([
   1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
 ]);
 
-type BetColor = "red" | "black" | "green";
-
-function colorOf(n: number): BetColor {
+/** Client-side preview only (coloring the spin animation's tumbling digits) - mirrors server/src/games/roulette.ts's colorOf() exactly, but the number that actually gets paid out always comes from the server's response (#36). */
+function colorOf(n: number): RouletteColor {
   if (n === 0) return "green";
   return RED_NUMBERS.has(n) ? "red" : "black";
 }
-
-const PAYOUTS: Record<BetColor, number> = {
-  red: 2,
-  black: 2,
-  green: 20 // generous for early playtesting, same spirit as the slots paytable
-};
 
 // Roulette's red/black/green stay domain-specific (a real wheel needs 3
 // distinguishable colors), but the black pocket is a warm dark-brown, not
 // pure black, and red/green now share the theme's danger/success family -
 // per STYLE_GUIDE direction notes 1/2/7.
-const COLOR_HEX: Record<BetColor, string> = {
+const COLOR_HEX: Record<RouletteColor, string> = {
   red: "#c2504d",
   black: "#5c3a2e",
   green: "#2e9b72"
 };
-const COLOR_NUM: Record<BetColor, number> = {
+const COLOR_NUM: Record<RouletteColor, number> = {
   red: 0xc2504d,
   black: 0x5c3a2e,
   green: 0x2e9b72
 };
-const COLOR_NUM_HOVER: Record<BetColor, number> = {
+const COLOR_NUM_HOVER: Record<RouletteColor, number> = {
   red: 0xd47a77,
   black: 0x7a5442,
   green: 0x5cc79c
@@ -48,7 +44,6 @@ export class RouletteScene extends Phaser.Scene {
   private spinning = false;
   private spinTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
-  private currentBet = 0;
 
   constructor() {
     super("RouletteScene");
@@ -140,7 +135,8 @@ export class RouletteScene extends Phaser.Scene {
     this.updateBalance();
   }
 
-  private spin(bet: BetColor) {
+  /** #36: the winning number is resolved server-side (POST /games/roulette/play) - the spinning-digits animation here is purely cosmetic while the request is in flight. */
+  private spin(bet: RouletteColor) {
     if (this.spinning) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
@@ -148,52 +144,66 @@ export class RouletteScene extends Phaser.Scene {
       return;
     }
 
-    this.currentBet = gameState.betAmount;
+    const wager = gameState.betAmount;
     this.spinning = true;
     this.betButtons.forEach((b) => b.setEnabled(false));
     this.betControl?.setEnabled(false);
-    gameState.goldCoins -= this.currentBet;
-    this.updateBalance();
     this.messageText.setText("Spinning...").setColor(Theme.textMuted);
 
-    let ticks = 0;
     this.spinTimer = this.time.addEvent({
       delay: 70,
-      repeat: 16,
+      loop: true,
       callback: () => {
-        if (!this.resultText.active) {
-          this.spinTimer?.remove(false);
-          return;
-        }
-        const n = Phaser.Math.Between(0, 36);
-        this.resultText.setText(String(n)).setColor(COLOR_HEX[colorOf(n)]);
-        ticks++;
-        if (ticks >= 16) {
-          this.resolveSpin(bet);
+        if (this.resultText.active) {
+          const n = Phaser.Math.Between(0, 36);
+          this.resultText.setText(String(n)).setColor(COLOR_HEX[colorOf(n)]);
         }
       }
     });
+
+    api
+      .playRoulette(wager, "GC", bet)
+      .then((res) => this.resolveSpin(res))
+      .catch((err) => this.handleSpinError(err));
   }
 
-  private resolveSpin(bet: BetColor) {
-    const n = Phaser.Math.Between(0, 36);
-    const resultColor = colorOf(n);
-    this.resultText.setText(String(n)).setColor(COLOR_HEX[resultColor]);
+  private resolveSpin(res: Awaited<ReturnType<typeof api.playRoulette>>) {
+    this.spinTimer?.remove(false);
+    this.spinTimer = undefined;
 
-    if (resultColor === bet) {
-      const payout = this.currentBet * PAYOUTS[bet];
-      gameState.goldCoins += payout;
+    gameState.hydrateFromServer(res.user);
+
+    const { number, color, won, payout } = res.result;
+    this.resultText.setText(String(number)).setColor(COLOR_HEX[color]);
+
+    if (won) {
       this.messageText
-        .setText(`${n} ${resultColor.toUpperCase()} — you win +${payout} GC`)
+        .setText(`${number} ${color.toUpperCase()} — you win +${payout} GC`)
         .setColor(Theme.textAccent);
       popIn(this, this.resultText);
     } else {
-      this.messageText.setText(`${n} ${resultColor.toUpperCase()} — you lose`).setColor(
-        Theme.textDanger
-      );
+      this.messageText.setText(`${number} ${color.toUpperCase()} — you lose`).setColor(Theme.textDanger);
     }
 
     this.updateBalance();
+    this.spinning = false;
+    this.betButtons.forEach((b) => b.setEnabled(true));
+    this.betControl?.setEnabled(true);
+  }
+
+  private handleSpinError(err: unknown) {
+    this.spinTimer?.remove(false);
+    this.spinTimer = undefined;
+    this.resultText.setText("?").setColor(Theme.textPrimary);
+
+    if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+    } else if (err instanceof NetworkError) {
+      this.messageText.setText(err.message).setColor(Theme.textDanger);
+    } else {
+      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+    }
+
     this.spinning = false;
     this.betButtons.forEach((b) => b.setEnabled(true));
     this.betControl?.setEnabled(true);
