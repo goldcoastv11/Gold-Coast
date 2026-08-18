@@ -40,4 +40,13 @@ EXPOSE 8787
 
 # Applies any pending migrations, then starts the server. Safe to run on
 # every deploy - a no-op when the schema's already up to date.
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/index.js"]
+#
+# Calls the local prisma binary directly (node_modules/.bin/prisma) rather
+# than through `npx` - npx's own resolution/update-check overhead was
+# observed to hang indefinitely after migrate deploy finished its actual
+# work (migrations applied successfully every time, but control never
+# returned to the shell to run the next command), even with
+# CHECKPOINT_DISABLE=1 set. The local binary is already guaranteed present
+# (prisma is a devDependency, installed above) so there's nothing for npx
+# to resolve or fetch in the first place.
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy && node dist/index.js"]
