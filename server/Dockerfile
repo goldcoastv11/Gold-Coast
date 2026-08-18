@@ -12,7 +12,12 @@
 
 FROM node:20-slim
 WORKDIR /app
-ENV NODE_ENV=production
+
+# NODE_ENV=production must NOT be set yet here - `npm install` treats it as
+# an implicit --omit=dev, which would skip typescript/@types/*/prisma (all
+# devDependencies) and break both `npm run build` (tsc) and `prisma migrate
+# deploy` at container start below. Set it only after the build is done and
+# these steps no longer need devDependencies.
 
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
@@ -21,6 +26,8 @@ RUN npm install
 COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
+
+ENV NODE_ENV=production
 
 EXPOSE 8787
 
