@@ -20,13 +20,19 @@ type FieldName = "username" | "password" | null;
  * First scene after boot. Task #37: username/password screen backed by the
  * real casino-poc/server API (POST /auth/signup, POST /auth/login, GET
  * /me) instead of the old localStorage-hashed fake auth - see
- * src/api/client.ts. The server, not this client, decides new-vs-existing
- * (signup fails with USERNAME_TAKEN if the username exists, in which case
- * this scene transparently falls back to a login attempt with the same
- * credentials) and resolves the signup bonus's GC multiplier (the
- * shuffle-cup mini-game is purely presentational here - it always reveals
- * whatever the server already decided, never a locally-picked value; see
- * ShuffleCupReveal.ts's `forcedMultiplier`).
+ * src/api/client.ts. Resolves the signup bonus's GC multiplier server-side
+ * (the shuffle-cup mini-game is purely presentational here - it always
+ * reveals whatever the server already decided, never a locally-picked
+ * value; see ShuffleCupReveal.ts's `forcedMultiplier`).
+ *
+ * Explicit Sign Up / Sign In tabs (not "try signup, fall back to login on
+ * USERNAME_TAKEN" - the previous approach): the player picks a mode up
+ * front via `setMode()`, and `submit()` calls exactly the one matching
+ * endpoint. A Sign Up attempt that collides with an existing username
+ * surfaces that directly, pointing at the Sign In tab, rather than silently
+ * retrying as a login - a wrong password on what the player believes is a
+ * brand-new account would otherwise produce a confusing "wrong password"
+ * message instead of "that username's taken."
  */
 export class LoginScene extends Phaser.Scene {
   private usernameValue = "";
@@ -34,15 +40,19 @@ export class LoginScene extends Phaser.Scene {
   private activeField: FieldName = null;
   private cursorOn = true;
   private cursorTimer?: Phaser.Time.TimerEvent;
+  private mode: "signup" | "signin" = "signup";
 
   private usernameText!: Phaser.GameObjects.Text;
   private passwordText!: Phaser.GameObjects.Text;
   private usernameBox!: Phaser.GameObjects.Graphics;
   private passwordBox!: Phaser.GameObjects.Graphics;
   private errorText!: Phaser.GameObjects.Text;
+  private hintText!: Phaser.GameObjects.Text;
   private usernameZone!: Phaser.GameObjects.Zone;
   private passwordZone!: Phaser.GameObjects.Zone;
   private enterBtn!: UIButton;
+  private signupTabBtn!: UIButton;
+  private signinTabBtn!: UIButton;
 
   constructor() {
     super("LoginScene");
@@ -53,6 +63,7 @@ export class LoginScene extends Phaser.Scene {
     this.passwordValue = "";
     this.activeField = null;
     this.cursorOn = true;
+    this.mode = "signup";
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
     makePanel(this, 400, 300, 460, 460);
@@ -67,55 +78,49 @@ export class LoginScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    this.add
-      .text(400, 187, "Log in or create a profile", {
-        fontSize: "13px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
+    // Sign Up / Sign In tabs - see class doc comment for why this replaced
+    // the old single "ENTER CASINO" button that tried signup then silently
+    // fell back to login. renderTabs() (re)draws both to reflect `mode`.
+    this.renderTabs();
 
     this.add
-      .text(400, 220, "Username", { fontSize: "11px", color: Theme.textMuted })
+      .text(400, 228, "Username", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
     this.usernameBox = this.add.graphics();
-    this.drawFieldBox(this.usernameBox, 248, false);
+    this.drawFieldBox(this.usernameBox, 256, false);
     this.usernameText = this.add
-      .text(400, 248, "", { fontSize: "15px", color: Theme.textPrimary })
+      .text(400, 256, "", { fontSize: "15px", color: Theme.textPrimary })
       .setOrigin(0.5);
     this.usernameZone = this.add
-      .zone(400, 248, FIELD_W, FIELD_H)
+      .zone(400, 256, FIELD_W, FIELD_H)
       .setInteractive({ useHandCursor: true });
     this.usernameZone.on("pointerdown", () => this.setActiveField("username"));
 
     this.add
-      .text(400, 283, "Password", { fontSize: "11px", color: Theme.textMuted })
+      .text(400, 291, "Password", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
     this.passwordBox = this.add.graphics();
-    this.drawFieldBox(this.passwordBox, 311, false);
+    this.drawFieldBox(this.passwordBox, 319, false);
     this.passwordText = this.add
-      .text(400, 311, "", { fontSize: "15px", color: Theme.textPrimary })
+      .text(400, 319, "", { fontSize: "15px", color: Theme.textPrimary })
       .setOrigin(0.5);
     this.passwordZone = this.add
-      .zone(400, 311, FIELD_W, FIELD_H)
+      .zone(400, 319, FIELD_W, FIELD_H)
       .setInteractive({ useHandCursor: true });
     this.passwordZone.on("pointerdown", () => this.setActiveField("password"));
 
     this.errorText = this.add
-      .text(400, 350, "", { fontSize: "12px", color: Theme.textDanger })
+      .text(400, 358, "", { fontSize: "12px", color: Theme.textDanger, align: "center", wordWrap: { width: 400 } })
       .setOrigin(0.5);
 
-    this.enterBtn = makeButton(this, 400, 400, 220, 50, "ENTER CASINO", Theme.accent, Theme.accentHover, () =>
+    this.enterBtn = makeButton(this, 400, 406, 220, 50, "CREATE ACCOUNT", Theme.accent, Theme.accentHover, () =>
       this.submit()
     );
 
-    this.add
-      .text(
-        400,
-        455,
-        "New username? We'll create a fresh profile.\nYour progress now lives on the server.",
-        { fontSize: "11px", color: Theme.textMuted, align: "center" }
-      )
+    this.hintText = this.add
+      .text(400, 462, "", { fontSize: "11px", color: Theme.textMuted, align: "center" })
       .setOrigin(0.5);
+    this.updateModeCopy();
 
     this.input.keyboard?.on("keydown", this.onKeyDown);
     this.cursorTimer = this.time.addEvent({
@@ -214,12 +219,46 @@ export class LoginScene extends Phaser.Scene {
     const passCursor = this.activeField === "password" && this.cursorOn ? "_" : "";
     this.usernameText.setText(this.usernameValue + userCursor);
     this.passwordText.setText("•".repeat(this.passwordValue.length) + passCursor);
-    this.drawFieldBox(this.usernameBox, 248, this.activeField === "username");
-    this.drawFieldBox(this.passwordBox, 311, this.activeField === "password");
+    this.drawFieldBox(this.usernameBox, 256, this.activeField === "username");
+    this.drawFieldBox(this.passwordBox, 319, this.activeField === "password");
   }
 
   private setStatus(message: string, isError: boolean) {
     this.errorText.setColor(isError ? Theme.textDanger : Theme.textMuted).setText(message);
+  }
+
+  /** (Re)draws the Sign Up / Sign In tabs, highlighting whichever matches `this.mode`. Destroys and recreates rather than restyling in place - cheap for two small buttons, and keeps the active/inactive color logic in one place (uiHelpers' UIButton has no "recolor" API, only enable/disable). */
+  private renderTabs() {
+    this.signupTabBtn?.destroy();
+    this.signinTabBtn?.destroy();
+
+    const signupColors = this.mode === "signup" ? ([Theme.accent, Theme.accentHover] as const) : ([Theme.neutral, Theme.neutralHover] as const);
+    const signinColors = this.mode === "signin" ? ([Theme.accent, Theme.accentHover] as const) : ([Theme.neutral, Theme.neutralHover] as const);
+
+    this.signupTabBtn = makeButton(this, 292, 195, 200, 36, "Sign Up", signupColors[0], signupColors[1], () =>
+      this.setMode("signup")
+    );
+    this.signinTabBtn = makeButton(this, 508, 195, 200, 36, "Sign In", signinColors[0], signinColors[1], () =>
+      this.setMode("signin")
+    );
+  }
+
+  /** Updates the submit button label and the footer hint to match `this.mode`. Split out from setMode() so create() can call it once for the initial mode without also calling renderTabs() a second time. */
+  private updateModeCopy() {
+    this.enterBtn.setLabel(this.mode === "signup" ? "CREATE ACCOUNT" : "SIGN IN");
+    this.hintText.setText(
+      this.mode === "signup"
+        ? "We'll create a fresh profile.\nYour progress lives on the server."
+        : "Enter your existing username and password."
+    );
+  }
+
+  private setMode(mode: "signup" | "signin") {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    this.setStatus("", false);
+    this.renderTabs();
+    this.updateModeCopy();
   }
 
   /**
@@ -245,21 +284,24 @@ export class LoginScene extends Phaser.Scene {
       this.usernameZone.setInteractive({ useHandCursor: true });
       this.passwordZone.setInteractive({ useHandCursor: true });
       this.enterBtn.setEnabled(true);
+      this.signupTabBtn.setEnabled(true);
+      this.signinTabBtn.setEnabled(true);
     } else {
       this.usernameZone.disableInteractive();
       this.passwordZone.disableInteractive();
       this.enterBtn.setEnabled(false);
+      this.signupTabBtn.setEnabled(false);
+      this.signinTabBtn.setEnabled(false);
     }
   }
 
   /**
-   * Validates fields, then tries POST /auth/signup first - since only the
-   * server knows whether `username` already exists, any signup failure
-   * (USERNAME_TAKEN, or any other error) falls back to POST /auth/login
-   * with the same credentials rather than guessing client-side. A brand
-   * new profile plays the shuffle-cup reveal (task #28/#29) reconciled to
-   * the server's already-resolved multiplier before entering; logging into
-   * an existing profile skips it, matching the pre-#37 UX.
+   * Validates fields, then calls exactly the one endpoint matching
+   * `this.mode` - no signup-then-fallback-to-login guessing (see class doc
+   * comment). A brand new profile plays the shuffle-cup reveal (task
+   * #28/#29) reconciled to the server's already-resolved multiplier before
+   * entering; signing in to an existing profile skips it, matching the
+   * pre-#37 UX.
    */
   private async submit() {
     const username = this.usernameValue.trim();
@@ -275,40 +317,41 @@ export class LoginScene extends Phaser.Scene {
 
     this.setActiveField(null);
     this.setFormInteractionEnabled(false);
-    this.setStatus("Signing in...", false);
 
-    try {
-      const signupRes = await api.signup(username, password);
-      api.setToken(signupRes.token);
-      gameState.hydrateFromServer(signupRes.user);
-      await this.playForcedShuffleCup(signupRes.signupBonus.gcMultiplier);
-      await this.runTripleChanceOffer(signupRes.signupBonus.gcAmount);
-      await this.reconcileAndEnter(signupRes.user);
+    if (this.mode === "signup") {
+      this.setStatus("Creating your profile...", false);
+      try {
+        const signupRes = await api.signup(username, password);
+        api.setToken(signupRes.token);
+        gameState.hydrateFromServer(signupRes.user);
+        await this.playForcedShuffleCup(signupRes.signupBonus.gcMultiplier);
+        await this.runTripleChanceOffer(signupRes.signupBonus.gcAmount);
+        await this.reconcileAndEnter(signupRes.user);
+      } catch (err) {
+        this.setFormInteractionEnabled(true);
+        if (err instanceof ApiError) {
+          // USERNAME_TAKEN unambiguously means "this is an existing
+          // account" - point the player at the Sign In tab explicitly
+          // rather than silently retrying as a login behind their back
+          // (which would risk a confusing "wrong password" message if
+          // they'd meant to create a new account with a typo'd password).
+          this.setStatus(
+            err.code === "USERNAME_TAKEN"
+              ? "That username's taken - switch to Sign In to log in instead."
+              : this.describeSignupValidationError(err),
+            true
+          );
+        } else if (err instanceof NetworkError) {
+          this.setStatus(err.message, true);
+        } else {
+          this.setStatus("Something went wrong - please try again.", true);
+        }
+      }
       return;
-    } catch (err) {
-      if (!(err instanceof ApiError)) {
-        this.setFormInteractionEnabled(true);
-        this.setStatus(
-          err instanceof NetworkError ? err.message : "Something went wrong - please try again.",
-          true
-        );
-        return;
-      }
-      // Only USERNAME_TAKEN unambiguously means "this is an existing
-      // account, try logging in instead." Anything else (INVALID_INPUT -
-      // password too short, username has bad characters, etc.) is a real
-      // validation problem on what would be a brand-new account - show it
-      // directly rather than masking it behind a login attempt that would
-      // just 401 with a confusing "wrong password" message.
-      if (err.code !== "USERNAME_TAKEN") {
-        this.setFormInteractionEnabled(true);
-        this.setStatus(this.describeSignupValidationError(err), true);
-        return;
-      }
     }
 
+    this.setStatus("Signing in...", false);
     try {
-      this.setStatus("Signing in...", false);
       const loginRes = await api.login(username, password);
       api.setToken(loginRes.token);
       gameState.hydrateFromServer(loginRes.user);
@@ -378,9 +421,11 @@ export class LoginScene extends Phaser.Scene {
         .setOrigin(0.5)
         .setDepth(301);
       const sub = this.add
-        .text(400, 219, "Pick a cup to reveal your starting Gold Coins", {
+        .text(400, 219, "Shuffle the cups, then pick one to reveal your starting Gold Coins", {
           fontSize: "12px",
-          color: Theme.textMuted
+          color: Theme.textMuted,
+          align: "center",
+          wordWrap: { width: 360 }
         })
         .setOrigin(0.5)
         .setDepth(301);

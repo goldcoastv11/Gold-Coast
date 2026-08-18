@@ -33,7 +33,11 @@ import { ApiError, NetworkError } from "../api/client";
 
 const TRIPLE_CHANCE_DISPLAY_SET = [0, 0, 3] as const;
 const PANEL_W = 440;
-const PANEL_H = 240;
+// 260, not 240: ShuffleCupReveal's explain-then-shuffle-button beat (added
+// alongside the sign-up/sign-in screen) needs a bit more vertical room below
+// the cups than the old auto-timed preview did - 240 clipped the new
+// "Shuffle!" button by a few px against this panel's bottom edge.
+const PANEL_H = 260;
 
 export interface TripleChanceOutcome {
   /** Final GC amount held once this Triple Chance detour ends - unchanged `startingAmount` if declined without playing, 0 if the chain ended in a loss, or the compounded amount if the player won and then chose to stop. */

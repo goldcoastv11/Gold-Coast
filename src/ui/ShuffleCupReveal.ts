@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
-import { popIn } from "./uiHelpers";
+import { popIn, makeButton, UIButton } from "./uiHelpers";
 import { GC_MULTIPLIERS } from "../economy/gcMultiplier";
 
 /**
@@ -37,9 +37,11 @@ import { GC_MULTIPLIERS } from "../economy/gcMultiplier";
  * parity-locked to 3 of the 6 permutations (still per-slot-fair, but a
  * needless structural regularity); the lazy version removes that too.
  *
- * Sequence: preview (all 3 amounts shown briefly) -> hide (cups close back
- * to their identical unrevealed state) -> shuffle -> pick -> reveal (real
- * change to the flow, not just a relabel - see #32).
+ * Sequence: explain + preview (all 3 possible amounts shown, honestly - see
+ * `start()`'s doc comment for why this is true even in forced-outcome mode)
+ * -> player taps a "Shuffle!" button (not a timer - see below) -> hide (cups
+ * close back to their identical unrevealed state) -> shuffle -> pick ->
+ * reveal (real change to the flow, not just a relabel - see #32).
  *
  * #32 postmortem (real bug, found via live play in OverworldScene): every
  * element this component creates now gets its own explicit
@@ -68,7 +70,6 @@ const SLOT_COUNT = 3;
 const SLOT_SPACING = 110;
 const SWAP_STEPS = 18; // ~1/3 are no-ops, so ~12 real swaps happen on average - fast and plenty to be untrackable
 const NOOP_CHANCE = 1 / 3;
-const PREVIEW_MS = 1400; // how long the "here's what's under each cup" beat shows before cups close and shuffle starts
 
 const CUP_W = 84;
 const CUP_H = 78;
@@ -136,10 +137,14 @@ function paintRevealedCup(bg: Phaser.GameObjects.Graphics, multiplier: number, d
  * that has already resolved the real outcome (see
  * server/src/routes/auth.ts's/economy.ts's comments: the multiplier is
  * picked server-side via pickRandomGcMultiplier() BEFORE this component
- * ever runs, specifically so the client can't influence it). The
- * "preview what's under each cup" beat is skipped in this mode since
- * showing cup-identity values that are about to be overridden would be
- * actively misleading rather than just decorative.
+ * ever runs, specifically so the client can't influence it). This does NOT
+ * make the pre-shuffle "here's what's under each cup" preview dishonest,
+ * even in forced mode: at the moment `start()` shows it, no swap has
+ * happened yet, so cup identity and slot are still the same thing (see the
+ * `positions` comment below) - it's a true statement about how this round
+ * begins. Only the FINAL reveal, after ~12 untrackable real swaps and the
+ * player's pick, is overridden to `forcedMultiplier` regardless of which
+ * cup honestly ended up there.
  *
  * `possibleMultipliers` (#46 - Triple Chance): the set of values the OTHER
  * (non-chosen) cups cosmetically reveal alongside `forcedMultiplier` -
@@ -171,10 +176,12 @@ export function createShuffleCupReveal(
   };
 
   const statusText = scene.add
-    .text(0, -CUP_H / 2 - 30, "Get ready...", {
-      fontSize: "16px",
+    .text(0, -CUP_H / 2 - 44, "Get ready...", {
+      fontSize: "14px",
       color: Theme.textPrimary,
-      fontStyle: "bold"
+      fontStyle: "bold",
+      align: "center",
+      wordWrap: { width: 360 }
     })
     .setOrigin(0.5)
     .setScrollFactor(0);
@@ -301,29 +308,49 @@ export function createShuffleCupReveal(
     });
   }
 
+  let shuffleBtn: UIButton | undefined;
+
+  /**
+   * Explain-and-wait beat, always shown (forced mode included - see the
+   * `forcedMultiplier` doc comment above for why this preview is still
+   * honest there): show what's really under each cup right now (by
+   * identity, not slot - identity and slot are the same thing at this
+   * point since no swaps have happened yet - an actual sequence change,
+   * not a relabel, see #32) and require an explicit tap on a "Shuffle!"
+   * button before anything moves, instead of the old fixed-delay auto-
+   * transition. Gives the player a real beat to read the 3 amounts and
+   * understand what's about to happen, on their own timing.
+   */
+  function showExplainAndShuffleButton() {
+    statusText.setText("These are the 3 possible prizes. Tap Shuffle, then pick a cup to reveal yours!");
+    cups.forEach((cup, cupId) => {
+      paintRevealedCup(cup.bg, MULTIPLIERS[cupId], false);
+      cup.label.setText(formatAmount(MULTIPLIERS[cupId])).setColor(colorForMultiplier(MULTIPLIERS[cupId]).text).setVisible(true);
+    });
+
+    shuffleBtn = makeButton(
+      scene,
+      0,
+      CUP_H / 2 + 46,
+      190,
+      42,
+      "🔀 Shuffle!",
+      Theme.accent,
+      Theme.accentHover,
+      () => {
+        shuffleBtn?.destroy();
+        shuffleBtn = undefined;
+        beginShuffle();
+      }
+    );
+    shuffleBtn.container.setScrollFactor(0);
+    container.add(shuffleBtn.container);
+  }
+
   function start() {
     if (started) return;
     started = true;
-
-    if (forcedMultiplier === undefined) {
-      // Preview beat: show what's really under each cup (by identity, not
-      // slot - identity and slot are the same thing at this point since no
-      // swaps have happened yet) before hiding them and shuffling for real.
-      // An actual sequence change, not a relabel - see #32.
-      statusText.setText("Here's what's under each cup...");
-      cups.forEach((cup, cupId) => {
-        paintRevealedCup(cup.bg, MULTIPLIERS[cupId], false);
-        cup.label.setText(formatAmount(MULTIPLIERS[cupId])).setColor(colorForMultiplier(MULTIPLIERS[cupId]).text).setVisible(true);
-      });
-      const previewTimer = scene.time.delayedCall(PREVIEW_MS, beginShuffle);
-      pendingTimers.push(previewTimer);
-    } else {
-      // Forced-outcome mode - see doc comment above. Don't preview cup
-      // identities that are about to be overridden anyway.
-      statusText.setText("Get ready...");
-      const previewTimer = scene.time.delayedCall(400, beginShuffle);
-      pendingTimers.push(previewTimer);
-    }
+    showExplainAndShuffleButton();
   }
 
   function pickSlot(slot: number) {
@@ -375,6 +402,7 @@ export function createShuffleCupReveal(
       pendingTimers.forEach((t) => t.remove(false));
       scene.tweens.killTweensOf(cups.map((c) => c.container));
       hitZones.forEach((z) => z.removeAllListeners());
+      shuffleBtn?.destroy();
       container.destroy();
     }
   };
