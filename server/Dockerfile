@@ -62,4 +62,15 @@ EXPOSE 8787
 # every observed deploy shows all migrations already applied (nothing
 # pending) - the real migration work, when there is any, still completes
 # in under a second, well before the server would see meaningful traffic.
-CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy & node dist/index.js"]
+#
+# STILL failed after this change too - Railway's deploy log went silent in
+# the exact same place (right after Prisma's own "No pending migrations to
+# apply."), with zero server output, even though `node dist/index.js` is no
+# longer waiting on prisma at all. That ruled out prisma's process lifecycle
+# as the cause entirely. So: bare `echo` markers below, needing zero Node,
+# zero TypeScript, zero Prisma - just plain `sh` - to see whether the shell
+# itself ever reaches the point of launching node in the first place. Also
+# switched to `exec node ...` so node replaces the shell as PID 1 instead of
+# running as its child (correct signal handling, and one less process in
+# the way).
+CMD ["sh", "-c", "echo '>>> BOOT-A: shell entered CMD'; ./node_modules/.bin/prisma migrate deploy & echo '>>> BOOT-B: migrate backgrounded, about to exec node'; exec node dist/index.js"]

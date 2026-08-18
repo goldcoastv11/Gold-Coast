@@ -14,14 +14,13 @@ dockerfilePath = "Dockerfile"
 # Railway's startCommand (when set) overrides the Dockerfile's CMD entirely,
 # so this repeats the same sequence explicitly rather than relying on the
 # Dockerfile alone - keeps behavior identical whichever one Railway
-# actually uses. See the Dockerfile's CMD comment for the full history:
-# `prisma migrate deploy` was observed to hang indefinitely after its
-# actual work finished, and a `timeout`-wrapped version of it *still* left
-# the server unstarted after 30s, because `timeout` doesn't reliably kill
-# Prisma's grandchild query-engine process. `&` backgrounds the migrate
-# step entirely (fire-and-forget) so nothing about its process lifecycle
-# can ever block the server from starting.
-startCommand = "./node_modules/.bin/prisma migrate deploy & node dist/index.js"
+# actually uses. See the Dockerfile's CMD comment for the full history -
+# backgrounding prisma with `&` *still* produced a silent deploy log with
+# zero server output, ruling out prisma's process lifecycle as the cause
+# entirely. These bare `echo` markers need zero Node/TypeScript/Prisma to
+# produce output - they tell us whether the shell itself ever reaches the
+# point of launching node at all.
+startCommand = "echo '>>> BOOT-A: shell entered CMD'; ./node_modules/.bin/prisma migrate deploy & echo '>>> BOOT-B: migrate backgrounded, about to exec node'; exec node dist/index.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
 healthcheckPath = "/health"
