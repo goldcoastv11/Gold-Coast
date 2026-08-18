@@ -38,22 +38,28 @@ ENV NODE_ENV=production
 
 EXPOSE 8787
 
-# Applies any pending migrations, then starts the server. Safe to run on
-# every deploy - a no-op when the schema's already up to date.
+# Runs migrations in the BACKGROUND and starts the server immediately,
+# unconditionally - not `&&`, not even `timeout ...;`.
 #
-# `timeout 20 ... ; node dist/index.js` (semicolon, not &&) rather than the
-# more obvious `prisma migrate deploy && node dist/index.js`: on Railway,
-# `prisma migrate deploy` was observed to hang indefinitely AFTER printing
-# its own final success output ("No pending migrations to apply." / "All
-# migrations have been successfully applied.") - the actual migration work
-# completes in under a second every time, but the CLI process itself never
-# returns control to the shell (reproduced with both npx and the local
-# binary directly, with and without CHECKPOINT_DISABLE - not an npx or
-# telemetry issue, something about the CLI process itself not exiting
-# cleanly in this container environment, most likely a lingering DB
-# connection handle keeping its event loop alive). `timeout 20` caps how
-# long we wait for it, and the server always starts afterward regardless of
-# the migrate command's exit status - safe given migrations have reliably
-# already applied by then in every observed run. If prisma's own behavior
-# here is fixed in a future version, this can safely revert to `&&`.
-CMD ["sh", "-c", "timeout 20 ./node_modules/.bin/prisma migrate deploy; node dist/index.js"]
+# History: `prisma migrate deploy && node dist/index.js` was observed on
+# Railway to hang forever after printing its own final success output
+# ("No pending migrations to apply.") - migration work completes in under a
+# second every time, but the CLI process itself never returns control to
+# the shell. A `timeout 20 ...; node dist/index.js` wrapper was tried next,
+# expecting the server to start at most 20s later either way - but the
+# healthcheck still failed after its full 30s timeout with ZERO server
+# output (confirmed via staged boot logging that the very first line of
+# dist/index.js never printed). Root cause: `timeout` only signals the
+# direct child it spawns (the prisma CLI process) - Prisma's Rust
+# query-engine runs as a grandchild subprocess that can survive that signal
+# and keep holding the shell open past when `timeout` was expected to force
+# a return.
+#
+# Fix: stop waiting on prisma's process lifecycle entirely. `&` backgrounds
+# `prisma migrate deploy` (fire-and-forget) and the shell moves to
+# `node dist/index.js` immediately, regardless of whether/when the
+# migration command's process tree ever fully exits. Safe here because
+# every observed deploy shows all migrations already applied (nothing
+# pending) - the real migration work, when there is any, still completes
+# in under a second, well before the server would see meaningful traffic.
+CMD ["sh", "-c", "./node_modules/.bin/prisma migrate deploy & node dist/index.js"]
