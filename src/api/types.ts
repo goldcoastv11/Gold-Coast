@@ -17,6 +17,7 @@ export interface MeResponse {
   lastPosition: { x: number; y: number } | null;
   playthrough: { required: number; wagered: number };
   attendantClaim: { lastClaimedAt: string | null };
+  adReward: { lastClaimedAt: string | null };
   /**
    * The user's currently-active stateful-game round (Mines/Dragon Tower/
    * Hi-Lo/Blackjack/Video Poker), or null if none (#42/#43). Present on
@@ -91,6 +92,19 @@ export interface ClaimBonusResponse {
 
 /** POST /claim-bonus (429 COOLDOWN) */
 export interface ClaimBonusCooldownError {
+  error: string;
+  code: "COOLDOWN";
+  remainingMs: number;
+}
+
+/** POST /ads/claim (200) - simulated ad-reward GC refill, see server/src/economy/adRewards.ts. */
+export interface ClaimAdRewardResponse {
+  granted: { gcAmount: number };
+  user: MeResponse;
+}
+
+/** POST /ads/claim (429 COOLDOWN) - same shape as ClaimBonusCooldownError. */
+export interface ClaimAdRewardCooldownError {
   error: string;
   code: "COOLDOWN";
   remainingMs: number;

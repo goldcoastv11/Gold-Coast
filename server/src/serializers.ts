@@ -19,6 +19,7 @@ export interface MeResponse {
   lastPosition: { x: number; y: number } | null;
   playthrough: { required: number; wagered: number };
   attendantClaim: { lastClaimedAt: string | null };
+  adReward: { lastClaimedAt: string | null };
   /**
    * The user's currently-active stateful-game round (Mines/Dragon Tower/
    * Hi-Lo/Blackjack/Video Poker), or null if none. Added alongside #42
@@ -33,17 +34,27 @@ export interface MeResponse {
 }
 
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
-  const [goldCoins, stakeCoins, skinsOwned, equippedSkin, lastPosition, playthrough, attendantClaim, activeRound] =
-    await Promise.all([
-      getBalance(tx, userId, "GC"),
-      getBalance(tx, userId, "SC"),
-      listOwnedSkins(tx, userId),
-      getEquippedSkin(tx, userId),
-      tx.lastPosition.findUnique({ where: { userId } }),
-      getPlaythroughState(tx, userId),
-      tx.attendantClaim.findUnique({ where: { userId } }),
-      tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } })
-    ]);
+  const [
+    goldCoins,
+    stakeCoins,
+    skinsOwned,
+    equippedSkin,
+    lastPosition,
+    playthrough,
+    attendantClaim,
+    adRewardClaim,
+    activeRound
+  ] = await Promise.all([
+    getBalance(tx, userId, "GC"),
+    getBalance(tx, userId, "SC"),
+    listOwnedSkins(tx, userId),
+    getEquippedSkin(tx, userId),
+    tx.lastPosition.findUnique({ where: { userId } }),
+    getPlaythroughState(tx, userId),
+    tx.attendantClaim.findUnique({ where: { userId } }),
+    tx.adRewardClaim.findUnique({ where: { userId } }),
+    tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } })
+  ]);
 
   return {
     username,
@@ -55,6 +66,9 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     playthrough,
     attendantClaim: {
       lastClaimedAt: attendantClaim?.lastClaimedAt ? attendantClaim.lastClaimedAt.toISOString() : null
+    },
+    adReward: {
+      lastClaimedAt: adRewardClaim?.lastClaimedAt ? adRewardClaim.lastClaimedAt.toISOString() : null
     },
     activeRound: activeRound ? { game: activeRound.game, roundId: activeRound.id } : null
   };

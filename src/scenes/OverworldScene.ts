@@ -6,6 +6,7 @@ import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
+import { offerAdReward } from "../ui/AdRewardOffer";
 import { runOnboardingTutorial, TutorialStep } from "../ui/TutorialGuide";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -363,6 +364,18 @@ export class OverworldScene extends Phaser.Scene {
       "Skin Attendant",
       "Press E to browse skins",
       () => this.openSkinPanel("shop")
+    );
+
+    // Ad Kiosk - simulated "watch an ad for Gold Coins" claim (see
+    // ui/AdRewardOffer.ts's doc comment for why it's simulated, not a real
+    // ad network). Placed at (67,38), in the right corridor between HiLo
+    // (67,28) and Video Poker (67,48) - same 10-tile column spacing already
+    // proven clear in this layout (matches HiLo/Slots' existing 7-tile gap
+    // at column 74 one row over).
+    const adKiosk = this.physics.add.staticSprite(67 * TILE, 38 * TILE, "ad_kiosk");
+    this.physics.add.collider(this.player, adKiosk);
+    this.registerStation(adKiosk, "Ad Kiosk", "Press E to watch an ad for Gold Coins", () =>
+      this.openAdKioskOffer()
     );
 
     // Ambient bystanders - purely decorative "social hub" flavor (STYLE_GUIDE
@@ -847,6 +860,21 @@ export class OverworldScene extends Phaser.Scene {
   private openChipPanel() {
     this.panelOpen = true;
     this.showConfirmPanel();
+  }
+
+  /** Ad Kiosk's offer/simulated-ad/result flow - see ui/AdRewardOffer.ts. */
+  private openAdKioskOffer() {
+    this.panelOpen = true;
+    offerAdReward(
+      this,
+      400,
+      300,
+      () => {
+        this.panelOpen = false;
+        this.updateHud();
+      },
+      () => this.updateHud()
+    );
   }
 
   private showConfirmPanel() {

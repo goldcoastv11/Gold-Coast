@@ -39,6 +39,7 @@ model User {
   lastPosition        LastPosition?
   playthroughProgress PlaythroughProgress?
   attendantClaim      AttendantClaim?
+  adRewardClaim       AdRewardClaim?
   gameRounds          GameRound[]
 
   @@map("users")
@@ -163,6 +164,18 @@ model AttendantClaim {
   lastClaimedAt DateTime? @map("last_claimed_at") @db.Timestamptz(3)
 
   @@map("attendant_claim")
+}
+
+// Ad-reward GC refill cooldown (see economy/adRewards.ts) - separate table
+// from AttendantClaim since these are two independently-cooled-down claim
+// sources, not the same mechanic. Same @db.Timestamptz(3) note as above
+// applies here too.
+model AdRewardClaim {
+  userId        String    @id @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lastClaimedAt DateTime? @map("last_claimed_at") @db.Timestamptz(3)
+
+  @@map("ad_reward_claim")
 }
 
 // #36: server-authoritative round state for multi-step games (Mines, Dragon

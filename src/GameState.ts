@@ -210,6 +210,16 @@ class GameState {
   private _betAmount = 25;
   /** ms-since-epoch of the last successful attendant claim (#18/#19), or null if never claimed. */
   private _attendantClaimedAt: number | null = null;
+  /**
+   * ms-since-epoch of the last successful ad-reward claim, or null if never
+   * claimed. Server-hydrated only (see hydrateFromServer) - this is a new,
+   * fully server-authoritative feature with no pre-backend local-ledger
+   * equivalent, unlike attendantClaimedAt above, so there's no matching
+   * legacy claim method/local persistence for it - only the read side lives
+   * here, purely for optimistic "is the button enabled" UI display before
+   * the real POST /ads/claim call, which is the actual source of truth.
+   */
+  private _adRewardClaimedAt: number | null = null;
 
   /** Skin ids the player owns. "player" (Classic) is always owned/free. */
   unlockedSkins: string[] = ["player"];
@@ -412,6 +422,19 @@ class GameState {
   }
 
   /**
+   * ms remaining before the ad-reward claim (POST /ads/claim,
+   * AD_REWARD_COOLDOWN_MS = 60s server-side - see
+   * server/src/economy/adRewards.ts) can succeed again, based on the last
+   * server-hydrated value. 0 = available now. Optimistic only - the server
+   * re-checks this on every claim regardless of what this says.
+   */
+  get adRewardCooldownRemainingMs(): number {
+    if (this._adRewardClaimedAt === null) return 0;
+    const AD_REWARD_COOLDOWN_MS = 60_000; // keep in sync with server/src/economy/adRewards.ts
+    return Math.max(0, AD_REWARD_COOLDOWN_MS - (Date.now() - this._adRewardClaimedAt));
+  }
+
+  /**
    * The overworld Chip Attendant's free GC claim (#18/#19). Routed through
    * the purchase-bonus path (src/economy/attendantClaim.ts) rather than
    * the ad-reward path: this claim is a placeholder stand-in for a future
@@ -552,6 +575,7 @@ class GameState {
     this._attendantClaimedAt = me.attendantClaim.lastClaimedAt
       ? Date.parse(me.attendantClaim.lastClaimedAt)
       : null;
+    this._adRewardClaimedAt = me.adReward.lastClaimedAt ? Date.parse(me.adReward.lastClaimedAt) : null;
   }
 
   /** Clears the active session (including the stored JWT - see src/api/client.ts). Local profile data in localStorage is untouched. */

@@ -173,6 +173,7 @@ import type {
   BuySkinResponse,
   EquipSkinResponse,
   ClaimBonusResponse,
+  ClaimAdRewardResponse,
   Currency,
   DicePlayResponse,
   MinesStartResponse,
@@ -238,6 +239,12 @@ export function equipSkin(skinId: string): Promise<EquipSkinResponse> {
 
 export function claimBonus(): Promise<ClaimBonusResponse> {
   return request<ClaimBonusResponse>("/claim-bonus", { method: "POST" });
+}
+
+// ---- Ad reward (simulated - see server/src/economy/adRewards.ts) ----
+
+export function claimAdReward(): Promise<ClaimAdRewardResponse> {
+  return request<ClaimAdRewardResponse>("/ads/claim", { method: "POST" });
 }
 
 // ---- Games (#36 - server-authoritative RNG/payout) ----
