@@ -466,7 +466,14 @@ export class OverworldScene extends Phaser.Scene {
       },
       {
         title: "This Is You",
-        text: "This is your character! Use WASD or the arrow keys to walk around the casino floor."
+        text: "This is your character! Use WASD or the arrow keys to walk around the casino floor - try it now.",
+        // Every other step keeps movement locked (the camera's about to
+        // pan somewhere and the player shouldn't wander off mid-tour), but
+        // THIS step's whole point is inviting the player to move - locking
+        // it here would mean pressing WASD as instructed does nothing,
+        // which reads as the tutorial being frozen (confirmed via live
+        // testing). Camera resumes following the player for this one step.
+        allowMovement: true
       },
       {
         title: "Chip Attendant",
@@ -502,6 +509,9 @@ export class OverworldScene extends Phaser.Scene {
           this.activeInteractable = null;
           this.promptText.setVisible(false);
         }
+      },
+      onResumeFollow: () => {
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
       },
       onComplete: () => {
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);

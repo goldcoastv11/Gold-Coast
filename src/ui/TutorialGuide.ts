@@ -24,6 +24,17 @@ export interface TutorialStep {
   text: string;
   /** World position to pan the camera to before showing this step. Omit to keep the camera wherever it already is (the first step, right after stopFollow, or a step at the same spot as the previous one). */
   panTo?: { x: number; y: number };
+  /**
+   * If true, movement is unlocked and the camera resumes following the
+   * player while THIS step's dialogue is shown - for the "this is you, try
+   * WASD" step, so the tutorial's own instruction actually does something
+   * instead of the player pressing keys and nothing happening (movement is
+   * locked by default for every other step, since the player shouldn't be
+   * wandering off mid-tour while the camera's about to pan somewhere else).
+   * Locks again (and the camera stops following again) the moment they
+   * advance past it.
+   */
+  allowMovement?: boolean;
 }
 
 const PANEL_X = 400;
@@ -113,27 +124,43 @@ function showDialogue(
 /**
  * Runs `steps` in order: pans the camera (if `panTo` is given), shows the
  * dialogue, waits for "Next"/"Skip", advances - "Got it!" on the final
- * step's button instead of "Next". Stops following the player with the
- * camera for the duration (`stopFollow`) - this module doesn't know the
- * caller's `startFollow` lerp settings, so resuming it is the caller's job
- * via `onComplete`, called exactly once whether the tutorial finished
- * normally or was skipped. `onLockMovement(true)` fires immediately;
- * `onLockMovement(false)` fires right before `onComplete`.
+ * step's button instead of "Next".
+ *
+ * Movement/camera-follow state is re-applied fresh for EVERY step (not
+ * just once up front) based on that step's own `allowMovement` - locked +
+ * camera stopped for every step by default, unlocked + camera resumed
+ * following for a step that opts in (e.g. "try WASD now"). This module
+ * calls `stopFollow()` directly (no params needed), but resuming follow
+ * needs the caller's own `startFollow` lerp settings, so that's always the
+ * caller's job via `onResumeFollow` - called at the start of any step with
+ * `allowMovement: true`, and once more at the very end via `onComplete`
+ * regardless of which step the tutorial finished/was skipped on.
  */
 export function runOnboardingTutorial(
   scene: Phaser.Scene,
   steps: readonly TutorialStep[],
-  callbacks: { onLockMovement: (locked: boolean) => void; onComplete: () => void }
+  callbacks: {
+    onLockMovement: (locked: boolean) => void;
+    onResumeFollow: () => void;
+    onComplete: () => void;
+  }
 ): void {
   if (steps.length === 0) {
     callbacks.onComplete();
     return;
   }
 
-  callbacks.onLockMovement(true);
-  scene.cameras.main.stopFollow();
-
   let index = 0;
+
+  const applyStepInteractivity = (step: TutorialStep) => {
+    const interactive = !!step.allowMovement;
+    callbacks.onLockMovement(!interactive);
+    if (interactive) {
+      callbacks.onResumeFollow();
+    } else {
+      scene.cameras.main.stopFollow();
+    }
+  };
 
   const finish = () => {
     callbacks.onLockMovement(false);
@@ -179,6 +206,7 @@ export function runOnboardingTutorial(
 
   const goToStep = () => {
     const step = steps[index];
+    applyStepInteractivity(step);
     if (step.panTo) {
       // force: true - a fresh pan should never silently no-op just because
       // Phaser's Pan effect happened to still consider itself "running"

@@ -427,15 +427,12 @@ export class LoginScene extends Phaser.Scene {
         })
         .setOrigin(0.5)
         .setDepth(301);
-      const sub = this.add
-        .text(400, 219, "Shuffle the cups, then pick one to reveal your starting Gold Coins", {
-          fontSize: "12px",
-          color: Theme.textMuted,
-          align: "center",
-          wordWrap: { width: 360 }
-        })
-        .setOrigin(0.5)
-        .setDepth(301);
+      // No separate subtitle here (there used to be one, statically saying
+      // "Shuffle the cups, then pick one...") - ShuffleCupReveal's own
+      // statusText now explains each phase itself (added alongside the
+      // click-to-shuffle change), positioned at this exact same y. Having
+      // both rendered the two literally on top of each other ("Shuffle the
+      // cups..." under "Pick a cup!") - confirmed via a live screenshot.
 
       const handle = createShuffleCupReveal(
         this,
@@ -446,7 +443,6 @@ export class LoginScene extends Phaser.Scene {
           handle.destroy();
           overlay.destroy();
           title.destroy();
-          sub.destroy();
           resolve();
         },
         multiplier
