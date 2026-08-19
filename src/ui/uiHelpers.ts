@@ -21,7 +21,11 @@ function drawPill(
   g.fillStyle(fill, alpha);
   g.fillRoundedRect(-w / 2, -h / 2, w, h, h / 2);
   // Warm dark-brown outline, never pure black - STYLE_GUIDE direction note 2.
-  g.lineStyle(2, Theme.outline, 0.35);
+  // Full opacity to match every other bordered element in the chrome system
+  // (makePanel/makeInset/ShuffleCupReveal's cups all stroke at alpha 1) -
+  // this used to be a faint 0.35, which made buttons the one outlier that
+  // read flatter/lighter than everything drawn next to them.
+  g.lineStyle(2, Theme.outline, 1);
   g.strokeRoundedRect(-w / 2, -h / 2, w, h, h / 2);
 }
 
@@ -63,10 +67,24 @@ export function makeButton(
     if (enabled) drawPill(bg, w, h, hoverColor);
   });
   container.on("pointerout", () => {
+    // Also undoes the pointerdown press-scale below, in case the pointer
+    // drags off the button before releasing - otherwise it could get stuck
+    // visually "pressed."
+    container.setScale(1);
     if (enabled) drawPill(bg, w, h, baseColor);
   });
   container.on("pointerdown", () => {
-    if (enabled) onClick();
+    if (!enabled) return;
+    // Tasteful, conservative "press" affordance - a small scale-down while
+    // held, on top of the existing hover recolor (STYLE_GUIDE direction
+    // note 3: rounded/soft, not a hard bevel/glow state change). Purely
+    // visual - onClick still fires on pointerdown exactly as before, so no
+    // interaction timing changes for any caller.
+    container.setScale(0.96);
+    onClick();
+  });
+  container.on("pointerup", () => {
+    if (enabled) container.setScale(1);
   });
 
   return {
@@ -75,6 +93,7 @@ export function makeButton(
     setEnabled: (v: boolean) => {
       enabled = v;
       container.setAlpha(v ? 1 : 0.45);
+      container.setScale(1); // in case this lands mid-press
       if (v) {
         container.setInteractive({ useHandCursor: true });
       } else {
@@ -118,6 +137,78 @@ export function makeInset(
   g.lineStyle(1, Theme.panelBorder, 1);
   g.strokeRoundedRect(-w / 2, -h / 2, w, h, radius);
   return g;
+}
+
+export interface TextChip {
+  container: Phaser.GameObjects.Container;
+  text: Phaser.GameObjects.Text;
+  setText: (t: string) => void;
+  destroy: () => void;
+}
+
+/**
+ * A small rounded "chip" - a Theme.panel pill sized to fit a line of text,
+ * stroked the same way as makePanel/makeInset. Used for floating HUD/
+ * prompt-bubble/toast text that used to draw a flat CSS-style rectangular
+ * `backgroundColor` straight on a Phaser Text object - Text's own
+ * `backgroundColor` has no rounding or outline support, so those bubbles
+ * were the one place still reading as sharp/flat against STYLE_GUIDE
+ * direction notes 2 ("thick, consistent dark outlines... rounded corners")
+ * and 3 ("rounded everything"). This wraps the same look every other panel
+ * in the chrome system already uses instead.
+ *
+ * `originX`/`originY` mirror Phaser's text origin (0.5/0.5 = centered on
+ * (x, y); 0.5/1 = bottom-anchored, growing upward - e.g. a label that
+ * should stay pinned just above a moving point).
+ */
+export function makeTextChip(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  initialText: string,
+  textStyle: Phaser.Types.GameObjects.Text.TextStyle,
+  opts: {
+    originX?: number;
+    originY?: number;
+    paddingX?: number;
+    paddingY?: number;
+    fillAlpha?: number;
+  } = {}
+): TextChip {
+  const { originX = 0.5, originY = 0.5, paddingX = 10, paddingY = 6, fillAlpha = 0.92 } = opts;
+
+  const container = scene.add.container(x, y);
+  const bg = scene.add.graphics();
+  const text = scene.add.text(0, 0, initialText, textStyle).setOrigin(0.5);
+  container.add([bg, text]);
+
+  const redraw = () => {
+    const chipW = text.width + paddingX * 2;
+    const chipH = text.height + paddingY * 2;
+    // Shift both the text and the pill so the chip's own (x, y) behaves
+    // like a Phaser text origin of (originX, originY) rather than always
+    // being dead-center - e.g. a bottom-anchored HUD label that should grow
+    // upward as its text changes, not grow from its center.
+    const offX = (0.5 - originX) * chipW;
+    const offY = (0.5 - originY) * chipH;
+    text.setPosition(offX, offY);
+    bg.clear();
+    bg.fillStyle(Theme.panel, fillAlpha);
+    bg.fillRoundedRect(offX - chipW / 2, offY - chipH / 2, chipW, chipH, chipH / 2);
+    bg.lineStyle(1.5, Theme.panelBorder, 0.7);
+    bg.strokeRoundedRect(offX - chipW / 2, offY - chipH / 2, chipW, chipH, chipH / 2);
+  };
+  redraw();
+
+  return {
+    container,
+    text,
+    setText: (t: string) => {
+      text.setText(t);
+      redraw();
+    },
+    destroy: () => container.destroy()
+  };
 }
 
 export interface BetControl {

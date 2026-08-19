@@ -3,7 +3,7 @@ import { gameState } from "../GameState";
 import { listSkins, SkinDef } from "../economy/skinShop";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, UIButton } from "../ui/uiHelpers";
+import { makeButton, makePanel, makeInset, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { runOnboardingTutorial, TutorialStep } from "../ui/TutorialGuide";
@@ -16,14 +16,21 @@ const MAP_ROWS = 56;
 const PLAYER_SPEED = 160;
 const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
 
-// Floating text "chips" (prompt/HUD/labels/toasts) draw their own CSS-style
-// backgroundColor rather than a Theme.ts Graphics fill, so they need string
-// hex constants here instead of Theme's numeric ones. Task #23: swapped from
-// the old near-black "#000000cc"/"#000000aa" tooltip chips (leftover
-// old-dark-casino look, flagged during #22's audit) to a warm-cream chip
-// matching Theme.panel, so nothing still reads as "casino at night" against
-// the new bright backdrop (STYLE_GUIDE direction notes 1 & 7).
-const CHIP_BG = "#fdf3e1e6"; // Theme.panel, ~90% opaque - prompt/HUD/toast
+// Per-station/zone floating labels (registerStation/addZoneSign - many on
+// screen at once) still draw their own CSS-style backgroundColor rather
+// than a Theme.ts Graphics fill, so they need a string hex constant here
+// instead of Theme's numeric ones. Task #23: swapped from the old
+// near-black "#000000cc"/"#000000aa" tooltip chips (leftover old-dark-
+// casino look, flagged during #22's audit) to a warm-cream chip matching
+// Theme.panel, so nothing still reads as "casino at night" against the new
+// bright backdrop (STYLE_GUIDE direction notes 1 & 7).
+//
+// The HUD/prompt-bubble/toast (this scope's polish pass) moved off this
+// flat-rect approach entirely onto ui/uiHelpers.ts's makeTextChip, which
+// gets the same warm-cream fill but with the rounded corners + outline the
+// rest of the chrome system uses (STYLE_GUIDE direction notes 2 & 3) -
+// Text's own backgroundColor can't do either. Per-station labels stay on
+// this simpler path for now (out of this pass's scope - see file header).
 const CHIP_BG_SOFT = "#fdf3e1cc"; // Theme.panel, ~80% opaque - per-station labels (many on screen at once)
 
 interface Interactable {
@@ -299,8 +306,8 @@ export class OverworldScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private interactKey!: Phaser.Input.Keyboard.Key;
-  private promptText!: Phaser.GameObjects.Text;
-  private hudText!: Phaser.GameObjects.Text;
+  private promptText!: TextChip;
+  private hudText!: TextChip;
   private panelOpen = false;
   private interactables: Interactable[] = [];
   private activeInteractable: Interactable | null = null;
@@ -419,28 +426,25 @@ export class OverworldScene extends Phaser.Scene {
     >;
     this.interactKey = this.input.keyboard!.addKey("E");
 
-    // UI (fixed to camera)
-    this.promptText = this.add
-      .text(400, 550, "", {
-        fontSize: "16px",
-        color: Theme.textPrimary,
-        backgroundColor: CHIP_BG,
-        padding: { x: 10, y: 6 }
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(100)
-      .setVisible(false);
+    // UI (fixed to camera) - rounded warm-cream chips (makeTextChip), matching
+    // the rest of the chrome system's panel/inset outline treatment instead
+    // of Text's flat rectangular backgroundColor. See CHIP_BG_SOFT's comment
+    // above for why the per-station labels stay on the simpler path.
+    this.promptText = makeTextChip(this, 400, 550, "", {
+      fontSize: "16px",
+      color: Theme.textPrimary
+    });
+    this.promptText.container.setScrollFactor(0).setDepth(100).setVisible(false);
 
-    this.hudText = this.add
-      .text(0, 0, "", {
-        fontSize: "13px",
-        color: Theme.textGold,
-        backgroundColor: CHIP_BG,
-        padding: { x: 8, y: 4 }
-      })
-      .setOrigin(0.5, 1)
-      .setDepth(90);
+    this.hudText = makeTextChip(
+      this,
+      0,
+      0,
+      "",
+      { fontSize: "13px", color: Theme.textGold },
+      { originY: 1, paddingX: 8, paddingY: 4 }
+    );
+    this.hudText.container.setDepth(90);
 
     // "Clothes" corner button - always available, opens the wardrobe
     // (switch between skins you already own)
@@ -518,7 +522,7 @@ export class OverworldScene extends Phaser.Scene {
         // movement unlocks, no explicit restore needed here.
         if (locked) {
           this.activeInteractable = null;
-          this.promptText.setVisible(false);
+          this.promptText.container.setVisible(false);
         }
       },
       onResumeFollow: () => {
@@ -541,7 +545,7 @@ export class OverworldScene extends Phaser.Scene {
     this.handleInteraction();
 
     // keep the coin tracker hovering just above the player's head
-    this.hudText.setPosition(this.player.x, this.player.y - this.player.displayHeight / 2 - 6);
+    this.hudText.container.setPosition(this.player.x, this.player.y - this.player.displayHeight / 2 - 6);
   }
 
   private lastDir: "down" | "left" | "right" | "up" = "down";
@@ -687,9 +691,10 @@ export class OverworldScene extends Phaser.Scene {
     }
 
     if (this.activeInteractable) {
-      this.promptText.setText(this.activeInteractable.prompt).setVisible(true);
+      this.promptText.setText(this.activeInteractable.prompt);
+      this.promptText.container.setVisible(true);
     } else {
-      this.promptText.setVisible(false);
+      this.promptText.container.setVisible(false);
     }
   }
 
@@ -1121,37 +1126,37 @@ export class OverworldScene extends Phaser.Scene {
     return `Couldn't ${action} - try again.`;
   }
 
-  private activeToast?: Phaser.GameObjects.Text;
+  private activeToast?: TextChip;
 
   /**
    * Brief fading confirmation/error message, positioned above the skin
    * shop panel but generic enough for any overworld panel flow (also used
-   * by the attendant claim's rare cooldown-race fallback, #29).
+   * by the attendant claim's rare cooldown-race fallback, #29). Uses the
+   * same rounded warm-cream chip (makeTextChip) as the HUD/prompt bubble,
+   * rather than a flat CSS-rect Text background, so toast notifications
+   * match the rest of the chrome system's panel/outline treatment.
    */
   private showToast(message: string, color: string) {
     this.activeToast?.destroy();
-    const toast = this.add
-      .text(400, 145, message, {
-        fontSize: "13px",
-        color,
-        fontStyle: "bold",
-        backgroundColor: CHIP_BG,
-        padding: { x: 10, y: 5 }
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(210)
-      .setAlpha(0);
+    const toast = makeTextChip(
+      this,
+      400,
+      145,
+      message,
+      { fontSize: "13px", color, fontStyle: "bold" },
+      { paddingX: 10, paddingY: 5 }
+    );
+    toast.container.setScrollFactor(0).setDepth(210).setAlpha(0);
     this.activeToast = toast;
 
     this.tweens.add({
-      targets: toast,
+      targets: toast.container,
       alpha: 1,
       duration: 120,
       onComplete: () => {
         this.time.delayedCall(900, () => {
           this.tweens.add({
-            targets: toast,
+            targets: toast.container,
             alpha: 0,
             duration: 300,
             onComplete: () => {
