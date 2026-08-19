@@ -104,6 +104,25 @@ export class BootScene extends Phaser.Scene {
       frameHeight: 16
     });
 
+    // Ambient background bystanders (OverworldScene's addAmbientNpc) - the
+    // 3 Kenney variants STYLE_GUIDE.md flagged as sitting completely unused
+    // (char_b_brick/char_d_hardhat/char_f_dark), put to work as decorative
+    // "social hub" flavor per direction note 4 rather than static dead
+    // weight. Same 16x16/4x3 layout as player/npc/dealer above, so they
+    // reuse createKenneyWalkAnims below - no new loader logic needed.
+    this.load.spritesheet("npc2_sheet", "assets/characters/kenney/char_b_brick.png", {
+      frameWidth: 16,
+      frameHeight: 16
+    });
+    this.load.spritesheet("npc3_sheet", "assets/characters/kenney/char_d_hardhat.png", {
+      frameWidth: 16,
+      frameHeight: 16
+    });
+    this.load.spritesheet("npc4_sheet", "assets/characters/kenney/char_f_dark.png", {
+      frameWidth: 16,
+      frameHeight: 16
+    });
+
     // Every purchasable skin (SKIN_CATALOG) - STILL the old Jephed-pack rig,
     // 21x32, 3 cols (walk frame) x 4 rows (direction). STYLE_GUIDE.md's scope
     // note is explicit: the new Kenney pack has no equivalent for these 17
@@ -126,6 +145,9 @@ export class BootScene extends Phaser.Scene {
     this.createKenneyWalkAnims("player_sheet", "player");
     this.createKenneyWalkAnims("npc_sheet", "npc");
     this.createKenneyWalkAnims("dealer_sheet", "dealer");
+    this.createKenneyWalkAnims("npc2_sheet", "npc2");
+    this.createKenneyWalkAnims("npc3_sheet", "npc3");
+    this.createKenneyWalkAnims("npc4_sheet", "npc4");
     for (const skin of SKIN_CATALOG) {
       if (skin.id === "player") continue;
       this.createLegacySkinWalkAnims(skin.textureKey, skin.id);
