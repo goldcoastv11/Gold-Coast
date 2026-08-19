@@ -143,12 +143,23 @@ export function runOnboardingTutorial(
   const showStep = () => {
     const step = steps[index];
     const isLast = index === steps.length - 1;
+    // Guards against ever advancing/destroying twice for this one dialogue
+    // instance - belt-and-suspenders against a stray double pointerdown
+    // (fast double-click/tap) firing both onNext and, before the button's
+    // hit area is actually torn down, a second event landing on it too.
+    // Without this, a double-fire would create two overlapping dialogue
+    // boxes (the exact "text will overlay" symptom) since the second
+    // showStep() call renders on top of the first's before its own Next
+    // click ever destroys it.
+    let handled = false;
     const handle = showDialogue(
       scene,
       step.title,
       step.text,
       isLast ? "Got it!" : "Next →",
       () => {
+        if (handled) return;
+        handled = true;
         handle.destroy();
         index++;
         if (index >= steps.length) {
@@ -158,6 +169,8 @@ export function runOnboardingTutorial(
         }
       },
       () => {
+        if (handled) return;
+        handled = true;
         handle.destroy();
         finish();
       }
@@ -167,8 +180,18 @@ export function runOnboardingTutorial(
   const goToStep = () => {
     const step = steps[index];
     if (step.panTo) {
-      scene.cameras.main.pan(step.panTo.x, step.panTo.y, PAN_MS, "Sine.InOut", false, (_cam, progress) => {
-        if (progress === 1) showStep();
+      // force: true - a fresh pan should never silently no-op just because
+      // Phaser's Pan effect happened to still consider itself "running"
+      // (e.g. `isRunning` not yet reset the instant this fires) - without
+      // force, `Camera.pan()`'s `if (!force && this.isRunning) return cam;`
+      // would drop the call (and its callback) entirely, which reads
+      // exactly like the tutorial silently freezing on the previous step.
+      let panDone = false;
+      scene.cameras.main.pan(step.panTo.x, step.panTo.y, PAN_MS, "Sine.InOut", true, (_cam, progress) => {
+        if (progress === 1 && !panDone) {
+          panDone = true;
+          showStep();
+        }
       });
     } else {
       showStep();

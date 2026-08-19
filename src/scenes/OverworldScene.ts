@@ -488,6 +488,20 @@ export class OverworldScene extends Phaser.Scene {
     runOnboardingTutorial(this, steps, {
       onLockMovement: (locked) => {
         this.panelOpen = locked;
+        // handleProximity() (which normally owns promptText's visibility)
+        // never runs while panelOpen is true, so if the player happened to
+        // be standing near a station the instant the tutorial started, its
+        // "Press E to..." bubble would otherwise stay frozen on screen for
+        // the whole tutorial, sitting right inside the dialogue panel's own
+        // footprint (both around y=520-550) and showing through faintly
+        // since the panel isn't fully opaque - exactly the "text overlay"
+        // reported. Explicitly clear it going in; handleProximity()
+        // naturally re-establishes the correct state on its own once
+        // movement unlocks, no explicit restore needed here.
+        if (locked) {
+          this.activeInteractable = null;
+          this.promptText.setVisible(false);
+        }
       },
       onComplete: () => {
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
