@@ -367,3 +367,77 @@ generic tables all have at least one solid CC0 candidate above; a
 proper cabinet-style slot machine and a spinning roulette wheel in a
 matching bright/rounded style are the two pieces still worth actively
 searching for in a follow-up pass.
+
+## Furniture reskin (this gap, closed)
+
+The "open gap" above never got a bright CC0 slot-machine/roulette-wheel
+sprite pack, and the Kenney RPG Urban Pack itself is a town/plaza kit with
+no table/cabinet equivalents either (per the scope note above). Rather than
+keep waiting on a source pack, the gambling furniture went the other
+route already established for the rest of the drawn UI: **procedural
+`Phaser.Graphics` + `generateTexture()`**, same technique as the existing
+game-cabinet placeholders in `BootScene.ts` (`createMinesTexture`,
+`createDiceTexture`, etc.) - drawn flat/rounded/outlined to this doc's own
+palette table and direction notes instead of imported pixel art. Also
+brought the floor/wall/carpet ground tiles onto the palette in the same
+pass, so the whole floor - ground plus furniture - now reads as one
+consistent world instead of a bright plaza with a dark-casino island in
+the middle of it.
+
+### Ground tiles - `BootScene.ts` `preload()`
+
+`floor_tan`/`carpet_red`/`carpet_blue`/`wall` moved off the old Jephed pack
+onto four more pre-cut tiles from the same `kenney_rpg_urban_pack` already
+in use for `bench_prop`/`lamp_post`/`market_stall`/`hedge`/`tree_accent`
+(picked by eye against `Tilemap/tilemap_packed.png` and cross-checked
+against individual `Tiles/tile_NNNN.png` crops, same method the "Where the
+files landed" section above describes). All four are native 16x16, same as
+the tiles they replace, so `OverworldScene.buildFloor()`/`buildWalls()`
+needed no changes beyond the art living under each texture key:
+
+| Key | Tile | Why |
+|---|---|---|
+| `floor_tan` | `tile_0109` | plain cream/tan plaza floor, subtle brick texture, no border artifacts to tile |
+| `carpet_red` | `tile_0018` | warm red brick fill for the gaming-floor "rug" area (keeps the "red" in the key name literal) |
+| `carpet_blue` | `tile_0036` | cool gray-blue flagstone, used as the existing 1-in-5-tile accent inside the rug |
+| `wall` | `tile_0182` | terracotta brick - direction note 5's "warm terracotta ... for building-like pieces" applied to the perimeter walls |
+
+### Drawn furniture - `BootScene.ts` `create()`
+
+A shared `PALETTE` constant (module scope, top of `BootScene.ts`) maps this
+doc's hex table plus the `#5C2E22`-ish warm-brown outline from direction
+note 2 onto named fields (`outline`, `cabinet`, `cabinetDark`, `screen`,
+`screenAlt`, `felt`, `mint`, `mintBright`, `sky`, `coral`, `gold`,
+`danger`, `cream`) so every drawn texture pulls from one place instead of
+repeating hex literals. Two small helpers, `drawCabinetBody`/
+`drawCabinetBase`, factor out the rounded terracotta body + warm-brown
+outline + base bar shared by the 48x64 "arcade cabinet" style textures.
+
+- **Game-table furniture** (previously raw Jephed PNGs, now drawn,
+  original footprints kept exactly so `OverworldScene`'s
+  `sizeFracW/H`/`offsetFracX/Y` collision-box math and verified station
+  spacing needed no changes): `roulette_table` (112x64 - terracotta rail,
+  felt inset, a segmented wheel, betting-grid hints), `slot_machine`
+  (48x64 - cream screen, three circular "reel" symbols, a gold lever),
+  `blackjack_table` (96x112 - fanned mini cards over felt, a chip stack),
+  `coinflip_machine` (49x64 - a big gold coin on a cream screen),
+  `dragon_pedestal` (48x64 - a terracotta column topped with ascending
+  mint/gold/coral "tower level" blocks and a gold finial gem).
+- **Existing drawn cabinet games** (`mines_machine`, `dice_table`,
+  `limbo_machine`, `plinko_board`, `keno_machine`, `wheel_machine`,
+  `hilo_table`, `baccarat_table`, `video_poker_machine`,
+  `coming_soon_sign`, `exit_door`) - same shapes/layouts as before, palette
+  swapped off the old dark-navy/near-black cabinet colors onto `PALETTE`
+  (saturated mint/coral/gold/danger accents on a terracotta body with a
+  cream or pale-sky-blue screen, never pure black).
+- **`plant`** (48x64, `OverworldScene.buildDecorations()`) - also moved off
+  the old Jephed PNG onto a drawn terracotta pot with rounded mint-teal
+  foliage clumps, same footprint so its placement/origin needed no scene
+  changes.
+
+Verified by rendering every texture key through the live Phaser texture
+manager (`__game.textures.get(key).getSourceImage()`) rather than by eye
+on the source only - caught and fixed one real bug this way (the dragon
+pedestal's upper two tower-level blocks were being pushed off the top of
+the 64px canvas by a stacking-math error; now fixed coordinates keep the
+whole stack on-canvas).
