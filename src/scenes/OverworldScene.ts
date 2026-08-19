@@ -1386,8 +1386,12 @@ export class OverworldScene extends Phaser.Scene {
         const inRug = x > 16 && x < 64 && y > 10 && y < 46;
         let key = "floor_tan";
         if (inRug) {
-          // Task #41: reverted from the #23 Kenney plaza-path tiles back to
-          // the original Jephed pack's literal red/blue casino carpet.
+          // "floor_tan"/"carpet_red"/"carpet_blue" are Kenney RPG Urban
+          // Pack tiles now (see BootScene.ts preload) - a warm red brick
+          // rug fill with an occasional cool gray-blue flagstone accent
+          // tile, replacing the old Jephed pack's literal dark red/blue
+          // casino carpet. Same texture-key names, so this loop needed no
+          // changes beyond the art living under each key.
           key = (x + y) % 5 === 0 ? "carpet_blue" : "carpet_red";
         }
         this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key);
@@ -1396,24 +1400,20 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * Social-hub dressing (task #23, STYLE_GUIDE.md direction note 4: "nature
-   * woven into a social hub, not wilderness"). Every piece here is purely
+   * Social-hub dressing (STYLE_GUIDE.md direction note 4: "nature woven
+   * into a social hub, not wilderness"). Every piece here is purely
    * decorative (no collider registered) so placement only has to dodge
    * GAME_STATIONS/NPC/attendant sprites and their name labels visually - it
    * can't break interaction radii.
    *
-   * Task #41 note: "plant" reverted to the original 48x64 Jephed image (see
-   * BootScene.ts preload) so its setScale(2) - added in #23 to make the
-   * small 16x16 Kenney tree tile read as a canopy - was removed here to
-   * match; leaving it would have rendered the restored Jephed plant at
-   * 96x128, badly oversized. tree_accent/lamp_post/bench_prop/market_stall/
-   * hedge are untouched Kenney pieces, out of #41's explicit scope (floor/
-   * wall/ground tiles + furniture textures only) - flagged separately as a
-   * possible bright-prop-on-dark-floor mismatch rather than reverted here.
+   * "plant" is a procedurally-drawn Bright Social-Hub texture now (see
+   * BootScene.ts's createPlantTexture) at the same 48x64 footprint the old
+   * Jephed plant.png used, so placement/origin/scale below is unchanged.
+   * tree_accent/lamp_post/bench_prop/market_stall/hedge are the existing
+   * Kenney pieces, untouched.
    */
   private buildDecorations() {
-    // Plants - back to the original Jephed art/scale (no setScale - see
-    // note above), same spots as before (still clear of "games"' Baccarat
+    // Plants, same spots as before (still clear of "games"' Baccarat
     // cabinet at (10,8), see prior nudge-from-(8,8) note).
     const treeSpots: Array<[number, number]> = [
       [4, 9],

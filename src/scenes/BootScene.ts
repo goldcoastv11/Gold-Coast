@@ -5,35 +5,70 @@ import { SKIN_CATALOG } from "../GameState";
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
  * character spritesheets and every purchasable skin.
  *
- * Task #41: reverted the #23/#40 environment reskin (floor/wall/ground
- * tiles + the procedurally-drawn furniture texture palette) back to the
- * original pre-reskin Jephed tileset / dark-casino colors, per explicit
- * user request after seeing the bright reskin live. This is a floor/wall/
- * furniture-texture-only revert - Theme.ts/uiHelpers.ts (chrome's bright UI
- * palette) and the player/NPC/dealer character spritesheets below
- * (characters' Kenney rig) are deliberately left as the new look; they
- * weren't part of this request. The new Kenney-sourced decorative props
- * (bench_prop/lamp_post/market_stall/hedge/tree_accent, still loaded below)
- * were similarly left alone - not explicitly in scope for #41 - but note
- * they're bright pack pieces now sitting on the reverted dark floor; see
- * the #41 report for the mismatch flag raised about that.
+ * Furniture-reskin pass (see STYLE_GUIDE.md "Furniture reskin" section):
+ * the floor/wall/carpet ground tiles and every procedurally-drawn game
+ * cabinet/table texture below were moved onto the "Bright Social-Hub"
+ * palette (task #41 had previously reverted an earlier attempt at this back
+ * to the old dark-casino Jephed look - this pass redoes it, this time
+ * closing out STYLE_GUIDE.md's "Future: casino furniture" gap for the
+ * actual gambling furniture too, not just floor/wall/carpet). Theme.ts/
+ * uiHelpers.ts (chrome's bright UI palette) and the player/NPC/dealer
+ * character spritesheets below (characters' Kenney rig) are unrelated to
+ * this pass and untouched.
  */
+const PALETTE = {
+  /** Warm dark-brown outline used on every drawn shape - STYLE_GUIDE.md direction note 2: never pure black. */
+  outline: 0x5c2e22,
+  /** Terracotta - "building-like" furniture body (direction note 5). */
+  cabinet: 0xdc8652,
+  /** Darker terracotta - trim/base/plinth accents. */
+  cabinetDark: 0xc77b47,
+  /** Cream screen/panel background (STYLE_GUIDE.md Background `#FFF6E9`). */
+  screen: 0xfff6e9,
+  /** Pale sky-blue alt panel (STYLE_GUIDE.md Background-alt `#EAF7FB`). */
+  screenAlt: 0xeaf7fb,
+  /** Deep saturated mint felt for card/dice tables - a shaded-down version of Primary, not desaturated. */
+  felt: 0x1f9b78,
+  /** Primary mint-teal `#3BD2AB`. */
+  mint: 0x3bd2ab,
+  /** Success/positive bright mint `#42DFAB`. */
+  mintBright: 0x42dfab,
+  /** Secondary sky blue `#59B6D8`. */
+  sky: 0x59b6d8,
+  /** Accent coral-orange `#FF7143`. */
+  coral: 0xff7143,
+  /** Accent-warm gold-orange `#F5AA57`. */
+  gold: 0xf5aa57,
+  /** Danger/warning muted brick-red `#C2504D`. */
+  danger: 0xc2504d,
+  /** Warm off-white cream `#FFF6E9`. */
+  cream: 0xfff6e9
+} as const;
+
 export class BootScene extends Phaser.Scene {
   constructor() {
     super("BootScene");
   }
 
   preload() {
-    // Environment tiles - task #41 reverted these back to the original
-    // Jephed pack (public/assets/tiles/), the pre-#23 art. See git history
-    // (commit edeeb23, pre-reskin) for the exact prior state this restores.
-    this.load.image("floor_tan", "assets/tiles/floor_tan.png");
-    this.load.image("carpet_red", "assets/tiles/carpet_red.png");
-    this.load.image("carpet_blue", "assets/tiles/carpet_blue.png");
-    this.load.image("wall", "assets/tiles/wall.png");
-    this.load.image("plant", "assets/tiles/plant.png");
+    // Environment ground/wall tiles - "Bright Social-Hub" furniture-reskin
+    // pass (see STYLE_GUIDE.md "Furniture reskin" section): swapped off the
+    // old dark Jephed pack onto pre-cut tiles from the same Kenney "RPG
+    // Urban Pack" already used for the decorative props below, closing the
+    // gap STYLE_GUIDE.md's "Future: casino furniture" section flagged. Same
+    // key names as before (floor_tan/carpet_red/carpet_blue/wall) so nothing
+    // in OverworldScene.buildFloor()/buildWalls() needed to change - only
+    // the pixels under each key moved. All four are native 16x16, same as
+    // the tiles they replace, so no scale adjustments needed either.
+    this.load.image("floor_tan", "assets/kenney_rpg_urban_pack/Tiles/tile_0109.png"); // plain cream/tan plaza floor
+    this.load.image("carpet_red", "assets/kenney_rpg_urban_pack/Tiles/tile_0018.png"); // warm red brick rug fill
+    this.load.image("carpet_blue", "assets/kenney_rpg_urban_pack/Tiles/tile_0036.png"); // cool gray-blue flagstone accent (1-in-5 tile)
+    this.load.image("wall", "assets/kenney_rpg_urban_pack/Tiles/tile_0182.png"); // terracotta brick - direction note 5 "building-like" treatment
+    // "plant" is now drawn procedurally (see createPlantTexture) instead of
+    // loaded from a PNG - same 48x64 footprint as the old Jephed asset, so
+    // buildDecorations()'s placement/origin needed no changes.
 
-    // New social-hub dressing for OverworldScene's buildDecorations() -
+    // Social-hub dressing for OverworldScene's buildDecorations() -
     // benches/lamp posts/market stalls/hedges (STYLE_GUIDE direction note 4:
     // "nature woven into a social hub, not wilderness").
     this.load.image("bench_prop", "assets/kenney_rpg_urban_pack/Tiles/tile_0250.png");
@@ -42,14 +77,14 @@ export class BootScene extends Phaser.Scene {
     this.load.image("hedge", "assets/kenney_rpg_urban_pack/Tiles/tile_0329.png");
     this.load.image("tree_accent", "assets/kenney_rpg_urban_pack/Tiles/tile_0341.png");
 
-    // Game-table furniture - no equivalent in the new pack (it's a town/
-    // plaza kit, not a casino kit) - kept on the old Jephed-pack art per
-    // STYLE_GUIDE.md's scope note.
-    this.load.image("roulette_table", "assets/tiles/roulette_table.png");
-    this.load.image("slot_machine", "assets/tiles/slot_machine.png");
-    this.load.image("blackjack_table", "assets/tiles/blackjack_table.png");
-    this.load.image("coinflip_machine", "assets/tiles/coinflip_machine.png");
-    this.load.image("dragon_pedestal", "assets/tiles/dragon_pedestal.png");
+    // Game-table furniture (roulette/slots/blackjack/coin flip/dragon
+    // tower) - previously raw PNGs from the old dark Jephed pack; the new
+    // Kenney town/plaza pack has no direct table/cabinet equivalent to swap
+    // onto (per STYLE_GUIDE.md's scope note), so these are now drawn
+    // procedurally instead, same Graphics+generateTexture technique as
+    // every cabinet texture below. See createRouletteTableTexture /
+    // createSlotMachineTexture / createBlackjackTableTexture /
+    // createCoinFlipMachineTexture / createDragonPedestalTexture.
 
     // Base character spritesheets: task #21/STYLE_GUIDE.md "Bright Social-Hub"
     // reskin, Kenney "RPG Urban Pack" (CC0). 16x16 frames, 4 columns
@@ -106,49 +141,76 @@ export class BootScene extends Phaser.Scene {
     this.createBaccaratTexture();
     this.createVideoPokerTexture();
     this.createComingSoonTexture();
+    this.createPlantTexture();
+    this.createRouletteTableTexture();
+    this.createSlotMachineTexture();
+    this.createBlackjackTableTexture();
+    this.createCoinFlipMachineTexture();
+    this.createDragonPedestalTexture();
     this.createTutorialGuideTexture();
 
     this.scene.start("LoginScene");
   }
 
-  /** A simple drawn door - replaces the earlier placeholder "sign" look. */
+  /**
+   * A simple drawn door - Bright Social-Hub palette (STYLE_GUIDE.md): warm
+   * dark-brown outline (never pure black), terracotta panel, gold-orange
+   * knob, rounded corners throughout.
+   */
   private createExitDoorTexture() {
     const w = 40;
     const h = 48;
     const g = this.add.graphics();
     // door frame
-    g.fillStyle(0x3a2418, 1);
+    g.fillStyle(PALETTE.outline, 1);
     g.fillRoundedRect(0, 0, w, h, 4);
     // door panel
-    g.fillStyle(0x6b4226, 1);
+    g.fillStyle(PALETTE.cabinet, 1);
     g.fillRoundedRect(4, 4, w - 8, h - 8, 3);
     // panel inset lines
-    g.lineStyle(2, 0x4a2e18, 1);
+    g.lineStyle(2, PALETTE.cabinetDark, 1);
     g.strokeRoundedRect(9, 9, w - 18, h / 2 - 10, 2);
     g.strokeRoundedRect(9, h / 2 + 1, w - 18, h / 2 - 10, 2);
     // doorknob
-    g.fillStyle(0xffd54f, 1);
+    g.fillStyle(PALETTE.gold, 1);
     g.fillCircle(w - 11, h / 2, 2.5);
     g.generateTexture("exit_door", w, h);
     g.destroy();
   }
 
   /**
-   * The four new-game furniture pieces below are drawn placeholders (same
-   * approach as the exit door) so these games don't need to wait on real
-   * tileset art to be walkable-up-to in the overworld. Swap for real sprites
-   * whenever art is sourced - see README "Next steps".
+   * Shared cabinet-shell pieces reused by every 48x64 "arcade cabinet"
+   * style game texture below (mines/limbo/keno/wheel/hilo/baccarat/video
+   * poker/coin flip) - a rounded terracotta body with a warm dark-brown
+   * outline and a matching base bar. Callers draw their own screen/content
+   * on top between the two calls.
+   */
+  private drawCabinetBody(g: Phaser.GameObjects.Graphics, w: number, h: number) {
+    g.fillStyle(PALETTE.cabinet, 1);
+    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+  }
+
+  private drawCabinetBase(g: Phaser.GameObjects.Graphics, w: number, h: number) {
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+  }
+
+  /**
+   * The game furniture pieces below are drawn placeholders (procedural
+   * Graphics + generateTexture, same technique throughout this file) so
+   * these games don't need to wait on real tileset art to be walkable-up-to
+   * in the overworld. Palette per STYLE_GUIDE.md: saturated flat fills,
+   * warm dark-brown outlines (never pure black), rounded corners.
    */
   private createMinesTexture() {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+    this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(0x0b0d12, 1);
+    g.fillStyle(PALETTE.screen, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
     const cell = 7;
@@ -159,13 +221,12 @@ export class BootScene extends Phaser.Scene {
     for (let r = 0; r < 3; r++) {
       for (let c = 0; c < 3; c++) {
         const isMine = r === 1 && c === 1;
-        g.fillStyle(isMine ? 0xff5252 : 0x00e676, 1);
+        g.fillStyle(isMine ? PALETTE.danger : PALETTE.mint, 1);
         g.fillRoundedRect(startX + c * (cell + gap), startY + r * (cell + gap), cell, cell, 1.5);
       }
     }
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("mines_machine", w, h);
     g.destroy();
   }
@@ -175,11 +236,11 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
-    g.fillStyle(0x3a2418, 1);
+    g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillRoundedRect(10, h - 18, w - 20, 14, 3);
-    g.fillStyle(0x1b5e3a, 1);
+    g.fillStyle(PALETTE.felt, 1);
     g.fillRoundedRect(2, h - 42, w - 4, 26, 6);
-    g.lineStyle(2, 0x0e1015, 1);
+    g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(2, h - 42, w - 4, 26, 6);
 
     this.drawDie(g, 12, h - 36, 14, 5);
@@ -189,14 +250,14 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  /** Draws a single white die with black pips for the given face value (3 or 5 used here). */
+  /** Draws a single cream die with warm-brown pips for the given face value (3 or 5 used here). */
   private drawDie(g: Phaser.GameObjects.Graphics, x: number, y: number, size: number, value: number) {
-    g.fillStyle(0xffffff, 1);
+    g.fillStyle(PALETTE.cream, 1);
     g.fillRoundedRect(x, y, size, size, 3);
-    g.lineStyle(1, 0x999999, 1);
+    g.lineStyle(1, PALETTE.outline, 1);
     g.strokeRoundedRect(x, y, size, size, 3);
 
-    g.fillStyle(0x1a1d24, 1);
+    g.fillStyle(PALETTE.outline, 1);
     const cx = x + size / 2;
     const cy = y + size / 2;
     const o = size * 0.25;
@@ -223,26 +284,21 @@ export class BootScene extends Phaser.Scene {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
+    this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
-
-    g.fillStyle(0x0b0d12, 1);
+    g.fillStyle(PALETTE.screen, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
-    g.lineStyle(3, 0xffd54f, 1);
+    g.lineStyle(3, PALETTE.gold, 1);
     g.beginPath();
     g.moveTo(13, 42);
     g.lineTo(24, 30);
     g.lineTo(33, 20);
     g.strokePath();
-    g.fillStyle(0xffd54f, 1);
+    g.fillStyle(PALETTE.gold, 1);
     g.fillTriangle(33, 18, 27, 22, 33, 26);
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("limbo_machine", w, h);
     g.destroy();
   }
@@ -252,12 +308,12 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
-    g.fillStyle(0x171a22, 1);
+    g.fillStyle(PALETTE.screen, 1);
     g.fillRoundedRect(2, 4, w - 4, h - 18, 6);
-    g.lineStyle(2, 0x2a2f3a, 1);
+    g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(2, 4, w - 4, h - 18, 6);
 
-    g.fillStyle(0x8a92a3, 1);
+    g.fillStyle(PALETTE.cabinetDark, 1);
     const rows = 5;
     for (let r = 0; r < rows; r++) {
       const count = r + 2;
@@ -269,15 +325,14 @@ export class BootScene extends Phaser.Scene {
       }
     }
 
-    const slotColors = [0xff5252, 0xffd54f, 0x00e676, 0xffd54f, 0xff5252];
+    const slotColors = [PALETTE.coral, PALETTE.gold, PALETTE.mint, PALETTE.gold, PALETTE.coral];
     const slotW = (w - 8) / slotColors.length;
     slotColors.forEach((color, i) => {
       g.fillStyle(color, 1);
       g.fillRect(4 + i * slotW, h - 24, slotW - 1, 6);
     });
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(w / 2 - 10, h - 10, 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("plinko_board", w, h);
     g.destroy();
   }
@@ -287,12 +342,9 @@ export class BootScene extends Phaser.Scene {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+    this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(0x0b0d12, 1);
+    g.fillStyle(PALETTE.screen, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
     const cell = 5;
@@ -300,21 +352,19 @@ export class BootScene extends Phaser.Scene {
     const cols = 4;
     const rows = 4;
     const gridW = cols * cell + (cols - 1) * gap;
-    const gridH = rows * cell + (rows - 1) * gap;
     const startX = w / 2 - gridW / 2;
     const startY = 20;
     const highlighted = new Set([1, 3, 6, 9, 12, 14]);
     let i = 0;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        g.fillStyle(highlighted.has(i) ? 0xffd54f : 0x00e676, 1);
+        g.fillStyle(highlighted.has(i) ? PALETTE.gold : PALETTE.mint, 1);
         g.fillRoundedRect(startX + c * (cell + gap), startY + r * (cell + gap), cell, cell, 1);
         i++;
       }
     }
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("keno_machine", w, h);
     g.destroy();
   }
@@ -324,15 +374,21 @@ export class BootScene extends Phaser.Scene {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+    this.drawCabinetBody(g, w, h);
 
     const cx = w / 2;
     const cy = 30;
     const radius = 14;
-    const colors = [0x00e676, 0xffd54f, 0xff5252, 0xffffff, 0x00e676, 0xffd54f, 0xff5252, 0xffffff];
+    const colors = [
+      PALETTE.mint,
+      PALETTE.gold,
+      PALETTE.coral,
+      PALETTE.cream,
+      PALETTE.mint,
+      PALETTE.gold,
+      PALETTE.coral,
+      PALETTE.cream
+    ];
     const slice = (Math.PI * 2) / colors.length;
     colors.forEach((color, i) => {
       g.fillStyle(color, 1);
@@ -342,13 +398,12 @@ export class BootScene extends Phaser.Scene {
       g.closePath();
       g.fillPath();
     });
-    g.lineStyle(1.5, 0x0e1015, 1);
+    g.lineStyle(1.5, PALETTE.outline, 1);
     g.strokeCircle(cx, cy, radius);
-    g.fillStyle(0xffffff, 1);
+    g.fillStyle(PALETTE.cream, 1);
     g.fillTriangle(cx - 3, cy - radius - 6, cx + 3, cy - radius - 6, cx, cy - radius + 1);
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("wheel_machine", w, h);
     g.destroy();
   }
@@ -362,30 +417,26 @@ export class BootScene extends Phaser.Scene {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+    this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(0x0b0d12, 1);
+    g.fillStyle(PALETTE.screen, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
 
     // two overlapping mini playing cards
-    g.fillStyle(0xf5f2ea, 1);
+    g.fillStyle(PALETTE.cream, 1);
     g.fillRoundedRect(14, 20, 14, 20, 2);
     g.fillRoundedRect(21, 24, 14, 20, 2);
-    g.lineStyle(1, 0x0e1015, 1);
+    g.lineStyle(1, PALETTE.outline, 1);
     g.strokeRoundedRect(14, 20, 14, 20, 2);
     g.strokeRoundedRect(21, 24, 14, 20, 2);
 
     // up/down arrow between them
-    g.fillStyle(0x00e676, 1);
+    g.fillStyle(PALETTE.mint, 1);
     g.fillTriangle(40, 22, 36, 28, 44, 28);
-    g.fillStyle(0xff5252, 1);
+    g.fillStyle(PALETTE.danger, 1);
     g.fillTriangle(40, 44, 36, 38, 44, 38);
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("hilo_table", w, h);
     g.destroy();
   }
@@ -395,31 +446,27 @@ export class BootScene extends Phaser.Scene {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+    this.drawCabinetBody(g, w, h);
 
-    // green felt playing surface
-    g.fillStyle(0x0f3d24, 1);
+    // felt playing surface
+    g.fillStyle(PALETTE.felt, 1);
     g.fillRoundedRect(9, 16, w - 18, 30, 4);
-    g.lineStyle(1, 0xffd54f, 0.6);
+    g.lineStyle(1, PALETTE.gold, 0.6);
     g.strokeRoundedRect(9, 16, w - 18, 30, 4);
 
     // two mini cards (player/banker)
-    g.fillStyle(0xf5f2ea, 1);
+    g.fillStyle(PALETTE.cream, 1);
     g.fillRoundedRect(13, 22, 10, 15, 2);
     g.fillRoundedRect(25, 22, 10, 15, 2);
-    g.lineStyle(1, 0x0e1015, 1);
+    g.lineStyle(1, PALETTE.outline, 1);
     g.strokeRoundedRect(13, 22, 10, 15, 2);
     g.strokeRoundedRect(25, 22, 10, 15, 2);
-    g.fillStyle(0xc62828, 1);
+    g.fillStyle(PALETTE.danger, 1);
     g.fillCircle(18, 29, 1.6);
-    g.fillStyle(0x1a1a1a, 1);
+    g.fillStyle(PALETTE.outline, 1);
     g.fillCircle(30, 29, 1.6);
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("baccarat_table", w, h);
     g.destroy();
   }
@@ -429,13 +476,10 @@ export class BootScene extends Phaser.Scene {
     const w = 48;
     const h = 64;
     const g = this.add.graphics();
-    g.fillStyle(0x2a2f3a, 1);
-    g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
-    g.lineStyle(2, 0x0e1015, 1);
-    g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
+    this.drawCabinetBody(g, w, h);
 
     // screen
-    g.fillStyle(0x0b0d12, 1);
+    g.fillStyle(PALETTE.screenAlt, 1);
     g.fillRoundedRect(9, 15, w - 18, 24, 4);
 
     // five tiny cards on the screen
@@ -445,12 +489,12 @@ export class BootScene extends Phaser.Scene {
     const totalW = 5 * cardW + 4 * cardGap;
     const startX = w / 2 - totalW / 2;
     for (let i = 0; i < 5; i++) {
-      g.fillStyle(0xf5f2ea, 1);
+      g.fillStyle(PALETTE.cream, 1);
       g.fillRoundedRect(startX + i * (cardW + cardGap), 20, cardW, cardH, 1);
     }
 
     // control buttons row
-    const btnColors = [0xff5252, 0x00e676, 0x00e676, 0x00e676, 0xffd54f];
+    const btnColors = [PALETTE.coral, PALETTE.mint, PALETTE.mint, PALETTE.mint, PALETTE.gold];
     const btnW = 4;
     const btnGap = 1.5;
     const btnTotal = 5 * btnW + 4 * btnGap;
@@ -460,8 +504,7 @@ export class BootScene extends Phaser.Scene {
       g.fillRoundedRect(btnStartX + i * (btnW + btnGap), 42, btnW, 4, 1);
     });
 
-    g.fillStyle(0x1a1d24, 1);
-    g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    this.drawCabinetBase(g, w, h);
     g.generateTexture("video_poker_machine", w, h);
     g.destroy();
   }
@@ -478,21 +521,330 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
 
     // signpost
-    g.fillStyle(0x3a2418, 1);
+    g.fillStyle(PALETTE.outline, 1);
     g.fillRect(w / 2 - 4, 34, 8, 26);
 
     // sign board
-    g.fillStyle(0xffd54f, 1);
+    g.fillStyle(PALETTE.gold, 1);
     g.fillRoundedRect(4, 6, w - 8, 32, 6);
-    g.lineStyle(2, 0x0e1015, 1);
+    g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(4, 6, w - 8, 32, 6);
 
     // exclamation mark
-    g.fillStyle(0x1a1d24, 1);
+    g.fillStyle(PALETTE.outline, 1);
     g.fillRoundedRect(w / 2 - 3, 12, 6, 15, 3);
     g.fillCircle(w / 2, 32, 3.2);
 
     g.generateTexture("coming_soon_sign", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Indoor decorative plant - replaces the old Jephed plant.png (same 48x64
+   * footprint so buildDecorations()'s placement/origin needed no changes).
+   * A terracotta pot with rounded mint-teal foliage clumps, warm dark-brown
+   * outlines throughout - direction notes 1/2/3/5.
+   */
+  private createPlantTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+
+    // pot (trapezoid, narrower at the base)
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillPoints(
+      [
+        { x: 12, y: 46 },
+        { x: 36, y: 46 },
+        { x: 32, y: 62 },
+        { x: 16, y: 62 }
+      ],
+      true
+    );
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokePoints(
+      [
+        { x: 12, y: 46 },
+        { x: 36, y: 46 },
+        { x: 32, y: 62 },
+        { x: 16, y: 62 }
+      ],
+      true
+    );
+    // pot rim
+    g.fillStyle(PALETTE.cabinet, 1);
+    g.fillRoundedRect(10, 42, 28, 7, 3);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeRoundedRect(10, 42, 28, 7, 3);
+
+    // foliage clumps
+    const clumps: Array<[number, number, number, number]> = [
+      [24, 26, 14, PALETTE.mint],
+      [13, 32, 10, PALETTE.mintBright],
+      [35, 32, 10, PALETTE.mint],
+      [24, 14, 9, PALETTE.mintBright]
+    ];
+    for (const [cx, cy, r, color] of clumps) {
+      g.fillStyle(color, 1);
+      g.fillCircle(cx, cy, r);
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokeCircle(cx, cy, r);
+    }
+
+    g.generateTexture("plant", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Roulette table - top-down cabinet-style table, 112x64 (same footprint
+   * as the old Jephed roulette_table.png). Terracotta rail, mint felt
+   * inset, a small segmented wheel centered like createWheelTexture's.
+   */
+  private createRouletteTableTexture() {
+    const w = 112;
+    const h = 64;
+    const g = this.add.graphics();
+
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillRoundedRect(2, 2, w - 4, h - 4, 12);
+    g.lineStyle(3, PALETTE.outline, 1);
+    g.strokeRoundedRect(2, 2, w - 4, h - 4, 12);
+
+    g.fillStyle(PALETTE.felt, 1);
+    g.fillRoundedRect(8, 8, w - 16, h - 16, 9);
+    g.lineStyle(1, PALETTE.gold, 0.6);
+    g.strokeRoundedRect(8, 8, w - 16, h - 16, 9);
+
+    // betting-grid hint on either side of the wheel
+    for (const gx of [16, w - 16 - 18]) {
+      for (let i = 0; i < 3; i++) {
+        g.fillStyle(PALETTE.cream, 0.85);
+        g.fillRoundedRect(gx, 16 + i * 11, 18, 8, 2);
+        g.lineStyle(1, PALETTE.outline, 0.8);
+        g.strokeRoundedRect(gx, 16 + i * 11, 18, 8, 2);
+      }
+    }
+
+    // wheel
+    const cx = w / 2;
+    const cy = h / 2;
+    const radius = 15;
+    const colors = [
+      PALETTE.mint,
+      PALETTE.gold,
+      PALETTE.coral,
+      PALETTE.cream,
+      PALETTE.mint,
+      PALETTE.gold,
+      PALETTE.coral,
+      PALETTE.cream,
+      PALETTE.mint,
+      PALETTE.gold
+    ];
+    const slice = (Math.PI * 2) / colors.length;
+    colors.forEach((color, i) => {
+      g.fillStyle(color, 1);
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.arc(cx, cy, radius, i * slice, (i + 1) * slice, false);
+      g.closePath();
+      g.fillPath();
+    });
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeCircle(cx, cy, radius);
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillCircle(cx, cy, 4);
+
+    g.generateTexture("roulette_table", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Slot machine cabinet - 48x64 (same footprint as the old Jephed
+   * slot_machine.png). Terracotta cabinet, cream screen with three
+   * fruit-style reel symbols, a gold lever on the side.
+   */
+  private createSlotMachineTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+
+    g.fillStyle(PALETTE.cabinet, 1);
+    g.fillRoundedRect(4, 6, w - 12, h - 10, 8);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeRoundedRect(4, 6, w - 12, h - 10, 8);
+
+    g.fillStyle(PALETTE.screenAlt, 1);
+    g.fillRoundedRect(8, 12, w - 20, 26, 5);
+    g.lineStyle(1.5, PALETTE.outline, 1);
+    g.strokeRoundedRect(8, 12, w - 20, 26, 5);
+
+    // three reel symbols
+    const reelColors = [PALETTE.coral, PALETTE.gold, PALETTE.mint];
+    reelColors.forEach((color, i) => {
+      g.fillStyle(color, 1);
+      g.fillCircle(13 + i * 8, 25, 4.5);
+      g.lineStyle(1, PALETTE.outline, 1);
+      g.strokeCircle(13 + i * 8, 25, 4.5);
+    });
+
+    // lever
+    g.lineStyle(3, PALETTE.cabinetDark, 1);
+    g.beginPath();
+    g.moveTo(w - 6, 16);
+    g.lineTo(w - 6, 6);
+    g.strokePath();
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillCircle(w - 6, 5, 4);
+    g.lineStyle(1.5, PALETTE.outline, 1);
+    g.strokeCircle(w - 6, 5, 4);
+
+    // control buttons row
+    const btnColors = [PALETTE.coral, PALETTE.mint, PALETTE.gold];
+    btnColors.forEach((color, i) => {
+      g.fillStyle(color, 1);
+      g.fillCircle(13 + i * 8, 46, 3);
+    });
+
+    this.drawCabinetBase(g, w, h);
+    g.generateTexture("slot_machine", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Blackjack table - 96x112 (same footprint as the old Jephed
+   * blackjack_table.png). A tall semi-circular felt table with a terracotta
+   * rail, a couple of mini playing cards and a small chip stack.
+   */
+  private createBlackjackTableTexture() {
+    const w = 96;
+    const h = 112;
+    const g = this.add.graphics();
+
+    // wood rail
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillRoundedRect(6, 6, w - 12, h - 12, 22);
+    g.lineStyle(3, PALETTE.outline, 1);
+    g.strokeRoundedRect(6, 6, w - 12, h - 12, 22);
+
+    // felt
+    g.fillStyle(PALETTE.felt, 1);
+    g.fillRoundedRect(16, 16, w - 32, h - 32, 16);
+    g.lineStyle(1.5, PALETTE.gold, 0.6);
+    g.strokeRoundedRect(16, 16, w - 32, h - 32, 16);
+
+    // dealt cards, fanned near the top
+    const cardPositions: Array<[number, number, number]> = [
+      [w / 2 - 20, 34, -10],
+      [w / 2 - 6, 30, 0],
+      [w / 2 + 8, 34, 10]
+    ];
+    for (const [x, y, angle] of cardPositions) {
+      g.save();
+      g.translateCanvas(x, y);
+      g.rotateCanvas(Phaser.Math.DegToRad(angle));
+      g.fillStyle(PALETTE.cream, 1);
+      g.fillRoundedRect(-8, -11, 16, 22, 2.5);
+      g.lineStyle(1.5, PALETTE.outline, 1);
+      g.strokeRoundedRect(-8, -11, 16, 22, 2.5);
+      g.fillStyle(PALETTE.danger, 1);
+      g.fillCircle(0, 0, 2.2);
+      g.restore();
+    }
+
+    // chip stack, lower-center
+    const chipColors = [PALETTE.coral, PALETTE.gold, PALETTE.mint];
+    chipColors.forEach((color, i) => {
+      g.fillStyle(color, 1);
+      g.fillEllipse(w / 2, h - 26 - i * 5, 22, 9);
+      g.lineStyle(1.5, PALETTE.outline, 1);
+      g.strokeEllipse(w / 2, h - 26 - i * 5, 22, 9);
+    });
+
+    g.generateTexture("blackjack_table", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Coin Flip machine - 49x64 (same footprint as the old Jephed
+   * coinflip_machine.png). Same cabinet shell as the arcade-scale games,
+   * with a big gold coin on the screen.
+   */
+  private createCoinFlipMachineTexture() {
+    const w = 49;
+    const h = 64;
+    const g = this.add.graphics();
+    this.drawCabinetBody(g, w, h);
+
+    g.fillStyle(PALETTE.screen, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+
+    const cx = w / 2;
+    const cy = 31;
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillCircle(cx, cy, 10);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeCircle(cx, cy, 10);
+    g.lineStyle(1.5, PALETTE.cabinetDark, 1);
+    g.strokeCircle(cx, cy, 6.5);
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillRoundedRect(cx - 1.5, cy - 5, 3, 10, 1.5);
+
+    this.drawCabinetBase(g, w, h);
+    g.generateTexture("coinflip_machine", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Dragon Tower pedestal - 48x64 (same footprint as the old Jephed
+   * dragon_pedestal.png). A terracotta column on a plinth, topped with a
+   * small ascending stack of tower "levels" and a gold finial gem.
+   */
+  private createDragonPedestalTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+
+    // base plinth
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillRoundedRect(10, h - 14, w - 20, 10, 3);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeRoundedRect(10, h - 14, w - 20, 10, 3);
+
+    // column - shorter than the plinth-to-canopy span used to give the
+    // ascending tower-level blocks below enough headroom (an earlier
+    // version stacked full-height blocks on a 32px column and pushed the
+    // top two levels above the canvas entirely - verified via a live
+    // texture-manager snapshot; these fixed coordinates keep every level
+    // and the finial gem on-canvas with room to spare).
+    g.fillStyle(PALETTE.cabinet, 1);
+    g.fillRoundedRect(16, 34, 16, 20, 4);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeRoundedRect(16, 34, 16, 20, 4);
+
+    // ascending tower-level blocks, each seated a couple px into the one below
+    g.fillStyle(PALETTE.mint, 1);
+    g.fillRoundedRect(11, 27, 26, 9, 3);
+    g.lineStyle(1.5, PALETTE.outline, 1);
+    g.strokeRoundedRect(11, 27, 26, 9, 3);
+
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillRoundedRect(14, 20, 20, 8, 3);
+    g.lineStyle(1.5, PALETTE.outline, 1);
+    g.strokeRoundedRect(14, 20, 20, 8, 3);
+
+    g.fillStyle(PALETTE.coral, 1);
+    g.fillRoundedRect(17, 13, 14, 7, 3);
+    g.lineStyle(1.5, PALETTE.outline, 1);
+    g.strokeRoundedRect(17, 13, 14, 7, 3);
+
+    // finial gem
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillCircle(w / 2, 8, 4.5);
+    g.lineStyle(1.5, PALETTE.outline, 1);
+    g.strokeCircle(w / 2, 8, 4.5);
+
+    g.generateTexture("dragon_pedestal", w, h);
     g.destroy();
   }
 
