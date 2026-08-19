@@ -30,6 +30,19 @@ describe("POST /skins/buy", () => {
     expect(tx!.amount).toBe(-skin.price);
   });
 
+  it("equips the skin immediately on purchase - buying it means wearing it", async () => {
+    const { token } = await signupUser();
+    await request(app).post("/packages/purchase").set(authed(token)).send({ packageId: "gold" });
+    const skin = SKIN_CATALOG.find((s) => s.id === "skin_001")!;
+
+    const res = await request(app).post("/skins/buy").set(authed(token)).send({ skinId: skin.id });
+    expect(res.status).toBe(200);
+    expect(res.body.user.equippedSkin).toBe(skin.id);
+
+    const me = await request(app).get("/me").set(authed(token));
+    expect(me.body.equippedSkin).toBe(skin.id);
+  });
+
   it("rejects buying a skin that can't be afforded", async () => {
     const { token } = await signupUser();
     const expensive = SKIN_CATALOG.find((s) => s.id === "skin_014")!; // price 4000, way above signup GC

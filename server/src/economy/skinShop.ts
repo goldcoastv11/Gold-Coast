@@ -32,7 +32,11 @@ export type PurchaseSkinOutcome =
 
 /**
  * Attempts to buy skin `id` with GC for `userId`. On success, debits the
- * ledger (SKIN_PURCHASE_GC transaction) and inserts a skins_owned row.
+ * ledger (SKIN_PURCHASE_GC transaction), inserts a skins_owned row, and
+ * equips it immediately (same transaction, so a purchase is never left in
+ * an "owned but still wearing something else" state) - a purchase is
+ * always also a wear, per product decision. Purely additive to ownership;
+ * doesn't touch GC/SC balances beyond the purchase debit itself.
  */
 export async function purchaseSkin(tx: TxClient, userId: string, id: string): Promise<PurchaseSkinOutcome> {
   const skin = getSkin(id);
@@ -48,6 +52,7 @@ export async function purchaseSkin(tx: TxClient, userId: string, id: string): Pr
     skinId: skin.id
   });
   await tx.skinOwned.create({ data: { userId, skinId: id } });
+  await equipSkin(tx, userId, id);
 
   return { ok: true, skin, transaction };
 }

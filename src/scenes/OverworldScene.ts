@@ -1169,14 +1169,22 @@ export class OverworldScene extends Phaser.Scene {
               // Task #37: POST /skins/buy - GC-only, server-authoritative.
               // The canAfford/ownership checks above are optimistic UI only;
               // the server re-checks both (INSUFFICIENT_GC/ALREADY_OWNED)
-              // and is the one that actually decides.
+              // and is the one that actually decides. A purchase now also
+              // equips server-side (economy/skinShop.ts's purchaseSkin, per
+              // product decision: buying a skin means wearing it) - so
+              // `res.user.equippedSkin` is already the new skin here, and
+              // the player sprite needs the same texture/body/scale update
+              // the "Wear" button below applies, not just a balance refresh.
               buyBtn.setEnabled(false);
               api
                 .buySkin(def.id)
                 .then((res) => {
                   gameState.hydrateFromServer(res.user);
+                  this.player.setTexture(def.textureKey, this.player.frame.name);
+                  this.applyPlayerBody();
+                  this.applyPlayerScale();
                   this.updateHud();
-                  this.showToast(`✓ Bought ${def.name}!`, Theme.textAccent);
+                  this.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
                   render();
                 })
                 .catch((err) => {
