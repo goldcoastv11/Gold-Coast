@@ -358,6 +358,17 @@ export class OverworldScene extends Phaser.Scene {
       () => this.openSkinPanel("shop")
     );
 
+    // Ambient bystanders - purely decorative "social hub" flavor (STYLE_GUIDE
+    // direction note 4: "nature woven into a social hub, not wilderness"),
+    // putting the 3 previously-unused Kenney character variants to work
+    // (char_b_brick/char_d_hardhat/char_f_dark - see BootScene.ts preload).
+    // No registerStation call - these aren't interactable, just people
+    // milling around the plaza. See addAmbientNpc's doc comment for the
+    // idle-frame convention.
+    this.addAmbientNpc(40, 31, "npc2_sheet", 2); // between the two benches (37,31)/(43,31), facing up toward the Chip Attendant
+    this.addAmbientNpc(35, 20, "npc3_sheet", 2); // browsing near the market stall (35,17)/Skin Attendant, facing up
+    this.addAmbientNpc(37, 47, "npc4_sheet", 1); // strolling the lamp-post path toward the exit, facing down
+
     // Every playable game's furniture - declarative (see GAME_STATIONS
     // above) so new entries can be appended there instead of adding more
     // hand-written blocks here.
@@ -627,6 +638,29 @@ export class OverworldScene extends Phaser.Scene {
    */
   private applyPlayerScale() {
     this.player.setScale(this.player.height <= 16 ? 2 : 1);
+  }
+
+  /**
+   * A purely decorative background character - not registered as an
+   * Interactable (no "Press E" prompt/name label), just visual "social hub"
+   * flavor. Same staticSprite + setScale(2) + refreshBody() pattern as the
+   * Chip Attendant NPC above (refreshBody is required, not optional -
+   * static bodies don't auto-resync to a post-creation setScale, so
+   * skipping it leaves the pre-scale 16x16 collider under a 32x32 sprite).
+   * Still collides with the player so it reads as a person standing there
+   * rather than a background decal.
+   *
+   * idleFrame follows the same convention as the Chip Attendant's own
+   * static frame (npc_sheet, frame 1): the first frame of a direction's
+   * walk cycle in createKenneyWalkAnims' DIRECTION_FRAMES, i.e. the column
+   * index of that direction - left=0, down=1, up=2, right=3.
+   */
+  private addAmbientNpc(col: number, row: number, sheetKey: string, idleFrame: number) {
+    const npc = this.physics.add
+      .staticSprite(col * TILE, row * TILE, sheetKey, idleFrame)
+      .setScale(2);
+    npc.refreshBody();
+    this.physics.add.collider(this.player, npc);
   }
 
   private getSkinDef(id: string): SkinDef {

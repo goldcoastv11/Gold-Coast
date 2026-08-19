@@ -125,6 +125,20 @@ The old placeholder-pack files in `public/assets/tiles/` and
 happens in `BootScene.ts`/`OverworldScene.ts` per the "floor"/"characters"
 tasks, not here.
 
+**Update (characters polish pass):** the 3 variants that sat unused
+(`char_b_brick`, `char_d_hardhat`, `char_f_dark`) are no longer free —
+they're loaded as `npc2_sheet`/`npc3_sheet`/`npc4_sheet` in `BootScene.ts`
+and placed as purely decorative, non-interactive "ambient bystander" NPCs
+in `OverworldScene.ts` (`addAmbientNpc`, called near the Chip Attendant's
+benches, the market stall/Skin Attendant, and the exit-path lamp posts) —
+social-hub flavor per direction note 4 below, matching the Chip Attendant's
+own static staticSprite + `setScale(2)` idle-pose pattern. All 6 character
+variants are now in use. Player/NPC/dealer scale (`applyPlayerScale`/
+`applyPlayerBody` in `OverworldScene.ts`) was audited against the new
+floor/furniture pass and left as-is — the Kenney rig's 2x scale and the
+legacy 21x32 skin rig's native scale already land at the same ~32px
+on-screen height, so nothing needed adjusting.
+
 ## Character sheet layout (read this before touching `createWalkAnims`)
 
 **This does NOT match the current 21×32, "3 cols (frames) × 4 rows
