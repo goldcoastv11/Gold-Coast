@@ -875,17 +875,21 @@ export class BootScene extends Phaser.Scene {
    * (src/ui/TutorialGuide.ts) - a drawn placeholder in the same style as
    * every other texture in this file, not a spritesheet, since it never
    * walks/animates - it's a static portrait icon inside a screen-fixed
-   * panel. Same gold (0xffd54f) already reused across dice pips/mines
-   * highlights/coming-soon sign, so it reads as part of the same palette.
+   * panel. Uses the same shared PALETTE as every other texture in this file
+   * (flagged during the chrome-polish pass: this function previously used
+   * ad-hoc hex values, including a near-black `0x1a1d24` face - the one
+   * spot in the whole file that still violated STYLE_GUIDE.md direction
+   * note 2's "never pure black" rule. Fixed here to PALETTE.outline, same
+   * warm dark-brown as every other drawn texture's line art.
    */
   private createTutorialGuideTexture() {
     const w = 44;
     const h = 44;
     const g = this.add.graphics();
 
-    g.fillStyle(0xffd54f, 1);
+    g.fillStyle(PALETTE.gold, 1);
     g.fillCircle(w / 2, h / 2, w / 2 - 2);
-    g.lineStyle(3, 0xc98f1f, 1);
+    g.lineStyle(3, PALETTE.outline, 1);
     g.strokeCircle(w / 2, h / 2, w / 2 - 2);
 
     // poker-chip-style inner ring, purely decorative
@@ -893,10 +897,10 @@ export class BootScene extends Phaser.Scene {
     g.strokeCircle(w / 2, h / 2, w / 2 - 9);
 
     // face
-    g.fillStyle(0x1a1d24, 1);
+    g.fillStyle(PALETTE.outline, 1);
     g.fillCircle(w / 2 - 7, h / 2 - 3, 2.6);
     g.fillCircle(w / 2 + 7, h / 2 - 3, 2.6);
-    g.lineStyle(2.5, 0x1a1d24, 1);
+    g.lineStyle(2.5, PALETTE.outline, 1);
     g.beginPath();
     g.arc(w / 2, h / 2 + 1, 8, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160));
     g.strokePath();
