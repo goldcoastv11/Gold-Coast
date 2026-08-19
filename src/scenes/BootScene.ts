@@ -106,6 +106,7 @@ export class BootScene extends Phaser.Scene {
     this.createBaccaratTexture();
     this.createVideoPokerTexture();
     this.createComingSoonTexture();
+    this.createTutorialGuideTexture();
 
     this.scene.start("LoginScene");
   }
@@ -492,6 +493,41 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(w / 2, 32, 3.2);
 
     g.generateTexture("coming_soon_sign", w, h);
+    g.destroy();
+  }
+
+  /**
+   * A friendly gold-chip mascot for the onboarding tutorial's dialogue box
+   * (src/ui/TutorialGuide.ts) - a drawn placeholder in the same style as
+   * every other texture in this file, not a spritesheet, since it never
+   * walks/animates - it's a static portrait icon inside a screen-fixed
+   * panel. Same gold (0xffd54f) already reused across dice pips/mines
+   * highlights/coming-soon sign, so it reads as part of the same palette.
+   */
+  private createTutorialGuideTexture() {
+    const w = 44;
+    const h = 44;
+    const g = this.add.graphics();
+
+    g.fillStyle(0xffd54f, 1);
+    g.fillCircle(w / 2, h / 2, w / 2 - 2);
+    g.lineStyle(3, 0xc98f1f, 1);
+    g.strokeCircle(w / 2, h / 2, w / 2 - 2);
+
+    // poker-chip-style inner ring, purely decorative
+    g.lineStyle(2, 0xffffff, 0.5);
+    g.strokeCircle(w / 2, h / 2, w / 2 - 9);
+
+    // face
+    g.fillStyle(0x1a1d24, 1);
+    g.fillCircle(w / 2 - 7, h / 2 - 3, 2.6);
+    g.fillCircle(w / 2 + 7, h / 2 - 3, 2.6);
+    g.lineStyle(2.5, 0x1a1d24, 1);
+    g.beginPath();
+    g.arc(w / 2, h / 2 + 1, 8, Phaser.Math.DegToRad(20), Phaser.Math.DegToRad(160));
+    g.strokePath();
+
+    g.generateTexture("tutorial_guide", w, h);
     g.destroy();
   }
 

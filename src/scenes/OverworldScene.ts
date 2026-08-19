@@ -6,6 +6,7 @@ import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, UIButton } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
+import { runOnboardingTutorial, TutorialStep } from "../ui/TutorialGuide";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -30,6 +31,11 @@ interface Interactable {
   prompt: string;
   radius: number;
   onInteract: () => void;
+}
+
+interface OverworldSceneData {
+  /** Set true only right after a brand-new signup - see StartMenuScene's doc comment and ui/TutorialGuide.ts for the full one-shot-by-construction explanation. */
+  startTutorial?: boolean;
 }
 
 /**
@@ -303,7 +309,7 @@ export class OverworldScene extends Phaser.Scene {
     super("OverworldScene");
   }
 
-  create() {
+  create(data?: OverworldSceneData) {
     this.buildFloor();
     this.buildDecorations();
 
@@ -432,6 +438,61 @@ export class OverworldScene extends Phaser.Scene {
     ).container.setScrollFactor(0).setDepth(150);
 
     this.updateHud();
+
+    // Onboarding tutorial - only right after a brand-new signup (see
+    // OverworldSceneData's doc comment). Runs last, after every station/
+    // camera/HUD setup above so its world coordinates (Chip Attendant/Dice/
+    // Skin Attendant) are all valid.
+    if (data?.startTutorial) {
+      this.startOnboardingTutorial();
+    }
+  }
+
+  /**
+   * Guided tour (ui/TutorialGuide.ts) - a mascot "voice box" explains the
+   * shuffle-cup bonus the player just received, introduces the character +
+   * movement, then pans the camera to the Chip Attendant, a representative
+   * game (Dice - already this codebase's other "reference" pick, see
+   * games/dice.ts's own doc comments), and the Skin Attendant in turn.
+   * World coordinates match each station's real placement above (NPC at
+   * 40,28 / Dice at 52,20 / Skin Attendant at 40,18, all in tiles) - if
+   * those ever move, update these to match.
+   */
+  private startOnboardingTutorial() {
+    const steps: TutorialStep[] = [
+      {
+        title: "Welcome to Gold Coast!",
+        text: "You just played the Shuffle Cups for your starting Gold Coins - shuffle, pick a cup, and reveal your prize. You'll see that again any time you get a bonus."
+      },
+      {
+        title: "This Is You",
+        text: "This is your character! Use WASD or the arrow keys to walk around the casino floor."
+      },
+      {
+        title: "Chip Attendant",
+        text: "Visit the Chip Attendant any time for a free Gold Coin claim. It's on a short cooldown, so check back often!",
+        panTo: { x: 40 * TILE, y: 28 * TILE }
+      },
+      {
+        title: "Play a Game",
+        text: "Walk up to any table or machine - like Dice here - and press E to play. Place a bet, then win or lose Gold Coins on the result.",
+        panTo: { x: 52 * TILE, y: 20 * TILE }
+      },
+      {
+        title: "Skin Attendant",
+        text: "The Skin Attendant sells new looks for your character with Gold Coins. Buy one and you'll be wearing it immediately!",
+        panTo: { x: 40 * TILE, y: 18 * TILE }
+      }
+    ];
+
+    runOnboardingTutorial(this, steps, {
+      onLockMovement: (locked) => {
+        this.panelOpen = locked;
+      },
+      onComplete: () => {
+        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+      }
+    });
   }
 
   update() {

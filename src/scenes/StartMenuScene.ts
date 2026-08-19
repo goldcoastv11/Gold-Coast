@@ -6,6 +6,8 @@ import { makeButton, makePanel } from "../ui/uiHelpers";
 interface StartMenuData {
   /** Task #43: set by LoginScene.reconcileAndEnter() when an orphaned stateful-game round was forfeited on this login - shown once, not persisted. */
   notice?: string;
+  /** Set true only right after a brand-new signup (see LoginScene.reconcileAndEnter) - threaded through to OverworldScene, which starts the onboarding tutorial (ui/TutorialGuide.ts) when it sees this flag. Not persisted anywhere; see that module's doc comment for why that's fine. */
+  startTutorial?: boolean;
 }
 
 export class StartMenuScene extends Phaser.Scene {
@@ -57,7 +59,7 @@ export class StartMenuScene extends Phaser.Scene {
       "ENTER CASINO",
       Theme.accent,
       Theme.accentHover,
-      () => this.scene.start("OverworldScene")
+      () => this.scene.start("OverworldScene", { startTutorial: data?.startTutorial })
     );
 
     makeButton(this, 400, 435, 160, 36, "LOG OUT", Theme.neutral, Theme.neutralHover, () => {

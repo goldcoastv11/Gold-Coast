@@ -326,7 +326,7 @@ export class LoginScene extends Phaser.Scene {
         gameState.hydrateFromServer(signupRes.user);
         await this.playForcedShuffleCup(signupRes.signupBonus.gcMultiplier);
         await this.runTripleChanceOffer(signupRes.signupBonus.gcAmount);
-        await this.reconcileAndEnter(signupRes.user);
+        await this.reconcileAndEnter(signupRes.user, true);
       } catch (err) {
         this.setFormInteractionEnabled(true);
         if (err instanceof ApiError) {
@@ -387,8 +387,15 @@ export class LoginScene extends Phaser.Scene {
    * hiccup, or a race where it somehow already resolved), this doesn't
    * block login - the ROUND_ALREADY_ACTIVE auto-recovery in each stateful
    * scene's start() is the fallback safety net for that edge case.
+   *
+   * `startTutorial` (onboarding tutorial): threaded through to
+   * StartMenuScene and, from there, to OverworldScene - see
+   * ui/TutorialGuide.ts's doc comment for why this one-shot flag (set true
+   * only from the signup branch of submit(), never from login or session
+   * restore) is enough to guarantee "runs exactly once per account" with
+   * no persisted state anywhere.
    */
-  private async reconcileAndEnter(me: MeResponse) {
+  private async reconcileAndEnter(me: MeResponse, startTutorial = false) {
     let notice: string | undefined;
     if (me.activeRound) {
       try {
@@ -399,7 +406,7 @@ export class LoginScene extends Phaser.Scene {
         // Best-effort - see doc comment above.
       }
     }
-    this.scene.start("StartMenuScene", notice ? { notice } : undefined);
+    this.scene.start("StartMenuScene", { notice, startTutorial });
   }
 
   /**
