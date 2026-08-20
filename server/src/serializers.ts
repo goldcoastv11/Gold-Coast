@@ -9,6 +9,7 @@ import { TxClient } from "./economy/ledger";
 import { getBalance } from "./economy/ledger";
 import { getPlaythroughState } from "./economy/playthrough";
 import { listOwnedSkins, getEquippedSkin } from "./economy/skinShop";
+import { prisma } from "./db";
 
 export interface MeResponse {
   username: string;
@@ -33,6 +34,37 @@ export interface MeResponse {
   activeRound: { game: string; roundId: string } | null;
 }
 
+/**
+ * Reads the ad-reward claim row on the TOP-LEVEL `prisma` client -
+ * deliberately NOT on the caller's `tx` (interactive transaction handle) -
+ * and swallows any error into `null`.
+ *
+ * Why not just `tx.adRewardClaim.findUnique(...).catch(() => null)`: a
+ * first attempt at that shipped and still 500'd every authenticated
+ * response in production. Reason - once ANY query inside a Postgres
+ * transaction errors (e.g. "relation ad_reward_claim does not exist",
+ * because the migration for it hadn't been applied there yet - migrations
+ * aren't automatic on deploy, see DEPLOYMENT.md), Postgres marks the WHOLE
+ * transaction aborted; every other query sharing that same `tx` then fails
+ * too ("current transaction is aborted, commands ignored until end of
+ * transaction block"), no matter how the failing query's own promise is
+ * caught in application code - the abort happens at the database
+ * connection level, not the JS Promise level. Querying on a genuinely
+ * separate connection (`prisma`, not `tx`) means a missing-table error
+ * here can't poison whatever transaction the caller is in the middle of.
+ * This is also just correct on its own merits, not only a migration-gap
+ * workaround: this read is purely informational display data, not part of
+ * the atomic write the rest of `serializeMe` might be participating in.
+ */
+async function getAdRewardLastClaimedAt(userId: string): Promise<string | null> {
+  try {
+    const row = await prisma.adRewardClaim.findUnique({ where: { userId } });
+    return row?.lastClaimedAt ? row.lastClaimedAt.toISOString() : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
   const [
     goldCoins,
@@ -42,7 +74,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     lastPosition,
     playthrough,
     attendantClaim,
-    adRewardClaim,
+    adRewardLastClaimedAt,
     activeRound
   ] = await Promise.all([
     getBalance(tx, userId, "GC"),
@@ -52,20 +84,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     tx.lastPosition.findUnique({ where: { userId } }),
     getPlaythroughState(tx, userId),
     tx.attendantClaim.findUnique({ where: { userId } }),
-    // .catch(() => null): self-healing safety net for the window between
-    // deploying this code and actually running `railway run npx prisma
-    // migrate deploy` for the ad_reward_claim table in production (this
-    // repo's migrations are NOT applied automatically on deploy anymore -
-    // see DEPLOYMENT.md). Without this, EVERY authenticated response that
-    // embeds MeResponse (signup/login/GET-me/skins/buy/etc. - not just
-    // /ads/claim) 500s outright the instant this code goes live, because
-    // Promise.all rejects the whole group if any one query fails - and
-    // "relation ad_reward_claim does not exist" is a real Postgres error,
-    // not a Prisma-level miss, so it can't be caught any narrower than
-    // this. Once the migration has actually run, this query succeeds
-    // normally and the catch never fires - safe to remove later, but not
-    // urgent since it's a no-op post-migration.
-    tx.adRewardClaim.findUnique({ where: { userId } }).catch(() => null),
+    getAdRewardLastClaimedAt(userId),
     tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } })
   ]);
 
@@ -81,7 +100,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
       lastClaimedAt: attendantClaim?.lastClaimedAt ? attendantClaim.lastClaimedAt.toISOString() : null
     },
     adReward: {
-      lastClaimedAt: adRewardClaim?.lastClaimedAt ? adRewardClaim.lastClaimedAt.toISOString() : null
+      lastClaimedAt: adRewardLastClaimedAt
     },
     activeRound: activeRound ? { game: activeRound.game, roundId: activeRound.id } : null
   };
