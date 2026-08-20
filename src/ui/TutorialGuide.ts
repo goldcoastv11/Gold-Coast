@@ -214,8 +214,27 @@ export function runOnboardingTutorial(
       // force, `Camera.pan()`'s `if (!force && this.isRunning) return cam;`
       // would drop the call (and its callback) entirely, which reads
       // exactly like the tutorial silently freezing on the previous step.
+      //
+      // "Sine.easeInOut", NOT "Sine.InOut" - this is the actual root cause
+      // of the real browser-tab hang reported in testing (found via a
+      // console stack trace: "Uncaught TypeError: this.ease is not a
+      // function", thrown every single frame from inside Phaser's Pan
+      // effect). Phaser's Tween system (see ShuffleCupReveal.ts's own
+      // "Sine.InOut" usages, which are fine) has smart fallback string
+      // normalization that accepts "Sine.InOut" and corrects it - but the
+      // Camera Pan effect (Phaser.Cameras.Scene2D.Effects.Pan#start) does
+      // a raw `EaseMap.hasOwnProperty(ease)` lookup with NO fallback, so
+      // an unrecognized string leaves its internal `this.ease` unset. Every
+      // subsequent frame then calls `this.ease(progress)` and throws,
+      // forever - the effect never reaches its own completion, so the pan
+      // (and the whole tutorial) never advances, and repeatedly throwing
+      // an uncaught exception every frame (compounded by DevTools capturing
+      // a full stack trace each time) is exactly what made the tab feel
+      // unresponsive. Two earlier fix attempts (removing live camera-
+      // follow, then blocking station interaction during movement) were
+      // both reasonable hardening but neither was the actual cause.
       let panDone = false;
-      scene.cameras.main.pan(step.panTo.x, step.panTo.y, PAN_MS, "Sine.InOut", true, (_cam, progress) => {
+      scene.cameras.main.pan(step.panTo.x, step.panTo.y, PAN_MS, "Sine.easeInOut", true, (_cam, progress) => {
         if (progress === 1 && !panDone) {
           panDone = true;
           showStep();
