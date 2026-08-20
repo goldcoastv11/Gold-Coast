@@ -310,6 +310,14 @@ export class OverworldScene extends Phaser.Scene {
   private promptText!: TextChip;
   private hudText!: TextChip;
   private panelOpen = false;
+  /**
+   * Override that lets handleMovement() run even while panelOpen is true -
+   * used ONLY by the onboarding tutorial's "try WASD now" step (see
+   * startOnboardingTutorial). panelOpen itself stays true for the tutorial's
+   * entire duration so handleProximity()/handleInteraction() never run -
+   * see update()'s doc comment for why that matters.
+   */
+  private tutorialAllowMovement = false;
   private interactables: Interactable[] = [];
   private activeInteractable: Interactable | null = null;
 
@@ -500,7 +508,10 @@ export class OverworldScene extends Phaser.Scene {
         // THIS step's whole point is inviting the player to move - locking
         // it here would mean pressing WASD as instructed does nothing,
         // which reads as the tutorial being frozen (confirmed via live
-        // testing). Camera resumes following the player for this one step.
+        // testing). See update()'s doc comment for why this unlocks
+        // movement specifically (tutorialAllowMovement) without touching
+        // panelOpen - proximity/interaction (and, with them, real station
+        // panels) stay fully blocked throughout, camera stays static.
         allowMovement: true
       },
       {
@@ -520,33 +531,53 @@ export class OverworldScene extends Phaser.Scene {
       }
     ];
 
+    // panelOpen stays true for the tutorial's ENTIRE duration, including
+    // the movement-enabled step - see update()'s doc comment for why
+    // (blocks real station interaction/proximity throughout, no exception).
+    // Clearing activeInteractable/hiding promptText once here, up front,
+    // covers the same case the old per-step version handled (player
+    // happened to be standing near a station right as the tutorial
+    // started) - it can't need re-clearing mid-tutorial since
+    // handleProximity() never runs again until the tutorial actually ends.
+    this.panelOpen = true;
+    this.activeInteractable = null;
+    this.promptText.container.setVisible(false);
+
     runOnboardingTutorial(this, steps, {
       onLockMovement: (locked) => {
-        this.panelOpen = locked;
-        // handleProximity() (which normally owns promptText's visibility)
-        // never runs while panelOpen is true, so if the player happened to
-        // be standing near a station the instant the tutorial started, its
-        // "Press E to..." bubble would otherwise stay frozen on screen for
-        // the whole tutorial, sitting right inside the dialogue panel's own
-        // footprint (both around y=520-550) and showing through faintly
-        // since the panel isn't fully opaque - exactly the "text overlay"
-        // reported. Explicitly clear it going in; handleProximity()
-        // naturally re-establishes the correct state on its own once
-        // movement unlocks, no explicit restore needed here.
-        if (locked) {
-          this.activeInteractable = null;
-          this.promptText.container.setVisible(false);
-        }
+        this.tutorialAllowMovement = !locked;
       },
       onComplete: () => {
+        this.panelOpen = false;
+        this.tutorialAllowMovement = false;
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
       }
     });
   }
 
+  /**
+   * `panelOpen` blocks handleProximity()/handleInteraction() unconditionally
+   * whenever it's true, with no exception - this matters for the onboarding
+   * tutorial's "try WASD now" step specifically. That step previously
+   * unlocked the whole panelOpen gate (movement AND proximity/interaction
+   * together) so the player could test movement - but that also meant
+   * handleInteraction() ran, so walking near a real station (Chip
+   * Attendant/Skin Attendant/Ad Kiosk) and pressing E could trigger that
+   * station's own real, independent modal/API flow while the tutorial's
+   * own dialogue was simultaneously still open - two unrelated async UI
+   * systems colliding, the likely actual cause of a full browser-tab hang
+   * reported in testing (an earlier live-camera-follow theory was tried
+   * and ruled out - didn't fix it). `tutorialAllowMovement` lets movement
+   * specifically bypass this gate without reopening that whole class of
+   * bug - proximity/interaction/HUD stay blocked no matter what.
+   */
   update() {
     if (this.panelOpen) {
-      this.player.setVelocity(0, 0);
+      if (this.tutorialAllowMovement) {
+        this.handleMovement();
+      } else {
+        this.player.setVelocity(0, 0);
+      }
       return;
     }
 
