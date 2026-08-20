@@ -126,22 +126,27 @@ function showDialogue(
  * dialogue, waits for "Next"/"Skip", advances - "Got it!" on the final
  * step's button instead of "Next".
  *
- * Movement/camera-follow state is re-applied fresh for EVERY step (not
- * just once up front) based on that step's own `allowMovement` - locked +
- * camera stopped for every step by default, unlocked + camera resumed
- * following for a step that opts in (e.g. "try WASD now"). This module
- * calls `stopFollow()` directly (no params needed), but resuming follow
- * needs the caller's own `startFollow` lerp settings, so that's always the
- * caller's job via `onResumeFollow` - called at the start of any step with
- * `allowMovement: true`, and once more at the very end via `onComplete`
- * regardless of which step the tutorial finished/was skipped on.
+ * Movement is unlocked per-step via `onLockMovement` for a step with
+ * `allowMovement: true` (e.g. "try WASD now"), but the camera deliberately
+ * stays static (never resumes live `startFollow`) for the ENTIRE tutorial,
+ * even on that step - only `onComplete` (once the whole tutorial ends)
+ * resumes real camera-follow. This used to resume live follow during the
+ * movement-enabled step too, so the player could see themselves walk
+ * around - but that combination (a live camera actively re-centering every
+ * frame while a screen-fixed *interactive* dialogue with hover/click
+ * targets is simultaneously open) was directly correlated with a full
+ * browser-tab hang reported in testing, never fully root-caused. Every
+ * other step in this tutorial keeps the camera static while its dialogue
+ * shows; this just makes the movement-enabled step consistent with that
+ * instead of being the one exception - the player can still see their
+ * character move within the current (static) viewport, just without the
+ * camera chasing them if they walk far enough to leave it.
  */
 export function runOnboardingTutorial(
   scene: Phaser.Scene,
   steps: readonly TutorialStep[],
   callbacks: {
     onLockMovement: (locked: boolean) => void;
-    onResumeFollow: () => void;
     onComplete: () => void;
   }
 ): void {
@@ -153,13 +158,8 @@ export function runOnboardingTutorial(
   let index = 0;
 
   const applyStepInteractivity = (step: TutorialStep) => {
-    const interactive = !!step.allowMovement;
-    callbacks.onLockMovement(!interactive);
-    if (interactive) {
-      callbacks.onResumeFollow();
-    } else {
-      scene.cameras.main.stopFollow();
-    }
+    callbacks.onLockMovement(!step.allowMovement);
+    scene.cameras.main.stopFollow();
   };
 
   const finish = () => {

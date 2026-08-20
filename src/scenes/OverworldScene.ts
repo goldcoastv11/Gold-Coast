@@ -538,9 +538,6 @@ export class OverworldScene extends Phaser.Scene {
           this.promptText.container.setVisible(false);
         }
       },
-      onResumeFollow: () => {
-        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-      },
       onComplete: () => {
         this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
       }
@@ -1454,12 +1451,15 @@ export class OverworldScene extends Phaser.Scene {
         let key = "floor_tan";
         if (inRug) {
           // "floor_tan"/"carpet_red"/"carpet_blue" are Kenney RPG Urban
-          // Pack tiles now (see BootScene.ts preload) - a warm red brick
-          // rug fill with an occasional cool gray-blue flagstone accent
-          // tile, replacing the old Jephed pack's literal dark red/blue
-          // casino carpet. Same texture-key names, so this loop needed no
-          // changes beyond the art living under each key.
-          key = (x + y) % 5 === 0 ? "carpet_blue" : "carpet_red";
+          // Pack tiles (see BootScene.ts preload). The rug used to be
+          // dominantly carpet_red - per user request ("change the main
+          // floor from red to something that makes the games pop"), the
+          // roles are flipped: cool gray-blue flagstone (carpet_blue) is
+          // now the dominant rug fill, with a sparse warm-tan (floor_tan)
+          // accent. A cool, calmer floor sits behind the furniture - warm
+          // terracotta cabinets, mint felt tables, gold/coral accents -
+          // without competing with it the way a saturated red rug did.
+          key = (x + y) % 5 === 0 ? "floor_tan" : "carpet_blue";
         }
         this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key);
       }
