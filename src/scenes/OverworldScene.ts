@@ -618,11 +618,13 @@ export class OverworldScene extends Phaser.Scene {
         40,
         "Chip Attendant",
         "Walk up to the Chip Attendant and press E to claim your free Gold Coins!",
+        // Skip means "skip THIS step" (per user direction), not "end the
+        // whole tutorial" - moves straight to the next hands-on step.
         () => {
           this.events.off("tutorial:chipClaimed", onClaimed);
           highlight.destroy();
           instruction.destroy();
-          this.finishOnboardingTutorial();
+          this.runHandsOnGameStep();
         }
       );
       this.events.once("tutorial:chipClaimed", onClaimed);
@@ -640,11 +642,13 @@ export class OverworldScene extends Phaser.Scene {
         40,
         "Play a Game",
         "Walk up to Dice and press E, then place a bet to play!",
+        // Skip means "skip THIS step" (per user direction), not "end the
+        // whole tutorial" - moves straight to the Skin Attendant step.
         () => {
           gameState.tutorialAwaitingGamePlay = false;
           highlight.destroy();
           instruction.destroy();
-          this.finishOnboardingTutorial();
+          this.runHandsOnSkinAttendantStep();
         }
       );
       // No completion event to listen for here on the success path -
@@ -674,6 +678,9 @@ export class OverworldScene extends Phaser.Scene {
         40,
         "Skin Attendant",
         "Walk up to the Skin Attendant and press E, then buy a skin to wear it!",
+        // Skip means "skip THIS step" (per user direction) - this is the
+        // LAST step though, so "move to the next one" has nowhere left to
+        // go and is the same as finishing.
         () => {
           this.events.off("tutorial:skinPurchased", onPurchased);
           highlight.destroy();

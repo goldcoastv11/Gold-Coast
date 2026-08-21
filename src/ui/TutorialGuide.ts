@@ -9,7 +9,11 @@ import { makeButton, makePanel } from "./uiHelpers";
  * in a screen-fixed dialogue box (the "voice box") explaining one beat at a
  * time; the camera pans to whatever station is being introduced instead of
  * requiring the player to walk there themselves (per user direction).
- * Skippable at any point via the always-visible "Skip Tutorial" button.
+ * Skippable at any point via the always-visible "Skip" button - per user
+ * direction, "Skip" advances to the NEXT step rather than ending the whole
+ * tutorial (for the two informational steps here, that's identical to
+ * "Next"; for the three hands-on steps OverworldScene chains afterward,
+ * see its own runHandsOn*Step methods for what "next" means there).
  *
  * Deliberately NOT persisted anywhere - no server flag, no localStorage.
  * OverworldScene only ever passes `startTutorial: true` from the one-time
@@ -102,7 +106,7 @@ function showDialogue(
     PANEL_Y - 42,
     130,
     30,
-    "Skip Tutorial",
+    "Skip",
     Theme.neutral,
     Theme.neutralHover,
     onSkip
@@ -170,12 +174,14 @@ export interface InstructionHandle {
 
 /**
  * A lighter-weight sibling of the dialogue box above, for a "go do this
- * for real" step - same title/body/mascot/Skip-Tutorial layout, but NO
- * Next button, since progression here is driven by the player actually
- * completing the real action (a real claim, purchase, or game round), not
- * a click. The caller is responsible for listening for that real
- * completion itself and calling `.destroy()` (this handle doesn't know
- * what "done" means for any given station).
+ * for real" step - same title/body/mascot/Skip layout, but NO Next button,
+ * since progression here is driven by the player actually completing the
+ * real action (a real claim, purchase, or game round), not a click. The
+ * caller is responsible for listening for that real completion itself and
+ * calling `.destroy()` (this handle doesn't know what "done" means for any
+ * given station). `onSkip` here means "skip THIS step, move to the next
+ * one" (per user direction, same as every other step's Skip button) - the
+ * caller decides what "next" actually is.
  */
 export function showInstruction(scene: Phaser.Scene, title: string, text: string, onSkip: () => void): InstructionHandle {
   const panel = makePanel(scene, PANEL_X, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
@@ -210,7 +216,7 @@ export function showInstruction(scene: Phaser.Scene, title: string, text: string
     PANEL_Y,
     130,
     40,
-    "Skip Tutorial",
+    "Skip",
     Theme.neutral,
     Theme.neutralHover,
     onSkip
@@ -279,36 +285,27 @@ export function runOnboardingTutorial(
     const isLast = index === steps.length - 1;
     // Guards against ever advancing/destroying twice for this one dialogue
     // instance - belt-and-suspenders against a stray double pointerdown
-    // (fast double-click/tap) firing both onNext and, before the button's
-    // hit area is actually torn down, a second event landing on it too.
-    // Without this, a double-fire would create two overlapping dialogue
-    // boxes (the exact "text will overlay" symptom) since the second
-    // showStep() call renders on top of the first's before its own Next
-    // click ever destroys it.
+    // (fast double-click/tap) firing both handlers, or one twice, before
+    // the button's hit area is actually torn down. Without this, a
+    // double-fire would create two overlapping dialogue boxes (the exact
+    // "text will overlay" symptom) since a second showStep() call renders
+    // on top of the first's before its own click ever destroys it.
     let handled = false;
-    const handle = showDialogue(
-      scene,
-      step.title,
-      step.text,
-      isLast ? "Got it!" : "Next →",
-      () => {
-        if (handled) return;
-        handled = true;
-        handle.destroy();
-        index++;
-        if (index >= steps.length) {
-          finish();
-        } else {
-          goToStep();
-        }
-      },
-      () => {
-        if (handled) return;
-        handled = true;
-        handle.destroy();
+    // Skip means "skip THIS step, move to the next one" (per user
+    // direction), which for these two purely informational steps is
+    // identical to clicking Next - both just call this same advance().
+    const advance = () => {
+      if (handled) return;
+      handled = true;
+      handle.destroy();
+      index++;
+      if (index >= steps.length) {
         finish();
+      } else {
+        goToStep();
       }
-    );
+    };
+    const handle = showDialogue(scene, step.title, step.text, isLast ? "Got it!" : "Next →", advance, advance);
   };
 
   const goToStep = () => {
