@@ -7,7 +7,14 @@ import { makeButton, makePanel, makeInset, makeTextChip, TextChip, UIButton } fr
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { offerAdReward } from "../ui/AdRewardOffer";
-import { runOnboardingTutorial, TutorialStep } from "../ui/TutorialGuide";
+import {
+  runOnboardingTutorial,
+  TutorialStep,
+  showHighlightRing,
+  showInstruction,
+  HighlightHandle,
+  InstructionHandle
+} from "../ui/TutorialGuide";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -326,6 +333,18 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   create(data?: OverworldSceneData) {
+    // Capture, then IMMEDIATELY clear, whatever data this scene was
+    // started with - Phaser's Systems.start(data) only overwrites
+    // settings.data `if (data)` is truthy, so any later `scene.start(
+    // "OverworldScene")` call with no data (every game scene's exit/walk-
+    // away button does exactly this) would otherwise silently keep seeing
+    // THIS SAME data forever, re-triggering the tutorial every time the
+    // player returned from a game - confirmed directly in Phaser's own
+    // source (Systems.js). Clearing it here means only a genuine fresh
+    // `{startTutorial: true}` passed to THIS exact start() call counts.
+    const shouldStartTutorial = data?.startTutorial === true;
+    this.sys.settings.data = {};
+
     this.buildFloor();
     this.buildDecorations();
 
@@ -475,24 +494,38 @@ export class OverworldScene extends Phaser.Scene {
 
     this.updateHud();
 
-    // Onboarding tutorial - only right after a brand-new signup (see
-    // OverworldSceneData's doc comment). Runs last, after every station/
-    // camera/HUD setup above so its world coordinates (Chip Attendant/Dice/
-    // Skin Attendant) are all valid.
-    if (data?.startTutorial) {
+    // Onboarding tutorial - runs last, after every station/camera/HUD
+    // setup above so its world coordinates (Chip Attendant/Dice/Skin
+    // Attendant) are all valid. Two entry points:
+    // - A brand-new signup (see OverworldSceneData's doc comment) starts
+    //   the whole thing from the top.
+    // - Returning from a tutorial-triggered Dice round (see
+    //   gameState.tutorialResumeAtSkinAttendant's doc comment) resumes
+    //   directly at the Skin Attendant hands-on step, skipping everything
+    //   before it - the player already completed the Welcome/movement/
+    //   Chip Attendant/Play a Game steps in a PREVIOUS OverworldScene
+    //   instance that no longer exists (this one's a fresh scene, entered
+    //   via a real scene transition out of and back from DiceScene).
+    if (gameState.tutorialResumeAtSkinAttendant) {
+      gameState.tutorialResumeAtSkinAttendant = false;
+      this.runHandsOnSkinAttendantStep();
+    } else if (shouldStartTutorial) {
       this.startOnboardingTutorial();
     }
   }
 
   /**
    * Guided tour (ui/TutorialGuide.ts) - a mascot "voice box" explains the
-   * shuffle-cup bonus the player just received, introduces the character +
-   * movement, then pans the camera to the Chip Attendant, a representative
-   * game (Dice - already this codebase's other "reference" pick, see
-   * games/dice.ts's own doc comments), and the Skin Attendant in turn.
-   * World coordinates match each station's real placement above (NPC at
-   * 40,28 / Dice at 52,20 / Skin Attendant at 40,18, all in tiles) - if
-   * those ever move, update these to match.
+   * shuffle-cup bonus the player just received and introduces the
+   * character + movement (the two purely informational steps, run through
+   * TutorialGuide's own Next-button sequencer), then hands off to three
+   * "go do it for real" steps (runHandsOn*Step below) - the player
+   * actually walks to and interacts with the Chip Attendant, a real game
+   * (Dice), and the Skin Attendant, each step only advancing once the
+   * corresponding real action genuinely completes, not on a click. World
+   * coordinates match each station's real placement above (NPC at 40,28 /
+   * Dice at 52,20 / Skin Attendant at 40,18, all in tiles) - if those ever
+   * move, update runHandsOn*Step's pan targets to match.
    */
   private startOnboardingTutorial() {
     const steps: TutorialStep[] = [
@@ -503,42 +536,24 @@ export class OverworldScene extends Phaser.Scene {
       {
         title: "This Is You",
         text: "This is your character! Use WASD or the arrow keys to walk around the casino floor - try it now.",
-        // Every other step keeps movement locked (the camera's about to
-        // pan somewhere and the player shouldn't wander off mid-tour), but
-        // THIS step's whole point is inviting the player to move - locking
-        // it here would mean pressing WASD as instructed does nothing,
-        // which reads as the tutorial being frozen (confirmed via live
-        // testing). See update()'s doc comment for why this unlocks
-        // movement specifically (tutorialAllowMovement) without touching
-        // panelOpen - proximity/interaction (and, with them, real station
-        // panels) stay fully blocked throughout, camera stays static.
+        // Every other informational step keeps movement locked, but THIS
+        // step's whole point is inviting the player to move - locking it
+        // here would mean pressing WASD as instructed does nothing, which
+        // reads as the tutorial being frozen (confirmed via live testing).
+        // See update()'s doc comment for why this unlocks movement
+        // specifically (tutorialAllowMovement) without touching panelOpen.
         allowMovement: true
-      },
-      {
-        title: "Chip Attendant",
-        text: "Visit the Chip Attendant any time for a free Gold Coin claim. It's on a short cooldown, so check back often!",
-        panTo: { x: 40 * TILE, y: 28 * TILE }
-      },
-      {
-        title: "Play a Game",
-        text: "Walk up to any table or machine - like Dice here - and press E to play. Place a bet, then win or lose Gold Coins on the result.",
-        panTo: { x: 52 * TILE, y: 20 * TILE }
-      },
-      {
-        title: "Skin Attendant",
-        text: "The Skin Attendant sells new looks for your character with Gold Coins. Buy one and you'll be wearing it immediately!",
-        panTo: { x: 40 * TILE, y: 18 * TILE }
       }
     ];
 
-    // panelOpen stays true for the tutorial's ENTIRE duration, including
-    // the movement-enabled step - see update()'s doc comment for why
-    // (blocks real station interaction/proximity throughout, no exception).
-    // Clearing activeInteractable/hiding promptText once here, up front,
-    // covers the same case the old per-step version handled (player
+    // panelOpen stays true through both informational steps - see
+    // update()'s doc comment (blocks real station interaction/proximity
+    // throughout, no exception). Clearing activeInteractable/hiding
+    // promptText once here, up front, covers the case where the player
     // happened to be standing near a station right as the tutorial
-    // started) - it can't need re-clearing mid-tutorial since
-    // handleProximity() never runs again until the tutorial actually ends.
+    // started - it can't need re-clearing mid-sequence since
+    // handleProximity() never runs again until a hands-on step explicitly
+    // re-enables it.
     this.panelOpen = true;
     this.activeInteractable = null;
     this.promptText.container.setVisible(false);
@@ -548,10 +563,125 @@ export class OverworldScene extends Phaser.Scene {
         this.tutorialAllowMovement = !locked;
       },
       onComplete: () => {
-        this.panelOpen = false;
         this.tutorialAllowMovement = false;
-        this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+        this.runHandsOnChipAttendantStep();
       }
+    });
+  }
+
+  /** Ends the tutorial (whether finished normally or skipped from any hands-on step): unblocks real interaction and resumes normal camera-follow. Idempotent - safe to call even if already unblocked. */
+  private finishOnboardingTutorial() {
+    this.panelOpen = false;
+    this.tutorialAllowMovement = false;
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+  }
+
+  /**
+   * Pans to `x, y`, resumes camera-follow (so the player can see
+   * themselves walk toward the target - safe now that the earlier tutorial
+   * hang is confirmed fixed at its actual root cause, an invalid ease
+   * string, not camera-follow itself), shows a highlight ring + a
+   * no-Next-button instruction bubble, and fully unblocks real
+   * interaction (`panelOpen = false`) so the player can genuinely walk up
+   * and interact with the real station. `onSkip` and the real completion
+   * signal are both the caller's responsibility - this just handles the
+   * shared pan/highlight/instruction choreography.
+   */
+  private runHandsOnStep(
+    x: number,
+    y: number,
+    radius: number,
+    title: string,
+    text: string,
+    onSkip: () => void
+  ): { highlight: HighlightHandle; instruction: InstructionHandle } {
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    const highlight = showHighlightRing(this, x, y, radius);
+    const instruction = showInstruction(this, title, text, onSkip);
+    this.panelOpen = false;
+    return { highlight, instruction };
+  }
+
+  private runHandsOnChipAttendantStep() {
+    this.cameras.main.stopFollow();
+    this.cameras.main.pan(40 * TILE, 28 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
+      if (progress !== 1) return;
+
+      const onClaimed = () => {
+        highlight.destroy();
+        instruction.destroy();
+        this.runHandsOnGameStep();
+      };
+      const { highlight, instruction } = this.runHandsOnStep(
+        40 * TILE,
+        28 * TILE,
+        40,
+        "Chip Attendant",
+        "Walk up to the Chip Attendant and press E to claim your free Gold Coins!",
+        () => {
+          this.events.off("tutorial:chipClaimed", onClaimed);
+          highlight.destroy();
+          instruction.destroy();
+          this.finishOnboardingTutorial();
+        }
+      );
+      this.events.once("tutorial:chipClaimed", onClaimed);
+    });
+  }
+
+  private runHandsOnGameStep() {
+    this.cameras.main.stopFollow();
+    this.cameras.main.pan(52 * TILE, 20 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
+      if (progress !== 1) return;
+
+      const { highlight, instruction } = this.runHandsOnStep(
+        52 * TILE,
+        20 * TILE,
+        40,
+        "Play a Game",
+        "Walk up to Dice and press E, then place a bet to play!",
+        () => {
+          gameState.tutorialAwaitingGamePlay = false;
+          highlight.destroy();
+          instruction.destroy();
+          this.finishOnboardingTutorial();
+        }
+      );
+      // No completion event to listen for here on the success path -
+      // entering DiceScene tears this whole scene down (the real,
+      // unmodified goToGame() flow), which destroys `highlight`/
+      // `instruction` along with everything else in this scene
+      // automatically. DiceScene itself picks up this flag on its own
+      // create() and continues the tutorial from there - see its doc
+      // comments and gameState.tutorialAwaitingGamePlay's.
+      gameState.tutorialAwaitingGamePlay = true;
+    });
+  }
+
+  private runHandsOnSkinAttendantStep() {
+    this.cameras.main.stopFollow();
+    this.cameras.main.pan(40 * TILE, 18 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
+      if (progress !== 1) return;
+
+      const onPurchased = () => {
+        highlight.destroy();
+        instruction.destroy();
+        this.finishOnboardingTutorial();
+      };
+      const { highlight, instruction } = this.runHandsOnStep(
+        40 * TILE,
+        18 * TILE,
+        40,
+        "Skin Attendant",
+        "Walk up to the Skin Attendant and press E, then buy a skin to wear it!",
+        () => {
+          this.events.off("tutorial:skinPurchased", onPurchased);
+          highlight.destroy();
+          instruction.destroy();
+          this.finishOnboardingTutorial();
+        }
+      );
+      this.events.once("tutorial:skinPurchased", onPurchased);
     });
   }
 
@@ -1018,6 +1148,14 @@ export class OverworldScene extends Phaser.Scene {
     let result: Awaited<ReturnType<typeof api.claimBonus>>;
     try {
       result = await api.claimBonus();
+      // Onboarding tutorial's Chip Attendant hands-on step (see
+      // startOnboardingTutorial) listens for this - a harmless no-op emit
+      // when the tutorial isn't running (Phaser's EventEmitter doesn't
+      // error on emit-with-no-listeners). Fired right here, at the real
+      // economy grant, not after the shuffle-cup/Triple Chance
+      // presentation that follows - those are cosmetic, this is the
+      // moment the claim actually happened.
+      this.events.emit("tutorial:chipClaimed");
     } catch (err) {
       this.panelOpen = false;
       this.updateHud();
@@ -1366,6 +1504,10 @@ export class OverworldScene extends Phaser.Scene {
                   this.updateHud();
                   this.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
                   render();
+                  // Onboarding tutorial's Skin Attendant hands-on step
+                  // (see startOnboardingTutorial) listens for this -
+                  // harmless no-op emit when the tutorial isn't running.
+                  this.events.emit("tutorial:skinPurchased");
                 })
                 .catch((err) => {
                   this.showToast(this.describeSkinError(err, `buy ${def.name}`), Theme.textDanger);

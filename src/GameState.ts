@@ -308,6 +308,30 @@ class GameState {
    */
   lastPlayerPosition: { x: number; y: number } | null = null;
 
+  /**
+   * Onboarding tutorial cross-scene coordination (see ui/TutorialGuide.ts
+   * and OverworldScene's hands-on tutorial steps). The tutorial's
+   * "Play a Game" step sends the player into a real game scene (Dice) -
+   * a real scene transition, not just an overlay panel like the Chip/Skin
+   * Attendant steps - so it needs *some* state that survives the scene
+   * boundary. Deliberately NOT using Phaser's own scene-data mechanism for
+   * this (`scene.start(key, data)`): `Systems.start()` only overwrites
+   * `settings.data` `if (data)` is truthy, so a later `scene.start(key)`
+   * call with no data (which is what every single game scene's exit
+   * button does) silently keeps whatever data was passed the LAST time
+   * that scene started - confirmed directly in Phaser's own source. That
+   * bug is exactly why the tutorial was re-triggering after playing any
+   * game. A plain gameState field, read once and explicitly cleared by
+   * whichever scene consumes it, has no equivalent footgun. Neither field
+   * is persisted (matching TutorialGuide.ts's whole "not persisted
+   * anywhere" design) - they only need to survive within one continuous
+   * play session, never across a reload.
+   */
+  /** True while the tutorial's "Play a Game" step is waiting for the player to enter and complete one real Dice round - DiceScene.create() checks this to show its own highlight/instruction, and clears it once a real round resolves (or the player walks away without playing). */
+  tutorialAwaitingGamePlay = false;
+  /** Set by DiceScene right before returning to the Overworld after a tutorial-triggered round resolves, so OverworldScene resumes the tutorial at the Skin Attendant step instead of doing nothing. Read-and-cleared exactly once, by OverworldScene.create(). */
+  tutorialResumeAtSkinAttendant = false;
+
   // ---- Economy: ledger-backed operations ----
   // These delegate to src/economy/*.ts (pure, unit-testable) and persist
   // afterwards. Prefer these over the legacy goldCoins/stakeCoins setters

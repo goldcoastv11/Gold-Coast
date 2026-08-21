@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import { showHighlightRing, HighlightHandle } from "../ui/TutorialGuide";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -43,6 +44,9 @@ export class DiceScene extends Phaser.Scene {
   private minusBtn?: UIButton;
   private plusBtn?: UIButton;
   private betControl?: BetControl;
+  /** Onboarding tutorial's "Play a Game" hands-on step - see gameState.tutorialAwaitingGamePlay's doc comment and OverworldScene.runHandsOnGameStep. */
+  private tutorialHighlight?: HighlightHandle;
+  private tutorialHint?: Phaser.GameObjects.Text;
 
   constructor() {
     super("DiceScene");
@@ -111,13 +115,39 @@ export class DiceScene extends Phaser.Scene {
       .text(400, 452, "Roll under your target to win", { fontSize: "13px", color: Theme.textMuted })
       .setOrigin(0.5);
 
-    makeButton(this, 400, 486, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
-    );
+    makeButton(this, 400, 486, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () => {
+      // Leaving without ever rolling shouldn't leave a stale flag behind -
+      // a LATER, unrelated visit to Dice would otherwise incorrectly show
+      // the tutorial highlight again. See resolveRoll() for the normal
+      // (played-a-real-round) path that also clears this.
+      gameState.tutorialAwaitingGamePlay = false;
+      this.scene.start("OverworldScene");
+    });
 
     this.redrawZoneBar();
     this.updateTargetLabel();
     this.updateBalance();
+
+    // Onboarding tutorial's "Play a Game" hands-on step (see
+    // gameState.tutorialAwaitingGamePlay's doc comment) - the player
+    // walked up and pressed E for real (this is a completely ordinary
+    // entry into DiceScene, no tutorial-specific transition logic
+    // involved), so highlight the real ROLL button and wait for one real
+    // round to resolve (see resolveRoll()) before returning to the
+    // Overworld to resume the tutorial.
+    if (gameState.tutorialAwaitingGamePlay) {
+      this.tutorialHighlight = showHighlightRing(this, 400, 412, 70, true);
+      this.tutorialHint = this.add
+        .text(400, 30, "Tutorial: place a bet, then press ROLL!", {
+          fontSize: "13px",
+          color: Theme.textGold,
+          fontStyle: "bold",
+          backgroundColor: "#fdf3e1e6",
+          padding: { x: 10, y: 6 }
+        })
+        .setOrigin(0.5)
+        .setDepth(600);
+    }
   }
 
   private adjustTarget(delta: number) {
@@ -220,6 +250,22 @@ export class DiceScene extends Phaser.Scene {
     this.minusBtn?.setEnabled(true);
     this.plusBtn?.setEnabled(true);
     this.betControl?.setEnabled(true);
+
+    // Onboarding tutorial's "Play a Game" hands-on step - a real round
+    // (win OR lose, either counts as "played") just resolved for real, so
+    // the tutorial's task here is done. Let the player see this result for
+    // a beat, then send them back to the Overworld to resume at the Skin
+    // Attendant step - see gameState.tutorialResumeAtSkinAttendant's doc
+    // comment and OverworldScene.create()'s resume check.
+    if (gameState.tutorialAwaitingGamePlay) {
+      gameState.tutorialAwaitingGamePlay = false;
+      gameState.tutorialResumeAtSkinAttendant = true;
+      this.tutorialHighlight?.destroy();
+      this.tutorialHint?.destroy();
+      this.tutorialHighlight = undefined;
+      this.tutorialHint = undefined;
+      this.time.delayedCall(1200, () => this.scene.start("OverworldScene"));
+    }
   }
 
   private handleRollError(err: unknown) {

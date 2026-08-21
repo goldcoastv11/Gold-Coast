@@ -121,6 +121,113 @@ function showDialogue(
   };
 }
 
+export interface HighlightHandle {
+  destroy: () => void;
+}
+
+/**
+ * A pulsing gold ring drawing attention to (x, y) - for "go do this for
+ * real" tutorial steps (walk up to a station and actually interact with
+ * it), as opposed to the informational steps' simple dialogue+Next flow.
+ * World-space by default (scrolls with the camera, so it stays pinned to
+ * whatever it's highlighting as the player walks around) - pass
+ * `screenFixed: true` for a UI target instead (e.g. a button inside a game
+ * scene that never scrolls).
+ */
+export function showHighlightRing(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  radius: number,
+  screenFixed = false
+): HighlightHandle {
+  const ring = scene.add.graphics().setPosition(x, y).setDepth(DEPTH + 2);
+  if (screenFixed) ring.setScrollFactor(0);
+  ring.lineStyle(4, Theme.gold, 1);
+  ring.strokeCircle(0, 0, radius);
+
+  const tween = scene.tweens.add({
+    targets: ring,
+    scale: { from: 1, to: 1.25 },
+    alpha: { from: 1, to: 0.35 },
+    duration: 700,
+    yoyo: true,
+    repeat: -1,
+    ease: "Sine.easeInOut"
+  });
+
+  return {
+    destroy: () => {
+      tween.stop();
+      ring.destroy();
+    }
+  };
+}
+
+export interface InstructionHandle {
+  destroy: () => void;
+}
+
+/**
+ * A lighter-weight sibling of the dialogue box above, for a "go do this
+ * for real" step - same title/body/mascot/Skip-Tutorial layout, but NO
+ * Next button, since progression here is driven by the player actually
+ * completing the real action (a real claim, purchase, or game round), not
+ * a click. The caller is responsible for listening for that real
+ * completion itself and calling `.destroy()` (this handle doesn't know
+ * what "done" means for any given station).
+ */
+export function showInstruction(scene: Phaser.Scene, title: string, text: string, onSkip: () => void): InstructionHandle {
+  const panel = makePanel(scene, PANEL_X, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
+
+  const portrait = scene.add
+    .image(PANEL_X - PANEL_W / 2 + 55, PANEL_Y, "tutorial_guide")
+    .setScrollFactor(0)
+    .setDepth(DEPTH + 1)
+    .setScale(1.5);
+
+  const titleText = scene.add
+    .text(PANEL_X - PANEL_W / 2 + 110, PANEL_Y - 42, title, {
+      fontSize: "15px",
+      color: Theme.textGold,
+      fontStyle: "bold"
+    })
+    .setScrollFactor(0)
+    .setDepth(DEPTH + 1);
+
+  const bodyText = scene.add
+    .text(PANEL_X - PANEL_W / 2 + 110, PANEL_Y - 20, text, {
+      fontSize: "13px",
+      color: Theme.textPrimary,
+      wordWrap: { width: 380 }
+    })
+    .setScrollFactor(0)
+    .setDepth(DEPTH + 1);
+
+  const skipBtn = makeButton(
+    scene,
+    PANEL_X + PANEL_W / 2 - 85,
+    PANEL_Y,
+    130,
+    40,
+    "Skip Tutorial",
+    Theme.neutral,
+    Theme.neutralHover,
+    onSkip
+  );
+  skipBtn.container.setScrollFactor(0).setDepth(DEPTH + 1);
+
+  return {
+    destroy: () => {
+      panel.destroy();
+      portrait.destroy();
+      titleText.destroy();
+      bodyText.destroy();
+      skipBtn.destroy();
+    }
+  };
+}
+
 /**
  * Runs `steps` in order: pans the camera (if `panTo` is given), shows the
  * dialogue, waits for "Next"/"Skip", advances - "Got it!" on the final
