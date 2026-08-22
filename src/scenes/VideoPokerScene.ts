@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -93,6 +94,7 @@ export class VideoPokerScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.hand = [];
     this.held = [false, false, false, false, false];
     this.stage = "idle";
@@ -275,7 +277,7 @@ export class VideoPokerScene extends Phaser.Scene {
   /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern ("holding" = cards dealt, round in progress, equivalent to the other 4 scenes' `active`). */
   private leaveGame() {
     if (this.stage !== "holding") {
-      this.scene.start("OverworldScene");
+      fadeToScene(this, "OverworldScene");
       return;
     }
     this.walkAwayBtn?.setEnabled(false);
@@ -286,7 +288,7 @@ export class VideoPokerScene extends Phaser.Scene {
       .catch(() => {
         // Best-effort - see MinesScene.leaveGame's doc comment.
       })
-      .finally(() => this.scene.start("OverworldScene"));
+      .finally(() => fadeToScene(this, "OverworldScene"));
   }
 
   private draw() {

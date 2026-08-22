@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -25,6 +26,7 @@ export class LimboScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.target = DEFAULT_TARGET;
     this.running = false;
     this.presetButtons = [];
@@ -68,7 +70,7 @@ export class LimboScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     makeButton(this, 400, 470, 200, 32, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+      fadeToScene(this, "OverworldScene")
     );
 
     this.renderPresets();

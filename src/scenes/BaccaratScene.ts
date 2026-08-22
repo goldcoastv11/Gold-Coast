@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -77,6 +78,7 @@ export class BaccaratScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.betType = "player";
     this.dealing = false;
     this.playerSlots = [];
@@ -130,7 +132,7 @@ export class BaccaratScene extends Phaser.Scene {
     );
 
     makeButton(this, 400, 424, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+      fadeToScene(this, "OverworldScene")
     );
 
     this.updateBalance();

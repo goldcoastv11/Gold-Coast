@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -43,6 +44,7 @@ export class MinesScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.active = false;
     this.busy = false;
     this.picksMade = 0;
@@ -260,7 +262,7 @@ export class MinesScene extends Phaser.Scene {
    */
   private leaveGame() {
     if (!this.active) {
-      this.scene.start("OverworldScene");
+      fadeToScene(this, "OverworldScene");
       return;
     }
     this.walkAwayBtn?.setEnabled(false);
@@ -272,7 +274,7 @@ export class MinesScene extends Phaser.Scene {
       .catch(() => {
         // Best-effort - see doc comment above.
       })
-      .finally(() => this.scene.start("OverworldScene"));
+      .finally(() => fadeToScene(this, "OverworldScene"));
   }
 
   private renderGridState() {

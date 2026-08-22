@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -44,6 +45,7 @@ export class DragonTowerScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.active = false;
     this.busy = false;
     this.currentRow = 0;
@@ -248,7 +250,7 @@ export class DragonTowerScene extends Phaser.Scene {
   /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern. */
   private leaveGame() {
     if (!this.active) {
-      this.scene.start("OverworldScene");
+      fadeToScene(this, "OverworldScene");
       return;
     }
     this.walkAwayBtn?.setEnabled(false);
@@ -260,7 +262,7 @@ export class DragonTowerScene extends Phaser.Scene {
       .catch(() => {
         // Best-effort - see MinesScene.leaveGame's doc comment.
       })
-      .finally(() => this.scene.start("OverworldScene"));
+      .finally(() => fadeToScene(this, "OverworldScene"));
   }
 
   /** Repaints every tile according to current run state, and wires up clicks for the active row. */

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -39,6 +40,7 @@ export class SlotsScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.spinning = false;
     this.spinTimer = undefined;
     this.reelTexts = [];
@@ -96,7 +98,7 @@ export class SlotsScene extends Phaser.Scene {
     );
 
     makeButton(this, 400, 465, 220, 40, "WALK AWAY", Theme.neutral, Theme.neutralHover, () =>
-      this.scene.start("OverworldScene")
+      fadeToScene(this, "OverworldScene")
     );
 
     this.betControl = makeBetControl(this, 400, 505, () => {});

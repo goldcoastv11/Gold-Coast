@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
 import { showHighlightRing, HighlightHandle } from "../ui/TutorialGuide";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -53,6 +54,7 @@ export class DiceScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.target = DEFAULT_TARGET;
     this.rolling = false;
     this.rollTimer = undefined;
@@ -121,7 +123,7 @@ export class DiceScene extends Phaser.Scene {
       // the tutorial highlight again. See resolveRoll() for the normal
       // (played-a-real-round) path that also clears this.
       gameState.tutorialAwaitingGamePlay = false;
-      this.scene.start("OverworldScene");
+      fadeToScene(this, "OverworldScene");
     });
 
     this.redrawZoneBar();
@@ -264,7 +266,7 @@ export class DiceScene extends Phaser.Scene {
       this.tutorialHint?.destroy();
       this.tutorialHighlight = undefined;
       this.tutorialHint = undefined;
-      this.time.delayedCall(1200, () => this.scene.start("OverworldScene"));
+      this.time.delayedCall(1200, () => fadeToScene(this, "OverworldScene"));
     }
   }
 

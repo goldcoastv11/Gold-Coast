@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel } from "../ui/uiHelpers";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 
 interface StartMenuData {
   /** Task #43: set by LoginScene.reconcileAndEnter() when an orphaned stateful-game round was forfeited on this login - shown once, not persisted. */
@@ -16,6 +17,7 @@ export class StartMenuScene extends Phaser.Scene {
   }
 
   create(data: StartMenuData) {
+    fadeInOnCreate(this);
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
     makePanel(this, 400, 300, 460, 340);
@@ -59,12 +61,12 @@ export class StartMenuScene extends Phaser.Scene {
       "ENTER CASINO",
       Theme.accent,
       Theme.accentHover,
-      () => this.scene.start("OverworldScene", { startTutorial: data?.startTutorial })
+      () => fadeToScene(this, "OverworldScene", { startTutorial: data?.startTutorial })
     );
 
     makeButton(this, 400, 435, 160, 36, "LOG OUT", Theme.neutral, Theme.neutralHover, () => {
       gameState.logout();
-      this.scene.start("LoginScene");
+      fadeToScene(this, "LoginScene");
     });
   }
 }

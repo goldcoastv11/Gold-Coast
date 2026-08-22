@@ -15,6 +15,7 @@ import {
   HighlightHandle,
   InstructionHandle
 } from "../ui/TutorialGuide";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -316,7 +317,7 @@ export class OverworldScene extends Phaser.Scene {
   private interactKey!: Phaser.Input.Keyboard.Key;
   private promptText!: TextChip;
   private hudText!: TextChip;
-  private panelOpen = false;
+  private _panelOpen = false;
   /**
    * Override that lets handleMovement() run even while panelOpen is true -
    * used ONLY by the onboarding tutorial's "try WASD now" step (see
@@ -328,11 +329,49 @@ export class OverworldScene extends Phaser.Scene {
   private interactables: Interactable[] = [];
   private activeInteractable: Interactable | null = null;
 
+  /** The onboarding tutorial's currently-showing "go do this for real" highlight ring + instruction bubble, if any - see runHandsOnStep/clearTutorialHighlight. */
+  private activeTutorialHighlight?: HighlightHandle;
+  private activeTutorialInstruction?: InstructionHandle;
+
+  private get panelOpen(): boolean {
+    return this._panelOpen;
+  }
+
+  /**
+   * A false->true transition means some REAL modal/panel/flow is opening
+   * (chip claim confirm, skin shop, ad kiosk, etc.) - if a tutorial hands-on
+   * step's highlight ring + instruction bubble happen to still be showing
+   * at that moment, clear them right here, centrally, rather than needing
+   * every single real-panel call site to remember to do it themselves
+   * (confirmed via live testing: they were staying visible on top of the
+   * real panel the whole time you were, say, buying a skin - genuinely
+   * confusing/cluttered, not just a cosmetic nit). This mirrors the same
+   * "fix it once at the boundary, not at every one of 18 call sites"
+   * approach used for the scene-data retention bug - see create()'s doc
+   * comment on `shouldStartTutorial`.
+   */
+  private set panelOpen(value: boolean) {
+    if (value && !this._panelOpen) {
+      this.clearTutorialHighlight();
+    }
+    this._panelOpen = value;
+  }
+
+  /** Destroys the tutorial's current highlight ring + instruction bubble, if any - safe to call even when neither exists. */
+  private clearTutorialHighlight() {
+    this.activeTutorialHighlight?.destroy();
+    this.activeTutorialInstruction?.destroy();
+    this.activeTutorialHighlight = undefined;
+    this.activeTutorialInstruction = undefined;
+  }
+
   constructor() {
     super("OverworldScene");
   }
 
   create(data?: OverworldSceneData) {
+    fadeInOnCreate(this);
+
     // Capture, then IMMEDIATELY clear, whatever data this scene was
     // started with - Phaser's Systems.start(data) only overwrites
     // settings.data `if (data)` is truthy, so any later `scene.start(
@@ -380,7 +419,7 @@ export class OverworldScene extends Phaser.Scene {
     this.registerStation(exitDoor, "Exit", "Press E to exit to the title screen", () => {
       gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
       this.savePositionRemote(this.player.x, this.player.y);
-      this.scene.start("StartMenuScene");
+      fadeToScene(this, "StartMenuScene");
     });
 
     // Skin Attendant - buy new looks for your character
@@ -581,25 +620,20 @@ export class OverworldScene extends Phaser.Scene {
    * themselves walk toward the target - safe now that the earlier tutorial
    * hang is confirmed fixed at its actual root cause, an invalid ease
    * string, not camera-follow itself), shows a highlight ring + a
-   * no-Next-button instruction bubble, and fully unblocks real
-   * interaction (`panelOpen = false`) so the player can genuinely walk up
-   * and interact with the real station. `onSkip` and the real completion
-   * signal are both the caller's responsibility - this just handles the
-   * shared pan/highlight/instruction choreography.
+   * no-Next-button instruction bubble (tracked as activeTutorialHighlight/
+   * activeTutorialInstruction - see clearTutorialHighlight() and
+   * panelOpen's setter, which auto-clears them the instant a real panel
+   * opens), and fully unblocks real interaction (`panelOpen = false`) so
+   * the player can genuinely walk up and interact with the real station.
+   * `onSkip` and the real completion signal are both the caller's
+   * responsibility - this just handles the shared pan/highlight/
+   * instruction choreography.
    */
-  private runHandsOnStep(
-    x: number,
-    y: number,
-    radius: number,
-    title: string,
-    text: string,
-    onSkip: () => void
-  ): { highlight: HighlightHandle; instruction: InstructionHandle } {
+  private runHandsOnStep(x: number, y: number, radius: number, title: string, text: string, onSkip: () => void): void {
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-    const highlight = showHighlightRing(this, x, y, radius);
-    const instruction = showInstruction(this, title, text, onSkip);
+    this.activeTutorialHighlight = showHighlightRing(this, x, y, radius);
+    this.activeTutorialInstruction = showInstruction(this, title, text, onSkip);
     this.panelOpen = false;
-    return { highlight, instruction };
   }
 
   private runHandsOnChipAttendantStep() {
@@ -608,11 +642,10 @@ export class OverworldScene extends Phaser.Scene {
       if (progress !== 1) return;
 
       const onClaimed = () => {
-        highlight.destroy();
-        instruction.destroy();
+        this.clearTutorialHighlight();
         this.runHandsOnGameStep();
       };
-      const { highlight, instruction } = this.runHandsOnStep(
+      this.runHandsOnStep(
         40 * TILE,
         28 * TILE,
         40,
@@ -622,8 +655,7 @@ export class OverworldScene extends Phaser.Scene {
         // whole tutorial" - moves straight to the next hands-on step.
         () => {
           this.events.off("tutorial:chipClaimed", onClaimed);
-          highlight.destroy();
-          instruction.destroy();
+          this.clearTutorialHighlight();
           this.runHandsOnGameStep();
         }
       );
@@ -636,7 +668,7 @@ export class OverworldScene extends Phaser.Scene {
     this.cameras.main.pan(52 * TILE, 20 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
       if (progress !== 1) return;
 
-      const { highlight, instruction } = this.runHandsOnStep(
+      this.runHandsOnStep(
         52 * TILE,
         20 * TILE,
         40,
@@ -646,18 +678,19 @@ export class OverworldScene extends Phaser.Scene {
         // whole tutorial" - moves straight to the Skin Attendant step.
         () => {
           gameState.tutorialAwaitingGamePlay = false;
-          highlight.destroy();
-          instruction.destroy();
+          this.clearTutorialHighlight();
           this.runHandsOnSkinAttendantStep();
         }
       );
       // No completion event to listen for here on the success path -
       // entering DiceScene tears this whole scene down (the real,
-      // unmodified goToGame() flow), which destroys `highlight`/
-      // `instruction` along with everything else in this scene
-      // automatically. DiceScene itself picks up this flag on its own
-      // create() and continues the tutorial from there - see its doc
-      // comments and gameState.tutorialAwaitingGamePlay's.
+      // unmodified goToGame() flow), which destroys the highlight/
+      // instruction along with everything else in this scene
+      // automatically (and panelOpen's setter has already cleared them
+      // the moment the real interaction opened DiceScene's own UI, same
+      // as every other real panel). DiceScene itself picks up this flag
+      // on its own create() and continues the tutorial from there - see
+      // its doc comments and gameState.tutorialAwaitingGamePlay's.
       gameState.tutorialAwaitingGamePlay = true;
     });
   }
@@ -668,11 +701,10 @@ export class OverworldScene extends Phaser.Scene {
       if (progress !== 1) return;
 
       const onPurchased = () => {
-        highlight.destroy();
-        instruction.destroy();
+        this.clearTutorialHighlight();
         this.finishOnboardingTutorial();
       };
-      const { highlight, instruction } = this.runHandsOnStep(
+      this.runHandsOnStep(
         40 * TILE,
         18 * TILE,
         40,
@@ -683,8 +715,7 @@ export class OverworldScene extends Phaser.Scene {
         // go and is the same as finishing.
         () => {
           this.events.off("tutorial:skinPurchased", onPurchased);
-          highlight.destroy();
-          instruction.destroy();
+          this.clearTutorialHighlight();
           this.finishOnboardingTutorial();
         }
       );
@@ -937,7 +968,7 @@ export class OverworldScene extends Phaser.Scene {
   private goToGame(sceneKey: string) {
     gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
     this.savePositionRemote(this.player.x, this.player.y);
-    this.scene.start(sceneKey);
+    fadeToScene(this, sceneKey);
   }
 
   /**

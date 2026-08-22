@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { SKIN_CATALOG } from "../GameState";
+import { fadeToScene } from "../ui/sceneTransition";
 
 /**
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
@@ -172,7 +173,7 @@ export class BootScene extends Phaser.Scene {
     this.createTutorialGuideTexture();
     this.createAdKioskTexture();
 
-    this.scene.start("LoginScene");
+    fadeToScene(this, "LoginScene");
   }
 
   /**

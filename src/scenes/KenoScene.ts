@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -156,6 +157,7 @@ export class KenoScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.picks = new Set();
     this.drawn = new Set();
     this.revealedSoFar = new Set();
@@ -224,7 +226,7 @@ export class KenoScene extends Phaser.Scene {
     );
 
     makeButton(this, 400, 520, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+      fadeToScene(this, "OverworldScene")
     );
 
     this.updateBalance();

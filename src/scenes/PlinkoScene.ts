@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -36,6 +37,7 @@ export class PlinkoScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.dropping = false;
     this.slotTexts = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
@@ -75,7 +77,7 @@ export class PlinkoScene extends Phaser.Scene {
     );
 
     makeButton(this, 400, 516, 200, 32, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.scene.start("OverworldScene")
+      fadeToScene(this, "OverworldScene")
     );
 
     this.updateBalance();

@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
@@ -62,6 +63,7 @@ export class BlackjackScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.playerHand = [];
     this.dealerHand = [];
     this.dealerHoleHidden = true;
@@ -221,7 +223,7 @@ export class BlackjackScene extends Phaser.Scene {
   /** Task #43: see MinesScene.leaveGame's doc comment - same forfeit-before-leaving pattern. */
   private leaveGame() {
     if (!this.active) {
-      this.scene.start("OverworldScene");
+      fadeToScene(this, "OverworldScene");
       return;
     }
     this.walkAwayBtn?.setEnabled(false);
@@ -232,7 +234,7 @@ export class BlackjackScene extends Phaser.Scene {
       .catch(() => {
         // Best-effort - see MinesScene.leaveGame's doc comment.
       })
-      .finally(() => this.scene.start("OverworldScene"));
+      .finally(() => fadeToScene(this, "OverworldScene"));
   }
 
   /** Reveals the dealer's full hand once the server sends it - reuses the already-displayed up-card (index 0) so it never visually changes suit, and picks fresh cosmetic suits for the rest. */

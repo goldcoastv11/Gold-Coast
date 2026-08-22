@@ -5,6 +5,7 @@ import { makeButton, makePanel, UIButton } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance } from "../ui/TripleChanceOffer";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
+import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { GcMultiplier, MeResponse } from "../api/types";
@@ -59,6 +60,7 @@ export class LoginScene extends Phaser.Scene {
   }
 
   create() {
+    fadeInOnCreate(this);
     this.usernameValue = "";
     this.passwordValue = "";
     this.activeField = null;
@@ -406,7 +408,7 @@ export class LoginScene extends Phaser.Scene {
         // Best-effort - see doc comment above.
       }
     }
-    this.scene.start("StartMenuScene", { notice, startTutorial });
+    fadeToScene(this, "StartMenuScene", { notice, startTutorial });
   }
 
   /**
