@@ -545,17 +545,8 @@ export class OverworldScene extends Phaser.Scene {
     //   Chip Attendant/Play a Game steps in a PREVIOUS OverworldScene
     //   instance that no longer exists (this one's a fresh scene, entered
     //   via a real scene transition out of and back from CoinFlipScene).
-    // TEMP diagnostic - see CoinFlipScene.ts's matching logs. Remove once
-    // the "skin attendant step never appears" bug is root-caused.
-    console.log(
-      "[tutorial-debug] OverworldScene.create() - tutorialResumeAtSkinAttendant:",
-      gameState.tutorialResumeAtSkinAttendant,
-      "shouldStartTutorial:",
-      shouldStartTutorial
-    );
     if (gameState.tutorialResumeAtSkinAttendant) {
       gameState.tutorialResumeAtSkinAttendant = false;
-      console.log("[tutorial-debug] OverworldScene.create() - calling runHandsOnSkinAttendantStep()");
       this.runHandsOnSkinAttendantStep();
     } else if (shouldStartTutorial) {
       this.startOnboardingTutorial();

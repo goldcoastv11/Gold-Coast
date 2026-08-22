@@ -104,11 +104,6 @@ export class CoinFlipScene extends Phaser.Scene {
     // involved), so highlight the real HEADS/TAILS buttons and wait for
     // one real round to resolve (see resolveFlip()) before returning to
     // the Overworld to resume the tutorial.
-    // TEMP diagnostic - narrowing down a reported "ring never clears /
-    // tutorial never resumes at Skin Attendant" bug that's survived two
-    // independent implementations and passed code review both times.
-    // Remove once root-caused.
-    console.log("[tutorial-debug] CoinFlipScene.create() - tutorialAwaitingGamePlay:", gameState.tutorialAwaitingGamePlay);
     if (gameState.tutorialAwaitingGamePlay) {
       this.tutorialHighlight = showHighlightRing(this, 400, 400, 150, true);
       this.tutorialHint = this.add
@@ -134,6 +129,22 @@ export class CoinFlipScene extends Phaser.Scene {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
       return;
     }
+
+    // Onboarding tutorial's "Play a Game" hands-on step - the ring/hint's
+    // whole job is showing the player WHERE to click. The instant they
+    // actually click Heads/Tails for real, that job is done - clear it
+    // here, not in resolveFlip() (previously the ring stayed up through the
+    // entire "Flipping..." animation while awaiting the server response,
+    // which read as "the ring is still visible when you play coin flip").
+    // tutorialAwaitingGamePlay itself (which gates the tutorial STEP
+    // actually advancing - flag clear, resume-at-Skin-Attendant flag, the
+    // delayed scene transition) deliberately still waits for resolveFlip(),
+    // since that's about the real round genuinely completing, not just a
+    // click being made.
+    this.tutorialHighlight?.destroy();
+    this.tutorialHint?.destroy();
+    this.tutorialHighlight = undefined;
+    this.tutorialHint = undefined;
 
     const bet = gameState.betAmount;
     this.flipping = true;
@@ -187,15 +198,9 @@ export class CoinFlipScene extends Phaser.Scene {
     // a beat, then send them back to the Overworld to resume at the Skin
     // Attendant step - see gameState.tutorialResumeAtSkinAttendant's doc
     // comment and OverworldScene.create()'s resume check.
-    console.log("[tutorial-debug] resolveFlip() - tutorialAwaitingGamePlay:", gameState.tutorialAwaitingGamePlay);
     if (gameState.tutorialAwaitingGamePlay) {
       gameState.tutorialAwaitingGamePlay = false;
       gameState.tutorialResumeAtSkinAttendant = true;
-      console.log("[tutorial-debug] resolveFlip() - set tutorialResumeAtSkinAttendant = true, will fade to Overworld in 1200ms");
-      this.tutorialHighlight?.destroy();
-      this.tutorialHint?.destroy();
-      this.tutorialHighlight = undefined;
-      this.tutorialHint = undefined;
       // Re-disable right away (already re-enabled above, matching the
       // normal non-tutorial flow) so a second flip can't slip in during
       // the delay below and race the scene transition.
@@ -203,7 +208,6 @@ export class CoinFlipScene extends Phaser.Scene {
       this.tailsBtn?.setEnabled(false);
       this.betControl?.setEnabled(false);
       this.time.delayedCall(1200, () => {
-        console.log("[tutorial-debug] delayedCall fired, calling fadeToScene(OverworldScene) now");
         fadeToScene(this, "OverworldScene");
       });
     }
@@ -213,7 +217,6 @@ export class CoinFlipScene extends Phaser.Scene {
     this.flipTimer?.remove(false);
     this.flipTimer = undefined;
     this.coinText.setText("🪙");
-    console.log("[tutorial-debug] handleFlipError() fired - flip errored instead of resolving:", err);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
