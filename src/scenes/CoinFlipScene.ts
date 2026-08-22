@@ -3,6 +3,7 @@ import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import { showHighlightRing, HighlightHandle } from "../ui/TutorialGuide";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { CoinSide } from "../api/types";
@@ -16,6 +17,9 @@ export class CoinFlipScene extends Phaser.Scene {
   private flipping = false;
   private flipTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
+  /** Onboarding tutorial's "Play a Game" hands-on step - see gameState.tutorialAwaitingGamePlay's doc comment and OverworldScene.runHandsOnGameStep. */
+  private tutorialHighlight?: HighlightHandle;
+  private tutorialHint?: Phaser.GameObjects.Text;
 
   constructor() {
     super("CoinFlipScene");
@@ -78,15 +82,41 @@ export class CoinFlipScene extends Phaser.Scene {
       () => this.flip("tails")
     );
 
-    makeButton(this, 400, 450, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
+    makeButton(this, 400, 450, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () => {
+      // Leaving without ever flipping shouldn't leave a stale flag behind
+      // - a LATER, unrelated visit to Coin Flip would otherwise incorrectly
+      // show the tutorial highlight again. See resolveFlip() for the
+      // normal (played-a-real-round) path that also clears this.
+      gameState.tutorialAwaitingGamePlay = false;
+      fadeToScene(this, "OverworldScene");
+    });
 
     this.betControl = makeBetControl(this, 400, 486, () => {});
 
     this.add
       .text(400, 516, "Pays 2x", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
+
+    // Onboarding tutorial's "Play a Game" hands-on step (see
+    // gameState.tutorialAwaitingGamePlay's doc comment) - the player
+    // walked up and pressed E for real (this is a completely ordinary
+    // entry into CoinFlipScene, no tutorial-specific transition logic
+    // involved), so highlight the real HEADS/TAILS buttons and wait for
+    // one real round to resolve (see resolveFlip()) before returning to
+    // the Overworld to resume the tutorial.
+    if (gameState.tutorialAwaitingGamePlay) {
+      this.tutorialHighlight = showHighlightRing(this, 400, 400, 150, true);
+      this.tutorialHint = this.add
+        .text(400, 30, "Tutorial: pick Heads or Tails to flip!", {
+          fontSize: "13px",
+          color: Theme.textGold,
+          fontStyle: "bold",
+          backgroundColor: "#fdf3e1e6",
+          padding: { x: 10, y: 6 }
+        })
+        .setOrigin(0.5)
+        .setDepth(600);
+    }
 
     this.updateBalance();
   }
@@ -145,6 +175,28 @@ export class CoinFlipScene extends Phaser.Scene {
     this.headsBtn?.setEnabled(true);
     this.tailsBtn?.setEnabled(true);
     this.betControl?.setEnabled(true);
+
+    // Onboarding tutorial's "Play a Game" hands-on step - a real round
+    // (win OR lose, either counts as "played") just resolved for real, so
+    // the tutorial's task here is done. Let the player see this result for
+    // a beat, then send them back to the Overworld to resume at the Skin
+    // Attendant step - see gameState.tutorialResumeAtSkinAttendant's doc
+    // comment and OverworldScene.create()'s resume check.
+    if (gameState.tutorialAwaitingGamePlay) {
+      gameState.tutorialAwaitingGamePlay = false;
+      gameState.tutorialResumeAtSkinAttendant = true;
+      this.tutorialHighlight?.destroy();
+      this.tutorialHint?.destroy();
+      this.tutorialHighlight = undefined;
+      this.tutorialHint = undefined;
+      // Re-disable right away (already re-enabled above, matching the
+      // normal non-tutorial flow) so a second flip can't slip in during
+      // the delay below and race the scene transition.
+      this.headsBtn?.setEnabled(false);
+      this.tailsBtn?.setEnabled(false);
+      this.betControl?.setEnabled(false);
+      this.time.delayedCall(1200, () => fadeToScene(this, "OverworldScene"));
+    }
   }
 
   private handleFlipError(err: unknown) {

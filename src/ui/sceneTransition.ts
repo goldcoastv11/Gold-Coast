@@ -22,14 +22,18 @@ import Phaser from "phaser";
  */
 
 const FADE_MS = 220;
-// Warm dark-brown, matching Theme.outline (#5C2E22) - STYLE_GUIDE.md
-// direction note 2 says "never pure black" for UI chrome; applied here to
-// the one moment that otherwise WOULD be a flash of pure black (the
-// default camera fade color), since an abrupt unfaded cut was the exact
-// "jolt" being fixed - no point trading one jarring moment for another.
-const FADE_R = 0x5c;
-const FADE_G = 0x2e;
-const FADE_B = 0x22;
+// Warm cream, matching Theme.bgDark (#FFF6E9, the world/panel backdrop
+// color used everywhere in this game) - NOT a dark color. A first attempt
+// used a dark warm-brown (Theme.outline) reasoning that STYLE_GUIDE.md's
+// "never pure black" rule meant any dark fade just needed to avoid true
+// black - but a fast ~220ms dip into ANY dark tone against this game's
+// all-bright palette reads as a jarring flash regardless of exact hue
+// (reported as "a flash of red" - it wasn't literally red, but a quick
+// glimpse of a dark warm color against bright surroundings reads that
+// way). A light-to-light fade avoids the whole class of problem.
+const FADE_R = 0xff;
+const FADE_G = 0xf6;
+const FADE_B = 0xe9;
 
 /**
  * Fades `scene`'s camera out, then starts `key` (with optional `data`) once

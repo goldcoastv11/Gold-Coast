@@ -534,17 +534,17 @@ export class OverworldScene extends Phaser.Scene {
     this.updateHud();
 
     // Onboarding tutorial - runs last, after every station/camera/HUD
-    // setup above so its world coordinates (Chip Attendant/Dice/Skin
+    // setup above so its world coordinates (Chip Attendant/Coin Flip/Skin
     // Attendant) are all valid. Two entry points:
     // - A brand-new signup (see OverworldSceneData's doc comment) starts
     //   the whole thing from the top.
-    // - Returning from a tutorial-triggered Dice round (see
+    // - Returning from a tutorial-triggered Coin Flip round (see
     //   gameState.tutorialResumeAtSkinAttendant's doc comment) resumes
     //   directly at the Skin Attendant hands-on step, skipping everything
     //   before it - the player already completed the Welcome/movement/
     //   Chip Attendant/Play a Game steps in a PREVIOUS OverworldScene
     //   instance that no longer exists (this one's a fresh scene, entered
-    //   via a real scene transition out of and back from DiceScene).
+    //   via a real scene transition out of and back from CoinFlipScene).
     if (gameState.tutorialResumeAtSkinAttendant) {
       gameState.tutorialResumeAtSkinAttendant = false;
       this.runHandsOnSkinAttendantStep();
@@ -560,11 +560,11 @@ export class OverworldScene extends Phaser.Scene {
    * TutorialGuide's own Next-button sequencer), then hands off to three
    * "go do it for real" steps (runHandsOn*Step below) - the player
    * actually walks to and interacts with the Chip Attendant, a real game
-   * (Dice), and the Skin Attendant, each step only advancing once the
+   * (Coin Flip), and the Skin Attendant, each step only advancing once the
    * corresponding real action genuinely completes, not on a click. World
    * coordinates match each station's real placement above (NPC at 40,28 /
-   * Dice at 52,20 / Skin Attendant at 40,18, all in tiles) - if those ever
-   * move, update runHandsOn*Step's pan targets to match.
+   * Coin Flip at 20,28 / Skin Attendant at 40,18, all in tiles) - if those
+   * ever move, update runHandsOn*Step's pan targets to match.
    */
   private startOnboardingTutorial() {
     const steps: TutorialStep[] = [
@@ -630,7 +630,16 @@ export class OverworldScene extends Phaser.Scene {
    * instruction choreography.
    */
   private runHandsOnStep(x: number, y: number, radius: number, title: string, text: string, onSkip: () => void): void {
-    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    // Deliberately NOT resuming camera-follow here (a previous version
+    // did, "so the player can see themselves walk toward the target") -
+    // confirmed via live testing that it backfired: the camera had JUST
+    // finished panning to the highlighted station, but the player hadn't
+    // actually moved there yet, so resuming follow immediately yanked the
+    // camera back toward the player's real (still-unmoved) position -
+    // "pans to the next item, then quickly cuts back to the old position."
+    // Camera stays parked at the highlighted target for the whole step;
+    // only finishOnboardingTutorial() (once the whole tutorial ends)
+    // resumes real follow.
     this.activeTutorialHighlight = showHighlightRing(this, x, y, radius);
     this.activeTutorialInstruction = showInstruction(this, title, text, onSkip);
     this.panelOpen = false;
@@ -665,15 +674,19 @@ export class OverworldScene extends Phaser.Scene {
 
   private runHandsOnGameStep() {
     this.cameras.main.stopFollow();
-    this.cameras.main.pan(52 * TILE, 20 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
+    // CoinFlip (20,28), not Dice - per user direction. Either of the two
+    // CoinFlip stations would do (20,28)/(60,28) - picked the one on the
+    // same row as the Chip Attendant (40,28) for a shorter, more coherent
+    // tutorial walking path.
+    this.cameras.main.pan(20 * TILE, 28 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
       if (progress !== 1) return;
 
       this.runHandsOnStep(
-        52 * TILE,
         20 * TILE,
-        40,
+        28 * TILE,
+        60,
         "Play a Game",
-        "Walk up to Dice and press E, then place a bet to play!",
+        "Walk up to Coin Flip and press E, then place a bet to play!",
         // Skip means "skip THIS step" (per user direction), not "end the
         // whole tutorial" - moves straight to the Skin Attendant step.
         () => {
@@ -683,14 +696,14 @@ export class OverworldScene extends Phaser.Scene {
         }
       );
       // No completion event to listen for here on the success path -
-      // entering DiceScene tears this whole scene down (the real,
+      // entering CoinFlipScene tears this whole scene down (the real,
       // unmodified goToGame() flow), which destroys the highlight/
       // instruction along with everything else in this scene
       // automatically (and panelOpen's setter has already cleared them
-      // the moment the real interaction opened DiceScene's own UI, same
-      // as every other real panel). DiceScene itself picks up this flag
-      // on its own create() and continues the tutorial from there - see
-      // its doc comments and gameState.tutorialAwaitingGamePlay's.
+      // the moment the real interaction opened CoinFlipScene's own UI,
+      // same as every other real panel). CoinFlipScene itself picks up
+      // this flag on its own create() and continues the tutorial from
+      // there - see its doc comments and gameState.tutorialAwaitingGamePlay's.
       gameState.tutorialAwaitingGamePlay = true;
     });
   }

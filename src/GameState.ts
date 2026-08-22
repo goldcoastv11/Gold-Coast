@@ -327,9 +327,9 @@ class GameState {
    * anywhere" design) - they only need to survive within one continuous
    * play session, never across a reload.
    */
-  /** True while the tutorial's "Play a Game" step is waiting for the player to enter and complete one real Dice round - DiceScene.create() checks this to show its own highlight/instruction, and clears it once a real round resolves (or the player walks away without playing). */
+  /** True while the tutorial's "Play a Game" step is waiting for the player to enter and complete one real Coin Flip round - CoinFlipScene.create() checks this to show its own highlight/instruction, and clears it once a real round resolves (or the player walks away without playing). */
   tutorialAwaitingGamePlay = false;
-  /** Set by DiceScene right before returning to the Overworld after a tutorial-triggered round resolves, so OverworldScene resumes the tutorial at the Skin Attendant step instead of doing nothing. Read-and-cleared exactly once, by OverworldScene.create(). */
+  /** Set by CoinFlipScene right before returning to the Overworld after a tutorial-triggered round resolves, so OverworldScene resumes the tutorial at the Skin Attendant step instead of doing nothing. Read-and-cleared exactly once, by OverworldScene.create(). */
   tutorialResumeAtSkinAttendant = false;
 
   // ---- Economy: ledger-backed operations ----

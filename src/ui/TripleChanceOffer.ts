@@ -158,8 +158,14 @@ function playRound(
   onBalanceChange?: () => void
 ) {
   const statusPanel = makePanel(scene, x, y, PANEL_W, PANEL_H, 400).setScrollFactor(0);
+  // y-110, not y-80: ShuffleCupReveal (created below, centered at y+15) now
+  // shows its own explain-then-shuffle status text starting around
+  // y+15-83 = y-68 (see its PREVIEW_MS-era comment history) - at y-80 this
+  // title sat only 12px above that, a confirmed real overlap ("Triple
+  // Chance" rendering on top of "These are the 3 possible prizes...").
+  // y-110 gives a healthy ~42px gap instead.
   const statusTitle = scene.add
-    .text(x, y - 80, "🎲 Triple Chance", { fontSize: "18px", color: Theme.textGold, fontStyle: "bold" })
+    .text(x, y - 110, "🎲 Triple Chance", { fontSize: "18px", color: Theme.textGold, fontStyle: "bold" })
     .setOrigin(0.5)
     .setScrollFactor(0)
     .setDepth(401);
