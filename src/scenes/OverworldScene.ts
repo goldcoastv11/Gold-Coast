@@ -1186,14 +1186,6 @@ export class OverworldScene extends Phaser.Scene {
     let result: Awaited<ReturnType<typeof api.claimBonus>>;
     try {
       result = await api.claimBonus();
-      // Onboarding tutorial's Chip Attendant hands-on step (see
-      // startOnboardingTutorial) listens for this - a harmless no-op emit
-      // when the tutorial isn't running (Phaser's EventEmitter doesn't
-      // error on emit-with-no-listeners). Fired right here, at the real
-      // economy grant, not after the shuffle-cup/Triple Chance
-      // presentation that follows - those are cosmetic, this is the
-      // moment the claim actually happened.
-      this.events.emit("tutorial:chipClaimed");
     } catch (err) {
       this.panelOpen = false;
       this.updateHud();
@@ -1332,6 +1324,21 @@ export class OverworldScene extends Phaser.Scene {
       cleanup();
       this.panelOpen = false;
       this.updateHud();
+      // Onboarding tutorial's Chip Attendant hands-on step (see
+      // startOnboardingTutorial) listens for this - a harmless no-op emit
+      // when the tutorial isn't running. Fired HERE, at the true end of
+      // the whole claim flow (shuffle-cup reveal -> Triple Chance offer ->
+      // this result panel -> Done), not at the raw API-success point -
+      // that earlier version advanced the tutorial to the next step while
+      // the shuffle/Triple Chance/result UI was still visibly playing out
+      // on screen, stacking a second tutorial panel on top of the first
+      // (confirmed via live testing). showResultPanel is only ever reached
+      // from this one flow, so this is a safe, unambiguous "truly done"
+      // signal - "Claim Again" below restarts the whole sequence instead
+      // of reaching here, which is correct (the tutorial step is already
+      // satisfied by the first claim; choosing to claim again is optional
+      // and shouldn't block advancing further if they then hit Done).
+      this.events.emit("tutorial:chipClaimed");
     });
     doneBtn.container.setScrollFactor(0).setDepth(201);
   }
