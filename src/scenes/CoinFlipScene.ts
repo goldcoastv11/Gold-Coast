@@ -104,6 +104,11 @@ export class CoinFlipScene extends Phaser.Scene {
     // involved), so highlight the real HEADS/TAILS buttons and wait for
     // one real round to resolve (see resolveFlip()) before returning to
     // the Overworld to resume the tutorial.
+    // TEMP diagnostic - narrowing down a reported "ring never clears /
+    // tutorial never resumes at Skin Attendant" bug that's survived two
+    // independent implementations and passed code review both times.
+    // Remove once root-caused.
+    console.log("[tutorial-debug] CoinFlipScene.create() - tutorialAwaitingGamePlay:", gameState.tutorialAwaitingGamePlay);
     if (gameState.tutorialAwaitingGamePlay) {
       this.tutorialHighlight = showHighlightRing(this, 400, 400, 150, true);
       this.tutorialHint = this.add
@@ -182,9 +187,11 @@ export class CoinFlipScene extends Phaser.Scene {
     // a beat, then send them back to the Overworld to resume at the Skin
     // Attendant step - see gameState.tutorialResumeAtSkinAttendant's doc
     // comment and OverworldScene.create()'s resume check.
+    console.log("[tutorial-debug] resolveFlip() - tutorialAwaitingGamePlay:", gameState.tutorialAwaitingGamePlay);
     if (gameState.tutorialAwaitingGamePlay) {
       gameState.tutorialAwaitingGamePlay = false;
       gameState.tutorialResumeAtSkinAttendant = true;
+      console.log("[tutorial-debug] resolveFlip() - set tutorialResumeAtSkinAttendant = true, will fade to Overworld in 1200ms");
       this.tutorialHighlight?.destroy();
       this.tutorialHint?.destroy();
       this.tutorialHighlight = undefined;
@@ -195,7 +202,10 @@ export class CoinFlipScene extends Phaser.Scene {
       this.headsBtn?.setEnabled(false);
       this.tailsBtn?.setEnabled(false);
       this.betControl?.setEnabled(false);
-      this.time.delayedCall(1200, () => fadeToScene(this, "OverworldScene"));
+      this.time.delayedCall(1200, () => {
+        console.log("[tutorial-debug] delayedCall fired, calling fadeToScene(OverworldScene) now");
+        fadeToScene(this, "OverworldScene");
+      });
     }
   }
 
@@ -203,6 +213,7 @@ export class CoinFlipScene extends Phaser.Scene {
     this.flipTimer?.remove(false);
     this.flipTimer = undefined;
     this.coinText.setText("🪙");
+    console.log("[tutorial-debug] handleFlipError() fired - flip errored instead of resolving:", err);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
