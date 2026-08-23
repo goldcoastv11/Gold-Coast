@@ -174,6 +174,7 @@ export class BootScene extends Phaser.Scene {
     this.createBaccaratTexture();
     this.createVideoPokerTexture();
     this.createCoinKioskTexture();
+    this.createItemShopTexture();
     this.createComingSoonTexture();
     this.createPlantTexture();
     this.createRouletteTableTexture();
@@ -190,61 +191,65 @@ export class BootScene extends Phaser.Scene {
    * Main plaza floor tile, 16x16 - flat near-black charcoal with a faint
    * darker fleck pattern so it doesn't read as a dead flat void. Drawn
    * procedurally (see class doc comment) instead of a loaded PNG.
-   */
-  /**
-   * Outer plaza floor, 16x16 - flat near-black, with only the faintest
-   * darker fleck so it doesn't read as a dead flat void. Per user
-   * direction ("I need the floor to be quieter so the games pop"), kept
-   * deliberately close to featureless - anything busier competes with the
-   * white game cabinets for attention.
+   *
+   * Palette per user direction ("dark greys, dark blues, orange and
+   * white... not super vibrant but has a little contrast"): the outer
+   * plaza reads as dark GREY (neutral, no blue cast) so it's tonally
+   * distinct from the rug's dark BLUE, and each tile's fleck is now
+   * LIGHTER than its base fill (visible contrast/sparkle) instead of the
+   * previous same-hue-but-darker flecks, which were nearly invisible - a
+   * deliberate middle ground between the original busy version and the
+   * later fully-flat "quieter" pass, still low-saturation/no loud pattern,
+   * just not textureless.
    */
   private createFloorTanTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(0x14161c, 1);
+    g.fillStyle(0x1c1e24, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x101218, 1);
-    g.fillCircle(4, 4, 0.8);
-    g.fillCircle(11, 9, 0.8);
+    g.fillStyle(0x2a2d35, 1);
+    g.fillCircle(4, 4, 0.9);
+    g.fillCircle(11, 9, 0.9);
+    g.fillStyle(PALETTE.cream, 0.1);
+    g.fillCircle(8, 13, 0.8);
     g.generateTexture("floor_tan", s, s);
     g.destroy();
   }
 
   /**
-   * Gaming-floor "rug" tile, 16x16 - a flat, quiet dark navy-black fill.
-   * Simplified twice over: first from a busier pattern-line version, then
-   * further after "the floor needs to be quieter so the games pop" (no
-   * per-tile border/grid line - an earlier orange-bordered version read as
-   * a loud repeating lattice across the whole rug). Per a follow-up
-   * direction ("add a little bit of orange... just a little bit"), one
-   * small low-alpha orange fleck is back in alongside the existing near-
-   * black ones - present on every tile but faint/small enough to read as
-   * a subtle warm sparkle throughout, not a repeating loud pattern like
-   * the removed border was.
+   * Gaming-floor "rug" tile, 16x16 - dark blue, tonally distinct from the
+   * plaza's dark grey (see createFloorTanTexture's doc comment for the
+   * full palette direction). A lighter blue fleck gives it a little
+   * contrast/texture, plus a small orange fleck and a faint white one -
+   * the full "dark greys, dark blues, orange and white" set, all kept
+   * low-alpha/small so none of it reads as a loud repeating pattern
+   * (an earlier full-tile orange border was too loud - see git history).
    */
   private createCarpetBlueTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(0x0f1526, 1);
+    g.fillStyle(0x131c34, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x0c111f, 1);
-    g.fillCircle(4, 4, 0.8);
-    g.fillCircle(12, 12, 0.8);
-    g.fillStyle(PALETTE.coral, 0.18);
+    g.fillStyle(0x203158, 1);
+    g.fillCircle(4, 4, 0.9);
+    g.fillCircle(12, 12, 0.9);
+    g.fillStyle(PALETTE.coral, 0.22);
     g.fillCircle(9, 5, 0.9);
+    g.fillStyle(PALETTE.cream, 0.12);
+    g.fillCircle(13, 8, 0.7);
     g.generateTexture("carpet_blue", s, s);
     g.destroy();
   }
 
-  /** Same quiet treatment as createCarpetBlueTexture, unused key kept for parity/future use - see that method's doc comment. */
+  /** Same treatment as createCarpetBlueTexture (dark-grey plaza / lighter-fleck contrast direction), unused key kept for parity/future use - see that method's doc comment. */
   private createCarpetRedTexture() {
     const s = 16;
     const g = this.add.graphics();
     g.fillStyle(0x2a0f10, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x210c0d, 1);
-    g.fillCircle(4, 4, 0.8);
-    g.fillCircle(12, 12, 0.8);
+    g.fillStyle(0x3c1618, 1);
+    g.fillCircle(4, 4, 0.9);
+    g.fillCircle(12, 12, 0.9);
     g.generateTexture("carpet_red", s, s);
     g.destroy();
   }
@@ -661,6 +666,46 @@ export class BootScene extends Phaser.Scene {
 
     this.drawCabinetBase(g, w, h);
     g.generateTexture("coin_kiosk", w, h);
+    g.destroy();
+  }
+
+  /**
+   * The overworld Item Shop - per user direction, a booth/counter similar
+   * to the Coin Kiosk (same cabinet-scale construction) rather than a
+   * person character (it used to be "skin_000", one of the purchasable
+   * skins itself, standing in as the attendant - see OverworldScene.ts's
+   * registerStation call for this station). A small orange-and-white
+   * awning up top instead of the Coin Kiosk's antenna (reads as "market
+   * stall," not "screen"), and a simple shirt icon on the screen panel
+   * instead of a play triangle, since this station sells outfits.
+   */
+  private createItemShopTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    this.drawCabinetBody(g, w, h);
+
+    // awning - a small triangular pennant on top
+    g.fillStyle(PALETTE.coral, 1);
+    g.fillTriangle(w / 2, 1, w / 2 - 11, 12, w / 2 + 11, 12);
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.strokeTriangle(w / 2, 1, w / 2 - 11, 12, w / 2 + 11, 12);
+
+    g.fillStyle(PALETTE.screen, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+
+    // shirt icon, centered on the screen panel
+    const cx = w / 2;
+    const cy = 31;
+    g.fillStyle(PALETTE.cream, 1);
+    g.fillTriangle(cx - 7, cy - 6, cx - 13, cy, cx - 7, cy + 2); // left sleeve
+    g.fillTriangle(cx + 7, cy - 6, cx + 13, cy, cx + 7, cy + 2); // right sleeve
+    g.fillRoundedRect(cx - 7, cy - 6, 14, 16, 2); // body
+    g.fillStyle(PALETTE.screen, 1);
+    g.fillCircle(cx, cy - 6, 3); // neckline notch, cut from the body with the screen's own color
+
+    this.drawCabinetBase(g, w, h);
+    g.generateTexture("item_shop_booth", w, h);
     g.destroy();
   }
 

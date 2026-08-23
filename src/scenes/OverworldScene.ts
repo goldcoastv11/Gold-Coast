@@ -35,21 +35,25 @@ const AMBIENT_NPC_ARRIVE_DIST = 4;
 // Random dwell range (ms) at each waypoint before reversing direction.
 const AMBIENT_NPC_PAUSE_MIN_MS = 1000;
 const AMBIENT_NPC_PAUSE_MAX_MS = 2000;
-// Same left/down/up/right -> column convention as createKenneyWalkAnims'
-// DIRECTION_FRAMES in BootScene.ts (col 0 of each direction's walk row is
-// its idle pose) - used both to seed an ambient NPC's starting facing from
-// its idleFrame and to pick the idle frame to show when it pauses.
+// Per user direction, ambient bystanders now wear real Item Shop skins
+// (see addAmbientNpc's call sites) instead of the generic Kenney NPC rig -
+// so this follows BootScene's createLegacySkinWalkAnims row-major layout
+// (row 0=down, 1=left, 2=right, 3=up, each row 3 frames), not
+// createKenneyWalkAnims' column layout the Kenney rig used. Frame = row*3
+// is each direction's idle pose (first frame of that direction's row) -
+// used both to seed an ambient NPC's starting facing from its idleFrame
+// and to pick the idle frame to show when it pauses.
 const AMBIENT_IDLE_FRAME_FOR_DIR: Record<"left" | "down" | "up" | "right", number> = {
-  left: 0,
-  down: 1,
-  up: 2,
-  right: 3
+  down: 0,
+  left: 3,
+  right: 6,
+  up: 9
 };
 const AMBIENT_DIR_FOR_IDLE_FRAME: Record<number, "left" | "down" | "up" | "right"> = {
-  0: "left",
-  1: "down",
-  2: "up",
-  3: "right"
+  0: "down",
+  3: "left",
+  6: "right",
+  9: "up"
 };
 
 /** One ambient bystander's simple two-point back-and-forth patrol state. See addAmbientNpc/updateAmbientNpcs. */
@@ -67,19 +71,22 @@ interface AmbientNpc {
 // Per-station/zone floating labels (registerStation/addZoneSign - many on
 // screen at once) still draw their own CSS-style backgroundColor rather
 // than a Theme.ts Graphics fill, so they need a string hex constant here
-// instead of Theme's numeric ones. Task #23: swapped from the old
-// near-black "#000000cc"/"#000000aa" tooltip chips (leftover old-dark-
-// casino look, flagged during #22's audit) to a warm-cream chip matching
-// Theme.panel, so nothing still reads as "casino at night" against the new
-// bright backdrop (STYLE_GUIDE direction notes 1 & 7).
+// instead of Theme's numeric ones.
 //
-// The HUD/prompt-bubble/toast (this scope's polish pass) moved off this
+// This was a warm-cream chip (matching the old "Bright Social-Hub" theme's
+// Theme.panel) left un-migrated when Theme.ts moved to the dark "Arcade
+// Nights" palette - a real bug, not a stylistic leftover: the label text
+// itself is Theme.textPrimary (near-white), so white-on-near-white-chip
+// was reading as "game names you can't see." Now matches the current dark
+// Theme.panel instead, same ~80% opacity.
+//
+// The HUD/prompt-bubble/toast (a separate polish pass) moved off this
 // flat-rect approach entirely onto ui/uiHelpers.ts's makeTextChip, which
-// gets the same warm-cream fill but with the rounded corners + outline the
-// rest of the chrome system uses (STYLE_GUIDE direction notes 2 & 3) -
-// Text's own backgroundColor can't do either. Per-station labels stay on
-// this simpler path for now (out of this pass's scope - see file header).
-const CHIP_BG_SOFT = "#fdf3e1cc"; // Theme.panel, ~80% opaque - per-station labels (many on screen at once)
+// gets the same dark fill but with the rounded corners + outline the rest
+// of the chrome system uses - Text's own backgroundColor can't do either.
+// Per-station labels stay on this simpler path for now (out of that pass's
+// scope).
+const CHIP_BG_SOFT = "#1a2138cc"; // Theme.panel, ~80% opaque - per-station labels (many on screen at once)
 
 interface Interactable {
   sprite: Phaser.Physics.Arcade.Sprite;
@@ -492,8 +499,15 @@ export class OverworldScene extends Phaser.Scene {
     });
 
     // Item Shop (was "Skin Attendant" - rebrand only, same skin-purchase
-    // mechanic underneath) - buy new looks for your character
-    const skinAttendant = this.physics.add.staticSprite(40 * TILE, 18 * TILE, "skin_000", 1);
+    // mechanic underneath) - buy new looks for your character. Per user
+    // direction, a booth/counter (BootScene.ts's createItemShopTexture,
+    // same cabinet scale as every other station) rather than a person
+    // character - it used to be "skin_000", one of the purchasable skins
+    // itself, standing in as the attendant. No setScale needed (unlike the
+    // old character sprite) since the texture is already native cabinet
+    // size, same as the Coin Kiosk above.
+    const skinAttendant = this.physics.add.staticSprite(40 * TILE, 18 * TILE, "item_shop_booth");
+    skinAttendant.refreshBody();
     this.physics.add.collider(this.player, skinAttendant);
     this.registerStation(
       skinAttendant,
@@ -505,19 +519,18 @@ export class OverworldScene extends Phaser.Scene {
     // (67,38), the standalone "Ad Kiosk" station's old spot, is now empty -
     // that station was retired and consolidated into the Coin Kiosk above.
 
-    // Ambient bystanders - purely decorative "social hub" flavor (STYLE_GUIDE
-    // direction note 4: "nature woven into a social hub, not wilderness"),
-    // putting the 3 previously-unused Kenney character variants to work
-    // (char_b_brick/char_d_hardhat/char_f_dark - see BootScene.ts preload).
-    // No registerStation call - these aren't interactable, just people
-    // milling around the plaza. See addAmbientNpc's doc comment for the
-    // idle-frame convention.
+    // Ambient bystanders - purely decorative "social hub" flavor, dressed
+    // in real Item Shop skins (per user direction) instead of the old
+    // generic Kenney NPC rig - literally wearing outfits players can buy,
+    // reinforcing that the Item Shop sells real looks. No registerStation
+    // call - these aren't interactable, just people milling around the
+    // plaza. See addAmbientNpc's doc comment for the idle-frame convention.
     // Patrol waypoints stay a couple tiles clear of every nearby
     // GAME_STATIONS/decoration collider so the back-and-forth walk never
     // clips through furniture - see updateAmbientNpcs for the movement.
-    this.addAmbientNpc(40, 31, "npc2_sheet", 2, [37, 31], [43, 31]); // patrols between the two benches (37,31)/(43,31), by the Coin Kiosk
-    this.addAmbientNpc(35, 20, "npc3_sheet", 2, [33, 20], [37, 20]); // short local patrol near the market stall (35,17)/Item Shop
-    this.addAmbientNpc(37, 47, "npc4_sheet", 1, [37, 44], [37, 49]); // strolls the lamp-post path toward the exit
+    this.addAmbientNpc(40, 31, "skin_003", 0, [37, 31], [43, 31]); // patrols between the two benches (37,31)/(43,31), by the Coin Kiosk
+    this.addAmbientNpc(35, 20, "skin_007", 0, [33, 20], [37, 20]); // short local patrol near the market stall (35,17)/Item Shop
+    this.addAmbientNpc(37, 47, "skin_012", 0, [37, 44], [37, 49]); // strolls the lamp-post path toward the exit
 
     // Every playable game's furniture - declarative (see GAME_STATIONS
     // above) so new entries can be appended there instead of adding more
@@ -937,19 +950,23 @@ export class OverworldScene extends Phaser.Scene {
    * A purely decorative background character - not registered as an
    * Interactable (no "Press E" prompt/name label), just visual "social hub"
    * flavor that ambles along a fixed, predetermined two-point patrol (see
-   * updateAmbientNpcs). Dynamic body (physics.add.sprite, not staticSprite)
-   * since it now actually moves - refreshBody() is a no-op here (dynamic
-   * bodies auto-resync to setScale every frame, per Phaser's own docs on
-   * Enable#refreshBody) but is kept for the same setScale(2)/refreshBody()
-   * pattern the Coin Kiosk NPC above uses. Still collides with the player
-   * so it reads as a person, not a background decal.
+   * updateAmbientNpcs). Per user direction, these are dressed in real Item
+   * Shop skins now (see call sites below) - `skinTextureKey` is a real
+   * `SKIN_CATALOG` entry's `textureKey` (== its `id`; see GameState.ts),
+   * same legacy 21x32 rig the player equips, at native scale (no
+   * setScale() needed - unlike the old Kenney rig this replaced, the
+   * legacy rig's native size already lands at the same on-screen height,
+   * per applyPlayerScale's doc comment). Dynamic body (physics.add.sprite,
+   * not staticSprite) since it now actually moves - refreshBody() is a
+   * no-op here (dynamic bodies auto-resync every frame) but kept for the
+   * same refreshBody() pattern the Coin Kiosk furniture above uses. Still
+   * collides with the player so it reads as a person, not a background
+   * decal.
    *
-   * idleFrame follows the same convention as the Coin Kiosk's own static
-   * frame (npc_sheet, frame 1): the first frame of a direction's walk cycle
-   * in createKenneyWalkAnims' DIRECTION_FRAMES, i.e. the column index of
-   * that direction - left=0, down=1, up=2, right=3. It's used both as the
-   * spawn-time static frame and to seed which way the NPC is initially
-   * "facing" before its first patrol leg.
+   * idleFrame follows createLegacySkinWalkAnims' row-major layout (see
+   * AMBIENT_IDLE_FRAME_FOR_DIR above) - the first frame of a direction's
+   * walk cycle. Used both as the spawn-time static frame and to seed which
+   * way the NPC is initially "facing" before its first patrol leg.
    *
    * waypointA/waypointB are [col, row] tile coordinates - the two ends of
    * the back-and-forth walk. The NPC starts idle at (col, row) (not
@@ -958,18 +975,18 @@ export class OverworldScene extends Phaser.Scene {
   private addAmbientNpc(
     col: number,
     row: number,
-    sheetKey: string,
+    skinTextureKey: string,
     idleFrame: number,
     waypointA: [number, number],
     waypointB: [number, number]
   ) {
-    const npc = this.physics.add.sprite(col * TILE, row * TILE, sheetKey, idleFrame).setScale(2);
+    const npc = this.physics.add.sprite(col * TILE, row * TILE, skinTextureKey, idleFrame);
     npc.refreshBody();
     this.physics.add.collider(this.player, npc);
 
     this.ambientNpcs.push({
       sprite: npc,
-      animPrefix: sheetKey.replace(/_sheet$/, ""),
+      animPrefix: skinTextureKey,
       waypoints: [
         new Phaser.Math.Vector2(waypointA[0] * TILE, waypointA[1] * TILE),
         new Phaser.Math.Vector2(waypointB[0] * TILE, waypointB[1] * TILE)
