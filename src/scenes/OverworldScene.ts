@@ -25,6 +25,45 @@ const MAP_ROWS = 56;
 const PLAYER_SPEED = 160;
 const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
 
+// Ambient bystander patrol tuning (see addAmbientNpc/updateAmbientNpcs) - a
+// lazy background stroll, deliberately much slower than the player
+// (~1/6th PLAYER_SPEED) so it reads as flavor rather than a race.
+const AMBIENT_NPC_SPEED = 28;
+// How close (px) to a waypoint counts as "arrived" - loose enough that a
+// low speed + fixed 60fps step can't overshoot and oscillate forever.
+const AMBIENT_NPC_ARRIVE_DIST = 4;
+// Random dwell range (ms) at each waypoint before reversing direction.
+const AMBIENT_NPC_PAUSE_MIN_MS = 1000;
+const AMBIENT_NPC_PAUSE_MAX_MS = 2000;
+// Same left/down/up/right -> column convention as createKenneyWalkAnims'
+// DIRECTION_FRAMES in BootScene.ts (col 0 of each direction's walk row is
+// its idle pose) - used both to seed an ambient NPC's starting facing from
+// its idleFrame and to pick the idle frame to show when it pauses.
+const AMBIENT_IDLE_FRAME_FOR_DIR: Record<"left" | "down" | "up" | "right", number> = {
+  left: 0,
+  down: 1,
+  up: 2,
+  right: 3
+};
+const AMBIENT_DIR_FOR_IDLE_FRAME: Record<number, "left" | "down" | "up" | "right"> = {
+  0: "left",
+  1: "down",
+  2: "up",
+  3: "right"
+};
+
+/** One ambient bystander's simple two-point back-and-forth patrol state. See addAmbientNpc/updateAmbientNpcs. */
+interface AmbientNpc {
+  sprite: Phaser.Physics.Arcade.Sprite;
+  /** Walk-anim key prefix, e.g. "npc2" for `npc2_walk_left` etc. - derived from the sheet key. */
+  animPrefix: string;
+  waypoints: [Phaser.Math.Vector2, Phaser.Math.Vector2];
+  targetIndex: 0 | 1;
+  /** scene.time timestamp (ms) until which this NPC stays idle/paused; 0 means "not paused, keep moving". */
+  pausedUntil: number;
+  lastDir: "left" | "down" | "up" | "right";
+}
+
 // Per-station/zone floating labels (registerStation/addZoneSign - many on
 // screen at once) still draw their own CSS-style backgroundColor rather
 // than a Theme.ts Graphics fill, so they need a string hex constant here
@@ -328,6 +367,8 @@ export class OverworldScene extends Phaser.Scene {
   private tutorialAllowMovement = false;
   private interactables: Interactable[] = [];
   private activeInteractable: Interactable | null = null;
+  /** Purely decorative background characters on simple back-and-forth patrols - see addAmbientNpc/updateAmbientNpcs. */
+  private ambientNpcs: AmbientNpc[] = [];
 
   /** The onboarding tutorial's currently-showing "go do this for real" highlight ring + instruction bubble, if any - see runHandsOnStep/clearTutorialHighlight. */
   private activeTutorialHighlight?: HighlightHandle;
@@ -449,9 +490,12 @@ export class OverworldScene extends Phaser.Scene {
     // No registerStation call - these aren't interactable, just people
     // milling around the plaza. See addAmbientNpc's doc comment for the
     // idle-frame convention.
-    this.addAmbientNpc(40, 31, "npc2_sheet", 2); // between the two benches (37,31)/(43,31), facing up toward the Coin Kiosk
-    this.addAmbientNpc(35, 20, "npc3_sheet", 2); // browsing near the market stall (35,17)/Skin Attendant, facing up
-    this.addAmbientNpc(37, 47, "npc4_sheet", 1); // strolling the lamp-post path toward the exit, facing down
+    // Patrol waypoints stay a couple tiles clear of every nearby
+    // GAME_STATIONS/decoration collider so the back-and-forth walk never
+    // clips through furniture - see updateAmbientNpcs for the movement.
+    this.addAmbientNpc(40, 31, "npc2_sheet", 2, [37, 31], [43, 31]); // patrols between the two benches (37,31)/(43,31), by the Coin Kiosk
+    this.addAmbientNpc(35, 20, "npc3_sheet", 2, [33, 20], [37, 20]); // short local patrol near the market stall (35,17)/Item Shop
+    this.addAmbientNpc(37, 47, "npc4_sheet", 1, [37, 44], [37, 49]); // strolls the lamp-post path toward the exit
 
     // Every playable game's furniture - declarative (see GAME_STATIONS
     // above) so new entries can be appended there instead of adding more
@@ -752,6 +796,8 @@ export class OverworldScene extends Phaser.Scene {
    * bug - proximity/interaction/HUD stay blocked no matter what.
    */
   update() {
+    this.updateAmbientNpcs();
+
     if (this.panelOpen) {
       if (this.tutorialAllowMovement) {
         this.handleMovement();
@@ -868,24 +914,92 @@ export class OverworldScene extends Phaser.Scene {
   /**
    * A purely decorative background character - not registered as an
    * Interactable (no "Press E" prompt/name label), just visual "social hub"
-   * flavor. Same staticSprite + setScale(2) + refreshBody() pattern as the
-   * Coin Kiosk NPC above (refreshBody is required, not optional -
-   * static bodies don't auto-resync to a post-creation setScale, so
-   * skipping it leaves the pre-scale 16x16 collider under a 32x32 sprite).
-   * Still collides with the player so it reads as a person standing there
-   * rather than a background decal.
+   * flavor that ambles along a fixed, predetermined two-point patrol (see
+   * updateAmbientNpcs). Dynamic body (physics.add.sprite, not staticSprite)
+   * since it now actually moves - refreshBody() is a no-op here (dynamic
+   * bodies auto-resync to setScale every frame, per Phaser's own docs on
+   * Enable#refreshBody) but is kept for the same setScale(2)/refreshBody()
+   * pattern the Coin Kiosk NPC above uses. Still collides with the player
+   * so it reads as a person, not a background decal.
    *
-   * idleFrame follows the same convention as the Coin Kiosk's own
-   * static frame (npc_sheet, frame 1): the first frame of a direction's
-   * walk cycle in createKenneyWalkAnims' DIRECTION_FRAMES, i.e. the column
-   * index of that direction - left=0, down=1, up=2, right=3.
+   * idleFrame follows the same convention as the Coin Kiosk's own static
+   * frame (npc_sheet, frame 1): the first frame of a direction's walk cycle
+   * in createKenneyWalkAnims' DIRECTION_FRAMES, i.e. the column index of
+   * that direction - left=0, down=1, up=2, right=3. It's used both as the
+   * spawn-time static frame and to seed which way the NPC is initially
+   * "facing" before its first patrol leg.
+   *
+   * waypointA/waypointB are [col, row] tile coordinates - the two ends of
+   * the back-and-forth walk. The NPC starts idle at (col, row) (not
+   * necessarily either waypoint) and heads for waypointA first.
    */
-  private addAmbientNpc(col: number, row: number, sheetKey: string, idleFrame: number) {
-    const npc = this.physics.add
-      .staticSprite(col * TILE, row * TILE, sheetKey, idleFrame)
-      .setScale(2);
+  private addAmbientNpc(
+    col: number,
+    row: number,
+    sheetKey: string,
+    idleFrame: number,
+    waypointA: [number, number],
+    waypointB: [number, number]
+  ) {
+    const npc = this.physics.add.sprite(col * TILE, row * TILE, sheetKey, idleFrame).setScale(2);
     npc.refreshBody();
     this.physics.add.collider(this.player, npc);
+
+    this.ambientNpcs.push({
+      sprite: npc,
+      animPrefix: sheetKey.replace(/_sheet$/, ""),
+      waypoints: [
+        new Phaser.Math.Vector2(waypointA[0] * TILE, waypointA[1] * TILE),
+        new Phaser.Math.Vector2(waypointB[0] * TILE, waypointB[1] * TILE)
+      ],
+      targetIndex: 0,
+      // Stagger the initial departure a little so all 3 don't start/stop in lockstep.
+      pausedUntil: this.time.now + Phaser.Math.Between(0, AMBIENT_NPC_PAUSE_MAX_MS),
+      lastDir: AMBIENT_DIR_FOR_IDLE_FRAME[idleFrame] ?? "down"
+    });
+  }
+
+  /**
+   * Moves every ambient bystander one step along its fixed two-point patrol
+   * (see addAmbientNpc/AmbientNpc) - simple constant-velocity walk toward
+   * the current target waypoint, no pathfinding/obstacle-avoidance (the
+   * waypoints themselves were picked to stay clear of walls/furniture/
+   * stations). On arrival it stops, faces the direction it was walking,
+   * pauses briefly, then reverses toward the other waypoint. Runs every
+   * frame regardless of panelOpen so background flavor doesn't visibly
+   * freeze just because a shop/tutorial panel happens to be open.
+   */
+  private updateAmbientNpcs() {
+    const now = this.time.now;
+
+    for (const npc of this.ambientNpcs) {
+      if (npc.pausedUntil > 0) {
+        if (now < npc.pausedUntil) continue;
+        npc.pausedUntil = 0;
+        npc.targetIndex = npc.targetIndex === 0 ? 1 : 0;
+      }
+
+      const target = npc.waypoints[npc.targetIndex];
+      const dx = target.x - npc.sprite.x;
+      const dy = target.y - npc.sprite.y;
+
+      if (Math.hypot(dx, dy) <= AMBIENT_NPC_ARRIVE_DIST) {
+        npc.sprite.setVelocity(0, 0);
+        npc.sprite.stop();
+        npc.sprite.setFrame(AMBIENT_IDLE_FRAME_FOR_DIR[npc.lastDir]);
+        npc.pausedUntil = now + Phaser.Math.Between(AMBIENT_NPC_PAUSE_MIN_MS, AMBIENT_NPC_PAUSE_MAX_MS);
+        continue;
+      }
+
+      // Waypoint pairs only ever differ along one axis, but pick the
+      // dominant axis the same way handleMovement() does in case that ever changes.
+      npc.lastDir =
+        Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
+
+      const velocity = new Phaser.Math.Vector2(dx, dy).normalize().scale(AMBIENT_NPC_SPEED);
+      npc.sprite.setVelocity(velocity.x, velocity.y);
+      npc.sprite.play(`${npc.animPrefix}_walk_${npc.lastDir}`, true);
+    }
   }
 
   private getSkinDef(id: string): SkinDef {

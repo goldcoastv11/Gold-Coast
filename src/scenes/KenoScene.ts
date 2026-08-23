@@ -275,15 +275,21 @@ export class KenoScene extends Phaser.Scene {
   }
 
   private paintCellVisual(cell: CellVisual, state: CellState) {
-    // Pale, high-key tint fills per state (STYLE_GUIDE: light/warm, no dark
-    // near-black cell backgrounds) - border/text stay tied to Theme tokens
-    // so they keep tracking the shared palette.
+    // Cell-state tint fills, tied to Theme tokens so they track the shared
+    // dark "Arcade Nights" palette. "picked"/"drawn" used to be pale
+    // light-theme pastels (0xbee8f5/0xfce8c7) left over from the old
+    // cream-background look - unreadable now (their paired text colors,
+    // textPrimary/textGold, would sit near-invisible on a near-white fill
+    // against the new near-black surfaces), so both now use Theme.neutral,
+    // the same muted slate-blue dark fill the rest of the chrome system
+    // uses for a "plain/secondary" surface - still visually distinct from
+    // "empty" (Theme.inset) while keeping their border/text colors readable.
     const colors: Record<CellState, number> = {
       empty: Theme.inset,
-      picked: 0xbee8f5, // deeper pale sky-blue - "selected, not drawn yet"
-      hit: Theme.winZone, // pale mint - matched number
-      miss: Theme.loseZone, // pale coral - drawn, not picked
-      drawn: 0xfce8c7 // pale warm gold - drawn, not picked, informational
+      picked: Theme.neutral, // "selected, not drawn yet"
+      hit: Theme.winZone, // matched number
+      miss: Theme.loseZone, // drawn, not picked
+      drawn: Theme.neutral // drawn, not picked, informational
     };
     const border: Record<CellState, number> = {
       empty: Theme.panelBorder,
@@ -481,8 +487,6 @@ export class KenoScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(
-      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
-    );
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 }

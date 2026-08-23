@@ -343,8 +343,6 @@ export class WheelScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(
-      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
-    );
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 }

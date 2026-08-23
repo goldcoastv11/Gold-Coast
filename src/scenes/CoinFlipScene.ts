@@ -124,7 +124,14 @@ export class CoinFlipScene extends Phaser.Scene {
           fontSize: "13px",
           color: Theme.textGold,
           fontStyle: "bold",
-          backgroundColor: "#fdf3e1e6",
+          // Contrast sweep: this used to be a warm-cream "#fdf3e1e6" chip,
+          // a leftover from the old light theme - unreadable-ish (light
+          // gold text on a near-white chip) against the new dark palette.
+          // Text's own backgroundColor only accepts a CSS string (not a
+          // Theme.* numeric token), so this matches Theme.panel's hex at
+          // ~90% opacity instead, same pattern as OverworldScene's
+          // CHIP_BG_SOFT constant.
+          backgroundColor: "#1a2138e6",
           padding: { x: 10, y: 6 }
         })
         .setOrigin(0.5)
@@ -241,8 +248,6 @@ export class CoinFlipScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(
-      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
-    );
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 }

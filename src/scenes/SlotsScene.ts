@@ -97,7 +97,7 @@ export class SlotsScene extends Phaser.Scene {
       () => this.spin()
     );
 
-    makeButton(this, 400, 465, 220, 40, "WALK AWAY", Theme.neutral, Theme.neutralHover, () =>
+    makeButton(this, 400, 465, 220, 40, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
       fadeToScene(this, "OverworldScene")
     );
 
@@ -188,8 +188,6 @@ export class SlotsScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(
-      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
-    );
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 }

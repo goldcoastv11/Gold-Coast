@@ -155,7 +155,13 @@ export class DragonTowerScene extends Phaser.Scene {
     bg.clear();
     const colors = {
       locked: Theme.inset,
-      active: 0xd9f5ec, // very pale mint - playable, not yet revealed
+      // Contrast sweep: was a hardcoded 0xd9f5ec "very pale mint" left over
+      // from the old light theme - the "?" label painted on top uses
+      // Theme.textPrimary (near-white), which read as low-contrast
+      // white-on-pale-mint. Theme.secondary (electric dark blue) keeps the
+      // "distinct from locked" highlight while giving that white "?" real
+      // contrast, and still pairs cleanly with the Theme.accent border below.
+      active: Theme.secondary,
       safe: Theme.winZone,
       bad: Theme.loseZone
     };
@@ -410,8 +416,6 @@ export class DragonTowerScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(
-      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
-    );
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 }

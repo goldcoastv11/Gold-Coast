@@ -149,7 +149,11 @@ export class MinesScene extends Phaser.Scene {
     bg.clear();
     const colors = {
       hidden: Theme.inset,
-      clickable: 0xd9f5ec, // very pale mint - playable, not yet revealed
+      // Contrast sweep: was the same hardcoded 0xd9f5ec "very pale mint"
+      // leftover as DragonTowerScene's "active" tile (see its comment) -
+      // swapped to the same Theme.secondary for a consistent, dark-theme-
+      // appropriate "playable" highlight instead of another light literal.
+      clickable: Theme.secondary,
       gem: Theme.winZone,
       mine: Theme.loseZone
     };
@@ -414,8 +418,6 @@ export class MinesScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(
-      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
-    );
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 }
