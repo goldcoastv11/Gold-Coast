@@ -3,13 +3,14 @@
  * mini-game).
  *
  * Two flows previously granted a hardcoded flat GC amount: the signup
- * bonus (src/economy/signupBonus.ts) and the attendant claim
- * (src/economy/attendantClaim.ts). Both now accept a resolved multiplier
- * instead - whatever cup the player picked in the shuffle-cup mini-game -
- * and compute the GC amount as GC_MULTIPLIER_BASE * multiplier. The SC leg
- * of both flows is explicitly untouched by this: still flat, same
- * transaction types, same playthrough registration (see each module's own
- * comments).
+ * bonus (src/economy/signupBonus.ts) and the Coin Kiosk claim
+ * (src/economy/attendantClaim.ts, formerly the Chip Attendant's). Both
+ * accept a resolved multiplier instead - whatever cup the player picked in
+ * the shuffle-cup mini-game - and compute the GC amount as
+ * GC_MULTIPLIER_BASE * multiplier. The signup bonus's SC leg is untouched
+ * by this (still flat, same transaction type, same playthrough
+ * registration - see that module's own comments); the Coin Kiosk claim no
+ * longer has an SC leg at all (see attendantClaim.ts's doc comment).
  *
  * The multiplier itself is resolved entirely by games/floor's mini-game -
  * this module has no opinion on odds, animation, or which cup is picked,

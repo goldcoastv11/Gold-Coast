@@ -6,7 +6,7 @@ import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
-import { offerAdReward } from "../ui/AdRewardOffer";
+import { offerCoinKiosk } from "../ui/CoinKioskOffer";
 import {
   runOnboardingTutorial,
   TutorialStep,
@@ -409,8 +409,14 @@ export class OverworldScene extends Phaser.Scene {
     // box while the sprite renders at 32x32.
     npc.refreshBody();
     this.physics.add.collider(this.player, npc);
-    this.registerStation(npc, "Chip Attendant", "Press E to talk to the Chip Attendant", () =>
-      this.openChipPanel()
+    // Coin Kiosk (was "Chip Attendant" + the separate standalone "Ad
+    // Kiosk" station elsewhere - the two are now one station: watch a
+    // simulated ad, then the same shuffle-cup mini-game the Chip Attendant
+    // always used reveals your Tickets. See openCoinKiosk()/
+    // ui/CoinKioskOffer.ts and economy/attendantClaim.ts's doc comment for
+    // the full history.
+    this.registerStation(npc, "Coin Kiosk", "Press E to visit the Coin Kiosk", () =>
+      this.openCoinKiosk()
     );
 
     // Exit - bottom-middle wall, sends you back to the title screen
@@ -433,17 +439,8 @@ export class OverworldScene extends Phaser.Scene {
       () => this.openSkinPanel("shop")
     );
 
-    // Ad Kiosk - simulated "watch an ad for Gold Coins" claim (see
-    // ui/AdRewardOffer.ts's doc comment for why it's simulated, not a real
-    // ad network). Placed at (67,38), in the right corridor between HiLo
-    // (67,28) and Video Poker (67,48) - same 10-tile column spacing already
-    // proven clear in this layout (matches HiLo/Slots' existing 7-tile gap
-    // at column 74 one row over).
-    const adKiosk = this.physics.add.staticSprite(67 * TILE, 38 * TILE, "ad_kiosk");
-    this.physics.add.collider(this.player, adKiosk);
-    this.registerStation(adKiosk, "Ad Kiosk", "Press E to watch an ad for Gold Coins", () =>
-      this.openAdKioskOffer()
-    );
+    // (67,38), the standalone "Ad Kiosk" station's old spot, is now empty -
+    // that station was retired and consolidated into the Coin Kiosk above.
 
     // Ambient bystanders - purely decorative "social hub" flavor (STYLE_GUIDE
     // direction note 4: "nature woven into a social hub, not wilderness"),
@@ -452,7 +449,7 @@ export class OverworldScene extends Phaser.Scene {
     // No registerStation call - these aren't interactable, just people
     // milling around the plaza. See addAmbientNpc's doc comment for the
     // idle-frame convention.
-    this.addAmbientNpc(40, 31, "npc2_sheet", 2); // between the two benches (37,31)/(43,31), facing up toward the Chip Attendant
+    this.addAmbientNpc(40, 31, "npc2_sheet", 2); // between the two benches (37,31)/(43,31), facing up toward the Coin Kiosk
     this.addAmbientNpc(35, 20, "npc3_sheet", 2); // browsing near the market stall (35,17)/Skin Attendant, facing up
     this.addAmbientNpc(37, 47, "npc4_sheet", 1); // strolling the lamp-post path toward the exit, facing down
 
@@ -535,15 +532,16 @@ export class OverworldScene extends Phaser.Scene {
     this.updateHud();
 
     // Onboarding tutorial - runs last, after every station/camera/HUD
-    // setup above so its world coordinates (Chip Attendant/Coin Flip/Skin
-    // Attendant) are all valid. Two entry points:
+    // setup above so its world coordinates (Coin Kiosk/Coin Flip/Item Shop)
+    // are all valid. Two entry points:
     // - A brand-new signup (see OverworldSceneData's doc comment) starts
     //   the whole thing from the top.
     // - Returning from a tutorial-triggered Coin Flip round (see
-    //   gameState.tutorialResumeAtSkinAttendant's doc comment) resumes
-    //   directly at the Skin Attendant hands-on step, skipping everything
-    //   before it - the player already completed the Welcome/movement/
-    //   Chip Attendant/Play a Game steps in a PREVIOUS OverworldScene
+    //   gameState.tutorialResumeAtSkinAttendant's doc comment - identifier
+    //   name predates the Item Shop rename, still means the same thing)
+    //   resumes directly at the Item Shop hands-on step, skipping
+    //   everything before it - the player already completed the Welcome/
+    //   movement/Coin Kiosk/Play a Game steps in a PREVIOUS OverworldScene
     //   instance that no longer exists (this one's a fresh scene, entered
     //   via a real scene transition out of and back from CoinFlipScene).
     if (gameState.tutorialResumeAtSkinAttendant) {
@@ -560,11 +558,11 @@ export class OverworldScene extends Phaser.Scene {
    * character + movement (the two purely informational steps, run through
    * TutorialGuide's own Next-button sequencer), then hands off to three
    * "go do it for real" steps (runHandsOn*Step below) - the player
-   * actually walks to and interacts with the Chip Attendant, a real game
-   * (Coin Flip), and the Skin Attendant, each step only advancing once the
+   * actually walks to and interacts with the Coin Kiosk, a real game
+   * (Coin Flip), and the Item Shop, each step only advancing once the
    * corresponding real action genuinely completes, not on a click. World
    * coordinates match each station's real placement above (NPC at 40,28 /
-   * Coin Flip at 20,28 / Skin Attendant at 40,18, all in tiles) - if those
+   * Coin Flip at 20,28 / Item Shop at 40,18, all in tiles) - if those
    * ever move, update runHandsOn*Step's pan targets to match.
    */
   private startOnboardingTutorial() {
@@ -604,7 +602,7 @@ export class OverworldScene extends Phaser.Scene {
       },
       onComplete: () => {
         this.tutorialAllowMovement = false;
-        this.runHandsOnChipAttendantStep();
+        this.runHandsOnCoinKioskStep();
       }
     });
   }
@@ -646,7 +644,7 @@ export class OverworldScene extends Phaser.Scene {
     this.panelOpen = false;
   }
 
-  private runHandsOnChipAttendantStep() {
+  private runHandsOnCoinKioskStep() {
     this.cameras.main.stopFollow();
     this.cameras.main.pan(40 * TILE, 28 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
       if (progress !== 1) return;
@@ -659,17 +657,17 @@ export class OverworldScene extends Phaser.Scene {
         40 * TILE,
         28 * TILE,
         40,
-        "Chip Attendant",
-        "Walk up to the Chip Attendant and press E to claim your free Gold Coins!",
+        "Coin Kiosk",
+        "Walk up to the Coin Kiosk and press E to watch an ad and claim your free Tickets!",
         // Skip means "skip THIS step" (per user direction), not "end the
         // whole tutorial" - moves straight to the next hands-on step.
         () => {
-          this.events.off("tutorial:chipClaimed", onClaimed);
+          this.events.off("tutorial:kioskClaimed", onClaimed);
           this.clearTutorialHighlight();
           this.runHandsOnGameStep();
         }
       );
-      this.events.once("tutorial:chipClaimed", onClaimed);
+      this.events.once("tutorial:kioskClaimed", onClaimed);
     });
   }
 
@@ -677,7 +675,7 @@ export class OverworldScene extends Phaser.Scene {
     this.cameras.main.stopFollow();
     // CoinFlip (20,28), not Dice - per user direction. Either of the two
     // CoinFlip stations would do (20,28)/(60,28) - picked the one on the
-    // same row as the Chip Attendant (40,28) for a shorter, more coherent
+    // same row as the Coin Kiosk (40,28) for a shorter, more coherent
     // tutorial walking path.
     this.cameras.main.pan(20 * TILE, 28 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
       if (progress !== 1) return;
@@ -871,13 +869,13 @@ export class OverworldScene extends Phaser.Scene {
    * A purely decorative background character - not registered as an
    * Interactable (no "Press E" prompt/name label), just visual "social hub"
    * flavor. Same staticSprite + setScale(2) + refreshBody() pattern as the
-   * Chip Attendant NPC above (refreshBody is required, not optional -
+   * Coin Kiosk NPC above (refreshBody is required, not optional -
    * static bodies don't auto-resync to a post-creation setScale, so
    * skipping it leaves the pre-scale 16x16 collider under a 32x32 sprite).
    * Still collides with the player so it reads as a person standing there
    * rather than a background decal.
    *
-   * idleFrame follows the same convention as the Chip Attendant's own
+   * idleFrame follows the same convention as the Coin Kiosk's own
    * static frame (npc_sheet, frame 1): the first frame of a direction's
    * walk cycle in createKenneyWalkAnims' DIRECTION_FRAMES, i.e. the column
    * index of that direction - left=0, down=1, up=2, right=3.
@@ -1067,67 +1065,32 @@ export class OverworldScene extends Phaser.Scene {
       .setOrigin(0.5);
   }
 
-  private openChipPanel() {
+  /**
+   * The Coin Kiosk's offer/simulated-ad/shuffle-cup/result flow (formerly
+   * "Chip Attendant" + the separate standalone "Ad Kiosk" - see
+   * registerStation's comment above and economy/attendantClaim.ts's doc
+   * comment for the full history). Checked here, before ever showing the
+   * ad offer, rather than inside the offer/countdown UI: no point making
+   * the player sit through a whole simulated ad only to be told to wait -
+   * see ui/CoinKioskOffer.ts for the ad-watch UI itself, which does no
+   * claiming/cooldown-checking of its own.
+   */
+  private openCoinKiosk() {
+    const remainingMs = gameState.attendantClaimCooldownRemainingMs;
+    if (remainingMs > 0) {
+      this.showToast(`Coin Kiosk available in ${Math.ceil(remainingMs / 1000)}s.`, Theme.textDanger);
+      return;
+    }
     this.panelOpen = true;
-    this.showConfirmPanel();
-  }
-
-  /** Ad Kiosk's offer/simulated-ad/result flow - see ui/AdRewardOffer.ts. */
-  private openAdKioskOffer() {
-    this.panelOpen = true;
-    offerAdReward(
+    offerCoinKiosk(
       this,
       400,
       300,
+      () => this.runAttendantClaimShuffle(),
       () => {
         this.panelOpen = false;
-        this.updateHud();
-      },
-      () => this.updateHud()
+      }
     );
-  }
-
-  private showConfirmPanel() {
-    const panel = makePanel(this, 400, 300, 420, 200, 200).setScrollFactor(0);
-
-    const title = this.add
-      .text(400, 260, "🪙 Get More Gold Coins", {
-        fontSize: "19px",
-        color: Theme.textGold,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(201);
-
-    const subtitle = this.add
-      .text(400, 288, "Claim 1000 Gold Coins + 1 Stake Coin?", {
-        fontSize: "14px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(201);
-
-    const yesBtn = this.createAttendantClaimButton(340, 335, 120, 46, "Yes", () => {
-      cleanup();
-      this.runAttendantClaimShuffle();
-    });
-    yesBtn.container.setScrollFactor(0).setDepth(201);
-
-    const noBtn = makeButton(this, 460, 335, 120, 46, "No", Theme.neutral, Theme.neutralHover, () => {
-      cleanup();
-      this.panelOpen = false;
-    });
-    noBtn.container.setScrollFactor(0).setDepth(201);
-
-    const cleanup = () => {
-      panel.destroy();
-      title.destroy();
-      subtitle.destroy();
-      yesBtn.destroy();
-      noBtn.destroy();
-    };
   }
 
   /**
@@ -1220,7 +1183,7 @@ export class OverworldScene extends Phaser.Scene {
 
     const panel = makePanel(this, 400, 300, 420, 260, 200).setScrollFactor(0);
     const title = this.add
-      .text(400, 195, "🪙 Chip Attendant's Shuffle", {
+      .text(400, 195, "🎟️ Coin Kiosk's Shuffle", {
         fontSize: "17px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -1240,7 +1203,7 @@ export class OverworldScene extends Phaser.Scene {
         title.destroy();
         gameState.hydrateFromServer(result.user);
         this.runTripleChanceOffer(result.granted.gcAmount).then((outcome) => {
-          this.showClaimResultFromServer(result.granted.gcAmount, result.granted.scAmount, outcome);
+          this.showClaimResultFromServer(result.granted.gcAmount, outcome);
         });
       },
       result.granted.gcMultiplier
@@ -1267,27 +1230,24 @@ export class OverworldScene extends Phaser.Scene {
     });
   }
 
-  /** Shows the result panel for a successful (server-confirmed) attendant claim - `tripleChance` (#46) reflects whether/how the GC leg changed after the bonus round, if the player played it. */
-  private showClaimResultFromServer(gcGained: number, scGained: number, tripleChance?: TripleChanceOutcome) {
+  /** Shows the result panel for a successful (server-confirmed) Coin Kiosk claim - `tripleChance` (#46) reflects whether/how the GC leg changed after the bonus round, if the player played it. GC-only now (see economy/attendantClaim.ts's doc comment) - no SC sub-message any more. */
+  private showClaimResultFromServer(gcGained: number, tripleChance?: TripleChanceOutcome) {
     this.updateHud();
-    let gcMessage = `+${gcGained} Gold Coins!`;
+    let gcMessage = `+${gcGained} Tickets!`;
     if (tripleChance?.played) {
       gcMessage =
         tripleChance.finalAmount > 0
-          ? `Tripled to +${tripleChance.finalAmount} Gold Coins!`
-          : `Lost the ${gcGained} Gold Coins to Triple Chance!`;
+          ? `Tripled to +${tripleChance.finalAmount} Tickets!`
+          : `Lost the ${gcGained} Tickets to Triple Chance!`;
     }
-    this.showResultPanel(
-      gcMessage,
-      scGained > 0 ? `+${scGained} Stake Coin${scGained === 1 ? "" : "s"}!` : undefined
-    );
+    this.showResultPanel(gcMessage);
   }
 
-  private showResultPanel(message: string, subMessage?: string) {
+  private showResultPanel(message: string) {
     const panel = makePanel(this, 400, 300, 420, 220, 200).setScrollFactor(0);
 
     const title = this.add
-      .text(400, subMessage ? 245 : 255, message, {
+      .text(400, 255, message, {
         fontSize: "22px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -1296,20 +1256,8 @@ export class OverworldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
 
-    const subtitle = subMessage
-      ? this.add
-          .text(400, 270, subMessage, {
-            fontSize: "14px",
-            color: Theme.textGold,
-            fontStyle: "bold"
-          })
-          .setOrigin(0.5)
-          .setScrollFactor(0)
-          .setDepth(201)
-      : null;
-
     const balance = this.add
-      .text(400, subMessage ? 296 : 288, `GC: ${gameState.goldCoins}   |   SC: ${gameState.stakeCoins}`, {
+      .text(400, 288, `Tickets: ${gameState.goldCoins}   |   SC: ${gameState.stakeCoins}`, {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -1320,17 +1268,27 @@ export class OverworldScene extends Phaser.Scene {
     const cleanup = () => {
       panel.destroy();
       title.destroy();
-      subtitle?.destroy();
       balance.destroy();
       againBtn.destroy();
       doneBtn.destroy();
     };
 
     // Claim again right from here - no need to close and re-open the panel.
-    // Same cooldown-aware button as the initial confirm panel.
+    // Same cooldown-aware button as the very first claim, and same ad-gate
+    // (watch another ad, then the shuffle cups run again) - the ad-watch is
+    // the gate every claim goes through now, not just the first.
     const againBtn = this.createAttendantClaimButton(340, 340, 140, 44, "Claim Again", () => {
       cleanup();
-      this.runAttendantClaimShuffle();
+      this.panelOpen = true;
+      offerCoinKiosk(
+        this,
+        400,
+        300,
+        () => this.runAttendantClaimShuffle(),
+        () => {
+          this.panelOpen = false;
+        }
+      );
     });
     againBtn.container.setScrollFactor(0).setDepth(201);
 
@@ -1338,21 +1296,22 @@ export class OverworldScene extends Phaser.Scene {
       cleanup();
       this.panelOpen = false;
       this.updateHud();
-      // Onboarding tutorial's Chip Attendant hands-on step (see
+      // Onboarding tutorial's Coin Kiosk hands-on step (see
       // startOnboardingTutorial) listens for this - a harmless no-op emit
       // when the tutorial isn't running. Fired HERE, at the true end of
-      // the whole claim flow (shuffle-cup reveal -> Triple Chance offer ->
-      // this result panel -> Done), not at the raw API-success point -
-      // that earlier version advanced the tutorial to the next step while
-      // the shuffle/Triple Chance/result UI was still visibly playing out
-      // on screen, stacking a second tutorial panel on top of the first
-      // (confirmed via live testing). showResultPanel is only ever reached
-      // from this one flow, so this is a safe, unambiguous "truly done"
-      // signal - "Claim Again" below restarts the whole sequence instead
-      // of reaching here, which is correct (the tutorial step is already
-      // satisfied by the first claim; choosing to claim again is optional
-      // and shouldn't block advancing further if they then hit Done).
-      this.events.emit("tutorial:chipClaimed");
+      // the whole claim flow (ad watch -> shuffle-cup reveal -> Triple
+      // Chance offer -> this result panel -> Done), not at the raw
+      // API-success point - that earlier version advanced the tutorial to
+      // the next step while the shuffle/Triple Chance/result UI was still
+      // visibly playing out on screen, stacking a second tutorial panel on
+      // top of the first (confirmed via live testing). showResultPanel is
+      // only ever reached from this one flow, so this is a safe,
+      // unambiguous "truly done" signal - "Claim Again" above restarts the
+      // whole sequence instead of reaching here, which is correct (the
+      // tutorial step is already satisfied by the first claim; choosing to
+      // claim again is optional and shouldn't block advancing further if
+      // they then hit Done).
+      this.events.emit("tutorial:kioskClaimed");
     });
     doneBtn.container.setScrollFactor(0).setDepth(201);
   }

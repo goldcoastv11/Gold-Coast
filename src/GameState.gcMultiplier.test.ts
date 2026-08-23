@@ -47,13 +47,13 @@ describe("GameState #27 GC multiplier passthrough", () => {
     expect(gameState.goldCoins).toBe(gcBefore + GC_MULTIPLIER_BASE);
   });
 
-  it("claimAttendantBonus() with an explicit multiplier scales the GC grant, SC bonus stays flat", () => {
+  it("claimAttendantBonus() with an explicit multiplier scales the GC grant, no SC leg at all", () => {
     gameState.login("peter", "pw");
     const gcBefore = gameState.goldCoins;
     const scBefore = gameState.stakeCoins;
     const outcome = gameState.claimAttendantBonus(0.5);
     expect(outcome.ok).toBe(true);
     expect(gameState.goldCoins).toBe(gcBefore + GC_MULTIPLIER_BASE * 0.5);
-    expect(gameState.stakeCoins).toBe(scBefore + 1); // flat SC bonus, unaffected by multiplier
+    expect(gameState.stakeCoins).toBe(scBefore); // no SC leg any more, regardless of multiplier
   });
 });

@@ -432,8 +432,8 @@ class GameState {
   /**
    * Grants a Gold Coin bonus via the GC-only ad-reward path. No cooldown
    * for this POC - always available. Kept for a future real "watch an ad"
-   * feature; the overworld Chip Attendant NPC no longer calls this (see
-   * `claimAttendantBonus` below, #18/#19).
+   * feature; the overworld Coin Kiosk no longer calls this (see
+   * `claimAttendantBonus` below, #18/#19) - it has its own ad-gated flow.
    */
   claimBonus(): number {
     const tx = this.claimAdReward();
@@ -459,31 +459,23 @@ class GameState {
   }
 
   /**
-   * The overworld Chip Attendant's free GC claim (#18/#19). Routed through
-   * the purchase-bonus path (src/economy/attendantClaim.ts) rather than
-   * the ad-reward path: this claim is a placeholder stand-in for a future
-   * real GC purchase, so its SC bonus rides the "SC gifted alongside a GC
-   * purchase" rule, not "ad-reward refills are GC-only" (adRewards.ts is
-   * untouched and unrelated to this method). Gated by a persisted 30s
-   * cooldown - check `attendantClaimCooldownRemainingMs` before showing a
-   * claim button as enabled, or just call this and handle the `COOLDOWN`
-   * outcome.
+   * The overworld Coin Kiosk's free GC claim (formerly the "Chip
+   * Attendant's", #18/#19) - watch a simulated ad, then a shuffle-cup
+   * mini-game reveals the (server-resolved) multiplier. GC-only, no SC leg
+   * (removed - see src/economy/attendantClaim.ts's doc comment for why),
+   * granted via `AD_REWARD_GC`, same in kind as an ad-reward refill just
+   * with a variable multiplier and its own separately-tracked cooldown.
+   * Gated by a persisted 30s cooldown - check
+   * `attendantClaimCooldownRemainingMs` before showing a claim button as
+   * enabled, or just call this and handle the `COOLDOWN` outcome.
    *
    * `multiplier` (#27) is the resolved shuffle-cup outcome (0.5x/1x/2x,
    * see economy/gcMultiplier.ts) that games/floor's mini-game (#28/#29)
-   * produces - pass it in once that's wired up. Defaults to 1 (= 1000 GC,
-   * the pre-#27 fixed amount), so this method works exactly as before if
-   * called with no multiplier. The SC bonus (1) is unaffected either way.
+   * produces. Defaults to 1 (= 1000 GC).
    */
   claimAttendantBonus(multiplier: GcMultiplier = 1): AttendantClaimOutcome {
     const now = Date.now();
-    const outcome = claimAttendantBonusInternal(
-      this._ledger,
-      this._playthrough,
-      this._attendantClaimedAt,
-      multiplier,
-      now
-    );
+    const outcome = claimAttendantBonusInternal(this._ledger, this._attendantClaimedAt, multiplier, now);
     if (outcome.ok) {
       this._attendantClaimedAt = now;
       this.save();

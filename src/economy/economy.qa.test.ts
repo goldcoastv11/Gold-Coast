@@ -12,7 +12,7 @@ import { grantSignupBonus } from "./signupBonus";
 import { checkRedemptionEligibility, MIN_SC_REDEMPTION, redeemSc } from "./redemption";
 import { claimAdRewardGc } from "./adRewards";
 import { purchaseSkin } from "./skinShop";
-import { ATTENDANT_CLAIM_PACKAGE, claimAttendantBonus } from "./attendantClaim";
+import { claimAttendantBonus } from "./attendantClaim";
 import { isValidGcMultiplier, GC_MULTIPLIER_BASE, InvalidGcMultiplierError } from "./gcMultiplier";
 
 /**
@@ -226,80 +226,44 @@ describe("QA tripwire: ad rewards only ever grant GC", () => {
 });
 
 /**
- * QA independent verification of #18/#19 against the amended repo-root
- * CLAUDE.md's "Temporary POC exception - attendant SC test grant" entry.
- * That entry excepts exactly two rules (SC only via signup/GC-purchase
- * bonus; ad-reward is GC-only) for this one function ONLY - it does NOT
- * except playthrough-gating or the redemption minimum, so this SC must
- * behave exactly like any other SC for those two rules. Written
+ * QA independent verification that the Coin Kiosk claim (formerly the Chip
+ * Attendant's, #18/#19) no longer touches SC at all. repo-root CLAUDE.md
+ * used to carry a "Temporary POC exception" here (SC granted alongside GC,
+ * exempted from the normal two-grant-path rule) - that exception has been
+ * removed entirely along with the SC leg it authorized, so this claim is
+ * now just an ordinary GC-only free claim, no different in kind from
+ * adRewards.ts's, and no exception is needed for it any more. Written
  * independently of economy/attendantClaim.test.ts.
- *
- * Note (#27): claimAttendantBonus gained a `multiplier` parameter between
- * lastClaimAtMs and nowMs (economy/attendantClaim.ts) - calls below pass
- * `1` explicitly to keep exercising the same at-1x amounts these tests
- * were written against; the SC leg these tests actually care about is
- * unaffected by #27 either way.
  */
-describe("QA tripwire: attendant claim exception is scoped exactly as CLAUDE.md documents", () => {
+describe("QA tripwire: the Coin Kiosk claim never touches SC", () => {
   it("is not part of the real, purchasable GC_PACKAGES catalog (can't be bought, can't perturb the non-linear-scaling check)", () => {
-    expect(GC_PACKAGES.some((p) => p.id === ATTENDANT_CLAIM_PACKAGE.id)).toBe(false);
-    expect(ATTENDANT_CLAIM_PACKAGE.priceUsd).toBe(0);
-    // The non-linear-scaling tripwire above asserts against GC_PACKAGES
-    // directly, so as long as this package isn't in that array, it cannot
-    // silently satisfy/break that check either way.
+    expect(GC_PACKAGES.some((p) => p.id === "attendant_claim_internal")).toBe(false);
   });
 
-  it("grants exactly 1 SC per claim, not a variable/larger amount", () => {
-    expect(ATTENDANT_CLAIM_PACKAGE.scBonus).toBe(1);
+  it("grants zero SC per claim, regardless of multiplier", () => {
+    for (const multiplier of [0.5, 1, 2] as const) {
+      const ledger = createLedger(0, 0);
+      const outcome = claimAttendantBonus(ledger, null, multiplier, 1_000_000);
+      expect(outcome.ok).toBe(true);
+      expect(getBalance(ledger, "SC")).toBe(0);
+    }
   });
 
-  it("the granted SC still requires a 1x playthrough before it's redeemable - the exception does NOT touch this rule", () => {
+  it("repeated claims (cooldown bypassed by advancing nowMs, like a player waiting out 30s x5) never move SC even as GC accumulates", () => {
     const ledger = createLedger(0, 0);
-    const playthrough = createPlaythroughState();
-    const outcome = claimAttendantBonus(ledger, playthrough, null, 1, 1_000_000);
-    expect(outcome.ok).toBe(true);
-
-    // Balance is 1 SC - can never reach MIN_SC_REDEMPTION on its own, but
-    // even if it could, playthrough must still block first (same ordering
-    // as every other SC source).
-    const elig = checkRedemptionEligibility(ledger, playthrough, 1);
-    expect(elig.eligible).toBe(false);
-    if (!elig.eligible) expect(elig.reason).toBe("PLAYTHROUGH_INCOMPLETE");
-
-    recordScWager(playthrough, 1);
-    expect(isPlaythroughCleared(playthrough)).toBe(true);
-  });
-
-  it("the granted SC still respects the redemption minimum threshold - the exception does NOT touch this rule either", () => {
-    const ledger = createLedger(0, 0);
-    const playthrough = createPlaythroughState();
-    // Claim repeatedly (cooldown bypassed by advancing nowMs each time,
-    // exactly like a player waiting out 30s x49) until balance is just
-    // under MIN_SC_REDEMPTION, so this exercises the real accumulation
-    // path rather than pre-seeding the ledger.
     let now = 1_000_000;
     let lastClaimAt: number | null = null;
-    while (getBalance(ledger, "SC") < MIN_SC_REDEMPTION - 1) {
-      const outcome = claimAttendantBonus(ledger, playthrough, lastClaimAt, 1, now);
+    for (let i = 0; i < 5; i++) {
+      const outcome = claimAttendantBonus(ledger, lastClaimAt, 1, now);
       expect(outcome.ok).toBe(true);
       lastClaimAt = now;
       now += 30_000;
     }
-    recordScWager(playthrough, getBalance(ledger, "SC")); // clear playthrough so only the threshold is being tested
-    expect(isPlaythroughCleared(playthrough)).toBe(true);
-
-    const elig = checkRedemptionEligibility(ledger, playthrough, getBalance(ledger, "SC"));
-    expect(elig.eligible).toBe(false);
-    if (!elig.eligible) expect(elig.reason).toBe("BELOW_MINIMUM");
-
-    // One more claim crosses the threshold - now it's eligible.
-    claimAttendantBonus(ledger, playthrough, lastClaimAt, 1, now);
-    recordScWager(playthrough, ATTENDANT_CLAIM_PACKAGE.scBonus);
-    const eligAfter = checkRedemptionEligibility(ledger, playthrough, MIN_SC_REDEMPTION);
-    expect(eligAfter.eligible).toBe(true);
+    expect(getBalance(ledger, "GC")).toBe(GC_MULTIPLIER_BASE * 5);
+    expect(getBalance(ledger, "SC")).toBe(0);
   });
 
-  it("adRewards.ts's claimAdRewardGc is completely unaffected by an active attendant-claim cooldown - the two paths are independent", () => {
+  it("adRewards.ts's claimAdRewardGc is completely unaffected by an active Coin-Kiosk-claim cooldown - the two paths are independent", () => {
     const ledger = createLedger(0, 0);
     claimAdRewardGc(ledger);
     expect(getBalance(ledger, "SC")).toBe(0); // still GC-only, unrelated module
@@ -337,23 +301,17 @@ describe("QA finding: gcMultiplier's runtime validator is now enforced at the so
 
   it("claimAttendantBonus rejects a negative multiplier on an empty ledger with a clear InvalidGcMultiplierError, not an incidental InsufficientBalanceError", () => {
     const ledger = createLedger(0, 0);
-    const playthrough = createPlaythroughState();
-    const outOfRange = -5 as unknown as Parameters<typeof claimAttendantBonus>[3];
+    const outOfRange = -5 as unknown as Parameters<typeof claimAttendantBonus>[2];
 
-    expect(() => claimAttendantBonus(ledger, playthrough, null, outOfRange, 1_000_000)).toThrow(
-      InvalidGcMultiplierError
-    );
+    expect(() => claimAttendantBonus(ledger, null, outOfRange, 1_000_000)).toThrow(InvalidGcMultiplierError);
   });
 
   it("claimAttendantBonus rejects a negative multiplier on a well-funded ledger too - no more silent GC drain disguised as a successful claim", () => {
     const ledger = createLedger(100_000, 0); // plenty of balance - this is the case that used to silently succeed
-    const playthrough = createPlaythroughState();
-    const outOfRange = -5 as unknown as Parameters<typeof claimAttendantBonus>[3];
+    const outOfRange = -5 as unknown as Parameters<typeof claimAttendantBonus>[2];
 
-    expect(() => claimAttendantBonus(ledger, playthrough, null, outOfRange, 1_000_000)).toThrow(
-      InvalidGcMultiplierError
-    );
-    // Balance is completely untouched - the rejection happens before grantPackage/applyTransaction ever runs.
+    expect(() => claimAttendantBonus(ledger, null, outOfRange, 1_000_000)).toThrow(InvalidGcMultiplierError);
+    // Balance is completely untouched - the rejection happens before applyTransaction ever runs.
     expect(getBalance(ledger, "GC")).toBe(100_000);
   });
 

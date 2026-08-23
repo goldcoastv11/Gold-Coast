@@ -9,8 +9,8 @@ import { MIN_SC_REDEMPTION } from "../src/economy/redemption";
 
 beforeEach(resetDb);
 
-describe("POST /claim-bonus (attendant claim - CLAUDE.md POC exception)", () => {
-  it("grants GC via a server-resolved multiplier plus a flat 1 SC, and registers a playthrough requirement", async () => {
+describe("POST /claim-bonus (Coin Kiosk claim, formerly the Chip Attendant's - GC only, no SC)", () => {
+  it("grants GC via a server-resolved multiplier, no SC, and doesn't touch the playthrough requirement", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
@@ -19,11 +19,11 @@ describe("POST /claim-bonus (attendant claim - CLAUDE.md POC exception)", () => 
     expect(res.status).toBe(200);
     expect(GC_MULTIPLIERS).toContain(res.body.granted.gcMultiplier);
     expect(res.body.granted.gcAmount).toBe(GC_MULTIPLIER_BASE * res.body.granted.gcMultiplier);
-    expect(res.body.granted.scAmount).toBe(1);
+    expect(res.body.granted.scAmount).toBe(0);
 
     expect(res.body.user.goldCoins).toBe(before.body.goldCoins + res.body.granted.gcAmount);
-    expect(res.body.user.stakeCoins).toBe(before.body.stakeCoins + 1);
-    expect(res.body.user.playthrough.required).toBe(before.body.playthrough.required + 1);
+    expect(res.body.user.stakeCoins).toBe(before.body.stakeCoins);
+    expect(res.body.user.playthrough.required).toBe(before.body.playthrough.required);
   });
 
   it("enforces a 30s server-side cooldown - a second immediate claim is rejected", async () => {
@@ -167,7 +167,8 @@ describe("Every balance change inserts a transactions row (ledger audit trail)",
     const types = txs.map((t) => t.type);
     expect(types).toContain("SIGNUP_BONUS_GC");
     expect(types).toContain("SIGNUP_BONUS_SC");
-    expect(types).toContain("PACKAGE_GC"); // attendant claim grants via the same package machinery
+    expect(types).toContain("AD_REWARD_GC"); // Coin Kiosk claim - GC only, no SC leg any more
+    expect(types).toContain("PACKAGE_GC"); // from the package purchase below
     expect(types).toContain("PACKAGE_BONUS_SC");
 
     // balanceAfter values must be internally consistent running totals.

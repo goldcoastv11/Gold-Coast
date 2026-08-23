@@ -177,7 +177,6 @@ export class BootScene extends Phaser.Scene {
     this.createCoinFlipMachineTexture();
     this.createDragonPedestalTexture();
     this.createTutorialGuideTexture();
-    this.createAdKioskTexture();
 
     fadeToScene(this, "LoginScene");
   }
@@ -638,44 +637,6 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(w / 2, 32, 3.2);
 
     g.generateTexture("coming_soon_sign", w, h);
-    g.destroy();
-  }
-
-  /**
-   * The overworld Ad Kiosk - a walkable-up-to station offering a simulated
-   * "watch an ad for Gold Coins" claim (see src/ui/AdRewardOffer.ts and
-   * server/src/economy/adRewards.ts). Same 48x64 cabinet scale as the other
-   * game furniture, styled as a small screen/billboard rather than a game
-   * machine - a coral play-triangle on a cream screen, plus a little
-   * antenna, reads as "media kiosk" rather than "another game" at a glance.
-   */
-  private createAdKioskTexture() {
-    const w = 48;
-    const h = 64;
-    const g = this.add.graphics();
-    this.drawCabinetBody(g, w, h);
-
-    // antenna, reads as "screen/TV" not "slot machine"
-    g.lineStyle(2, PALETTE.outline, 1);
-    g.beginPath();
-    g.moveTo(w / 2, 10);
-    g.lineTo(w / 2 - 6, 2);
-    g.moveTo(w / 2, 10);
-    g.lineTo(w / 2 + 6, 2);
-    g.strokePath();
-    g.fillStyle(PALETTE.gold, 1);
-    g.fillCircle(w / 2 - 6, 2, 1.8);
-    g.fillCircle(w / 2 + 6, 2, 1.8);
-
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
-
-    // coral play triangle, centered on the screen
-    g.fillStyle(PALETTE.coral, 1);
-    g.fillTriangle(w / 2 - 6, 22, w / 2 - 6, 40, w / 2 + 8, 31);
-
-    this.drawCabinetBase(g, w, h);
-    g.generateTexture("ad_kiosk", w, h);
     g.destroy();
   }
 

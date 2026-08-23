@@ -43,7 +43,10 @@ router.post(
       granted: {
         gcMultiplier: multiplier,
         gcAmount: outcome.gcTransaction.amount,
-        scAmount: outcome.scBonusTransaction.amount
+        // No SC leg any more (see economy/attendantClaim.ts) - scAmount is
+        // kept in the response shape (rather than dropped) so the client
+        // doesn't need a second response shape for this one endpoint.
+        scAmount: 0
       },
       user: me
     });

@@ -1,60 +1,39 @@
 /**
- * The overworld Chip Attendant's free claim - server-authoritative port of
- * casino-poc/src/economy/attendantClaim.ts.
- *
- * Authorization: this is a narrow, explicitly-scoped exception to the "SC
- * only via signup bonus or GC-purchase bonus" / "ad-reward refills are GC
- * only" rules - see repo-root CLAUDE.md, "Temporary POC exception -
- * attendant SC test grant (user-approved 2026-08-10)". Per that entry:
- * scoped ONLY to this function, requires the 30s cooldown below as an
- * anti-spam measure (now DB-enforced via `attendant_claim.last_claimed_at`
- * instead of client localStorage - a client can no longer forge "cooldown
- * already elapsed"), and must be removed/reworked once a real GC-purchase
- * payment flow exists. Not a basis for adding SC grants anywhere else.
+ * The overworld Coin Kiosk's free claim - server-authoritative port of
+ * casino-poc/src/economy/attendantClaim.ts. Formerly the "Chip Attendant's"
+ * claim - see that module's doc comment for the full history of why this no
+ * longer grants SC (the "Temporary POC exception" entry that used to
+ * authorize it has been removed from repo-root CLAUDE.md, since nothing
+ * needs it anymore). Now a plain GC-only claim, granted via `AD_REWARD_GC`
+ * (same transaction type an ad-reward refill uses) instead of routing
+ * through `grantPackage` - there's no SC leg left to justify the
+ * purchase-bonus package machinery.
  *
  * Like the signup bonus, the GC leg's multiplier is resolved server-side
  * by the caller (via `pickRandomGcMultiplier`) and passed in - never taken
- * from the client. The SC leg (scBonus: 1) is fixed and untouched by the
- * multiplier.
+ * from the client.
  *
  * Cooldown is enforced as a single atomic UPSERT with a conditional WHERE
  * on the DO UPDATE branch: it only succeeds if there's no prior claim or
  * the cooldown has elapsed, so two concurrent claim requests for the same
  * user can't both slip through a check-then-write race - the second one's
- * UPDATE simply matches zero rows.
+ * UPDATE simply matches zero rows. (Table name `attendant_claim` is kept
+ * as-is - renaming it would need a migration for zero behavioral benefit.)
  */
 
-import { TxClient } from "./ledger";
-import { GcPackage, PackagePurchaseResult, grantPackage } from "./packages";
+import { TxClient, applyTransaction, LedgerTransaction } from "./ledger";
 import { GcMultiplier, resolveGcAmount } from "./gcMultiplier";
-
-/**
- * Not a real purchasable tier - intentionally absent from GC_PACKAGES.
- * priceUsd is 0 because no money changes hands for this claim. `gcAmount`
- * here is just the at-1x reference value - the actual grant always
- * recomputes it from the caller's `multiplier` via `resolveGcAmount`.
- * scBonus is deliberately small and fixed - it does NOT scale with the GC
- * multiplier.
- */
-export const ATTENDANT_CLAIM_PACKAGE: GcPackage = {
-  id: "attendant_claim_internal",
-  name: "Attendant Claim (internal - not a real purchasable package)",
-  priceUsd: 0,
-  gcAmount: 1000,
-  scBonus: 1
-};
 
 export const ATTENDANT_CLAIM_COOLDOWN_MS = 30_000;
 
 export type AttendantClaimOutcome =
-  | ({ ok: true } & PackagePurchaseResult)
+  | { ok: true; gcTransaction: LedgerTransaction }
   | { ok: false; reason: "COOLDOWN"; remainingMs: number };
 
 /**
  * Attempts the claim for `userId`. Checks + records the 30s cooldown
- * atomically; if clear, grants GC_MULTIPLIER_BASE * `multiplier` GC plus
- * the flat 1 SC bonus via the same mechanics as a real package purchase
- * (playthrough lock included).
+ * atomically; if clear, grants GC_MULTIPLIER_BASE * `multiplier` GC via a
+ * single `AD_REWARD_GC` transaction.
  */
 export async function claimAttendantBonus(
   tx: TxClient,
@@ -82,9 +61,10 @@ export async function claimAttendantBonus(
     return { ok: false, reason: "COOLDOWN", remainingMs };
   }
 
-  const pkg: GcPackage = { ...ATTENDANT_CLAIM_PACKAGE, gcAmount: resolveGcAmount(multiplier) };
-  const result = await grantPackage(tx, userId, pkg, { multiplier });
-  return { ok: true, ...result };
+  const gcTransaction = await applyTransaction(tx, userId, "GC", "AD_REWARD_GC", resolveGcAmount(multiplier), {
+    multiplier
+  });
+  return { ok: true, gcTransaction };
 }
 
 /** ms remaining before another claim is allowed for `userId`. 0 = available now. */
