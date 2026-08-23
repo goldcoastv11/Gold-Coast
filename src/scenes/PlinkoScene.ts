@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 const ROWS = 8; // rows of pegs -> 9 landing slots
 const ROW_SPACING = 28;
@@ -168,6 +169,7 @@ export class PlinkoScene extends Phaser.Scene {
 
     if (multiplier >= 1) {
       this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Theme.textAccent);
+      showWinCelebration(this, payout);
     } else {
       this.messageText.setText(`Landed on ${multiplier}x - only +${payout} Tickets`).setColor(Theme.textDanger);
     }

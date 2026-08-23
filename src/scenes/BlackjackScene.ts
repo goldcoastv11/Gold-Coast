@@ -16,6 +16,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BlackjackOutcome } from "../api/types";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 // #36: the deck, dealer AI, and win/payout math are all resolved
 // server-side (POST /games/blackjack/start|hit|stand) - the server only
@@ -310,8 +311,13 @@ export class BlackjackScene extends Phaser.Scene {
     if (outcome === "win") {
       this.messageText.setText(`You win! +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.messageText);
+      showWinCelebration(this, payout);
     } else if (outcome === "push") {
-      this.messageText.setText("Push - bet returned").setColor(Theme.textMuted);
+      // A push still pays TICKETS = the GC bet amount (the GC wager itself
+      // was already spent at start time) - no "bet returned" in this
+      // currency, just a payout.
+      this.messageText.setText(`Push! +${payout} Tickets`).setColor(Theme.textMuted);
+      showWinCelebration(this, payout);
     } else {
       this.messageText.setText("Dealer wins").setColor(Theme.textDanger);
     }

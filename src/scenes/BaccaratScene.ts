@@ -15,6 +15,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BaccaratBetType } from "../api/types";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 /**
  * Real published baccarat odds - no invented numbers. Standard 8-deck-shoe
@@ -278,15 +279,19 @@ export class BaccaratScene extends Phaser.Scene {
 
     if (payout > 0) {
       if (multiplier === PUSH_MULT) {
-        this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - push, bet returned`).setColor(
-          Theme.textGold
-        );
+        // A push still pays out TICKETS = the GC bet amount (the GC wager
+        // itself was already spent at deal time, same as any other outcome
+        // here - there's no "bet returned" in this currency, just a payout).
+        this.messageText
+          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - push! +${payout} Tickets`)
+          .setColor(Theme.textGold);
       } else {
         this.messageText
           .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} Tickets`)
           .setColor(Theme.textAccent);
         popIn(this, this.messageText);
       }
+      showWinCelebration(this, payout);
     } else {
       this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - you lose`).setColor(Theme.textDanger);
     }

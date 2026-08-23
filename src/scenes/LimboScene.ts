@@ -14,6 +14,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 const PRESET_TARGETS = [1.5, 2, 3, 5, 10, 25, 50, 100];
 const DEFAULT_TARGET = 2;
@@ -175,6 +176,7 @@ export class LimboScene extends Phaser.Scene {
         Theme.textAccent
       );
       popIn(this, this.multiplierText);
+      showWinCelebration(this, payout);
     } else {
       this.multiplierText.setColor(Theme.textDanger);
       this.messageText

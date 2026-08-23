@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 /**
  * Standard "9/6 Jacks or Better" paytable - the classic full-pay video
@@ -321,11 +322,15 @@ export class VideoPokerScene extends Phaser.Scene {
 
         if (res.payout > 0) {
           if (res.multiplier === 1) {
-            this.messageText.setText(`${res.rank} - push, bet returned`).setColor(Theme.textGold);
+            // A push still pays TICKETS = the GC bet amount (the GC wager
+            // itself was already spent at deal time) - no "bet returned" in
+            // this currency, just a payout.
+            this.messageText.setText(`${res.rank} - push! +${res.payout} Tickets`).setColor(Theme.textGold);
           } else {
             this.messageText.setText(`${res.rank}! +${res.payout} Tickets`).setColor(Theme.textAccent);
             popIn(this, this.messageText);
           }
+          showWinCelebration(this, res.payout);
         } else {
           this.messageText.setText("No winning hand - you lose").setColor(Theme.textDanger);
         }

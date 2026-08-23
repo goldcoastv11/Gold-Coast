@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 const GRID_SIZE = 5; // 5x5 = 25 tiles
 const TOTAL_TILES = GRID_SIZE * GRID_SIZE;
@@ -322,6 +323,7 @@ export class MinesScene extends Phaser.Scene {
           this.revealMines(mines);
           this.messageText.setText(`Board cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
+          showWinCelebration(this, res.payout ?? 0);
           this.endRound();
           return;
         }
@@ -354,6 +356,7 @@ export class MinesScene extends Phaser.Scene {
         this.revealMines(res.minePositions);
         this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
+        showWinCelebration(this, res.payout);
         this.endRound();
       })
       .catch((err) => {

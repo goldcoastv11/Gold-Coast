@@ -14,6 +14,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
@@ -324,6 +325,7 @@ export class WheelScene extends Phaser.Scene {
     if (payout > 0) {
       this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.legendText);
+      showWinCelebration(this, payout);
     } else {
       this.messageText.setText("Landed on 0x - you lose").setColor(Theme.textDanger);
     }

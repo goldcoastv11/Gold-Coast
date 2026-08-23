@@ -15,6 +15,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { RouletteColor } from "../api/types";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 const RED_NUMBERS = new Set([
   1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
@@ -208,6 +209,7 @@ export class RouletteScene extends Phaser.Scene {
         .setText(`${number} ${color.toUpperCase()} — you win +${payout} Tickets`)
         .setColor(Theme.textAccent);
       popIn(this, this.resultText);
+      showWinCelebration(this, payout);
     } else {
       this.messageText.setText(`${number} ${color.toUpperCase()} — you lose`).setColor(Theme.textDanger);
     }

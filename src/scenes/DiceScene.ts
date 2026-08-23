@@ -12,6 +12,7 @@ import {
   UIButton
 } from "../ui/uiHelpers";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
+import { showWinCelebration } from "../ui/WinCelebration";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -236,6 +237,7 @@ export class DiceScene extends Phaser.Scene {
       this.rollText.setColor(Theme.textAccent);
       this.messageText.setText(`${roll} - under ${target}! +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.rollText);
+      showWinCelebration(this, payout);
     } else {
       this.rollText.setColor(Theme.textDanger);
       this.messageText.setText(`${roll} - not under ${target}, you lose`).setColor(Theme.textDanger);

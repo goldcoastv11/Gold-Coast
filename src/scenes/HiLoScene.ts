@@ -15,6 +15,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { HiLoGuess } from "../api/types";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 // Stake-style layout: card/history/buttons centered in the shell's
 // right-side display area (see ui/uiHelpers.ts's makeGameShell) - the
@@ -372,6 +373,7 @@ export class HiLoScene extends Phaser.Scene {
           this.active = false;
           this.messageText.setText(`Deck cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
+          showWinCelebration(this, res.payout ?? 0);
           this.endRun();
           return;
         }
@@ -414,6 +416,7 @@ export class HiLoScene extends Phaser.Scene {
         this.active = false;
         this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
+        showWinCelebration(this, res.payout);
         this.endRun();
       })
       .catch((err) => {

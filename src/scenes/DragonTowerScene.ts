@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 const ROWS = 6;
 const TILES_PER_ROW = 4;
@@ -318,6 +319,7 @@ export class DragonTowerScene extends Phaser.Scene {
           this.revealTower(res.badIndexPerRow ?? [], null);
           this.messageText.setText(`Reached the top! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
+          showWinCelebration(this, res.payout ?? 0);
           this.endRun();
           return;
         }
@@ -350,6 +352,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.revealTower(res.badIndexPerRow, null);
         this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
+        showWinCelebration(this, res.payout);
         this.endRun();
       })
       .catch((err) => {

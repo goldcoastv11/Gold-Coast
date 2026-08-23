@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { showWinCelebration } from "../ui/WinCelebration";
 
 /**
  * Symbol display metadata + the emoji reel. The paytable itself (weights,
@@ -146,6 +147,7 @@ export class SlotsScene extends Phaser.Scene {
       const label = winCount === 3 ? `3x ${SYMBOL_EMOJI[winKey]} — JACKPOT!` : `2x ${SYMBOL_EMOJI[winKey]}`;
       this.messageText.setText(`${label}  +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.messageText);
+      showWinCelebration(this, payout);
     } else {
       this.messageText.setText("No match, try again").setColor(Theme.textMuted);
     }
