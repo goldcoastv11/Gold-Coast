@@ -27,7 +27,7 @@ import { ApiError, NetworkError } from "../api/client";
  *
  * Repeatable/chainable by design: a win re-offers Triple Chance on the new
  * (tripled) amount; the player can stop and keep their winnings at any
- * point, or a loss ends the chain at 0. GC only - never touches SC, the
+ * point, or a loss ends the chain at 0. GC only - never touches TICKETS, the
  * server route doesn't even accept a currency param.
  */
 

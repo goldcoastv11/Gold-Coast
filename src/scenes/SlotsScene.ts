@@ -104,7 +104,7 @@ export class SlotsScene extends Phaser.Scene {
     if (this.spinning) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
       return;
     }
 
@@ -161,7 +161,7 @@ export class SlotsScene extends Phaser.Scene {
     this.spinTimer = undefined;
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
     } else if (err instanceof NetworkError) {
       this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
@@ -174,6 +174,6 @@ export class SlotsScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.tickets}`);
+    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
   }
 }

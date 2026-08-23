@@ -255,7 +255,7 @@ export function makeBetControl(
 
   const refresh = () => {
     if (editing) return;
-    label.setText(`Bet: ${gameState.betAmount} Tickets  ✎`);
+    label.setText(`Bet: ${gameState.betAmount} 🪙  ✎`);
   };
 
   const renderEditLabel = () => {

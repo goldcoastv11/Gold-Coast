@@ -482,7 +482,7 @@ export class OverworldScene extends Phaser.Scene {
     // Coin Kiosk (was "Chip Attendant" + the separate standalone "Ad
     // Kiosk" station elsewhere - the two are now one station: watch a
     // simulated ad, then the same shuffle-cup mini-game the Chip Attendant
-    // always used reveals your Tickets. See openCoinKiosk()/
+    // always used reveals your Gold Coins. See openCoinKiosk()/
     // ui/CoinKioskOffer.ts and economy/attendantClaim.ts's doc comment for
     // the full history.
     this.registerStation(npc, "Coin Kiosk", "Press E to visit the Coin Kiosk", () =>
@@ -648,7 +648,7 @@ export class OverworldScene extends Phaser.Scene {
     const steps: TutorialStep[] = [
       {
         title: "Welcome to Gold Coast!",
-        text: "You just played the Shuffle Cups for your starting Tickets - shuffle, pick a cup, and reveal your prize. You'll see that again any time you get a bonus."
+        text: "You just played the Shuffle Cups for your starting Gold Coins - shuffle, pick a cup, and reveal your prize. You'll see that again any time you get a bonus."
       },
       {
         title: "This Is You",
@@ -737,7 +737,7 @@ export class OverworldScene extends Phaser.Scene {
         28 * TILE,
         40,
         "Coin Kiosk",
-        "Walk up to the Coin Kiosk and press E to watch an ad and claim your free Tickets!",
+        "Walk up to the Coin Kiosk and press E to watch an ad and claim your free Gold Coins!",
         // Skip means "skip THIS step" (per user direction), not "end the
         // whole tutorial" - moves straight to the next hands-on step.
         () => {
@@ -1336,7 +1336,7 @@ export class OverworldScene extends Phaser.Scene {
 
     const panel = makePanel(this, 400, 300, 420, 260, 200).setScrollFactor(0);
     const title = this.add
-      .text(400, 195, "🎟️ Coin Kiosk's Shuffle", {
+      .text(400, 195, "🪙 Coin Kiosk's Shuffle", {
         fontSize: "17px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -1386,12 +1386,12 @@ export class OverworldScene extends Phaser.Scene {
   /** Shows the result panel for a successful (server-confirmed) Coin Kiosk claim - `tripleChance` (#46) reflects whether/how the GC leg changed after the bonus round, if the player played it. GC-only now (see economy/attendantClaim.ts's doc comment) - no SC sub-message any more. */
   private showClaimResultFromServer(gcGained: number, tripleChance?: TripleChanceOutcome) {
     this.updateHud();
-    let gcMessage = `+${gcGained} Tickets!`;
+    let gcMessage = `+${gcGained} Gold Coins!`;
     if (tripleChance?.played) {
       gcMessage =
         tripleChance.finalAmount > 0
-          ? `Tripled to +${tripleChance.finalAmount} Tickets!`
-          : `Lost the ${gcGained} Tickets to Triple Chance!`;
+          ? `Tripled to +${tripleChance.finalAmount} Gold Coins!`
+          : `Lost the ${gcGained} Gold Coins to Triple Chance!`;
     }
     this.showResultPanel(gcMessage);
   }
@@ -1410,7 +1410,7 @@ export class OverworldScene extends Phaser.Scene {
       .setDepth(201);
 
     const balance = this.add
-      .text(400, 288, `Tickets: ${gameState.goldCoins}   |   SC: ${gameState.tickets}`, {
+      .text(400, 288, `🪙 Gold Coins: ${gameState.goldCoins}   |   🎟️ Tickets: ${gameState.tickets}`, {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -1470,14 +1470,14 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private updateHud() {
-    this.hudText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.tickets}`);
+    this.hudText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
   }
 
   /** Turns a /skins/buy or /skins/equip failure into a short user-facing toast message. */
   private describeSkinError(err: unknown, action: string): string {
     if (err instanceof ApiError) {
       switch (err.code) {
-        case "INSUFFICIENT_GC":
+        case "INSUFFICIENT_TICKETS":
           return "Not enough Tickets.";
         case "ALREADY_OWNED":
           return "You already own that.";
@@ -1583,7 +1583,7 @@ export class OverworldScene extends Phaser.Scene {
         .text(
           400,
           130,
-          mode === "shop" ? `You have ${gameState.goldCoins} Tickets` : "Pick a look to wear",
+          mode === "shop" ? `You have ${gameState.tickets} Tickets` : "Pick a look to wear",
           { fontSize: "13px", color: Theme.textMuted }
         )
         .setOrigin(0.5)
@@ -1644,7 +1644,7 @@ export class OverworldScene extends Phaser.Scene {
             .setDepth(201);
           elements.push(priceLabel);
 
-          const canAfford = gameState.goldCoins >= def.price;
+          const canAfford = gameState.tickets >= def.price;
           const buyBtn = makeButton(
             this,
             540,
@@ -1655,9 +1655,9 @@ export class OverworldScene extends Phaser.Scene {
             canAfford ? Theme.accent : Theme.neutral,
             canAfford ? Theme.accentHover : Theme.neutral,
             () => {
-              // Task #37: POST /skins/buy - GC-only, server-authoritative.
+              // Task #37: POST /skins/buy - TICKETS-only, server-authoritative.
               // The canAfford/ownership checks above are optimistic UI only;
-              // the server re-checks both (INSUFFICIENT_GC/ALREADY_OWNED)
+              // the server re-checks both (INSUFFICIENT_TICKETS/ALREADY_OWNED)
               // and is the one that actually decides. A purchase now also
               // equips server-side (economy/skinShop.ts's purchaseSkin, per
               // product decision: buying a skin means wearing it) - so

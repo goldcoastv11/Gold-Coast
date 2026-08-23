@@ -47,7 +47,7 @@ export function offerCoinKiosk(
     .setScrollFactor(0)
     .setDepth(401);
   const sub = scene.add
-    .text(x, y - 44, "Watch an ad, then shuffle the cups for your Tickets!", {
+    .text(x, y - 44, "Watch an ad, then shuffle the cups for your Gold Coins!", {
       fontSize: "12px",
       color: Theme.textMuted,
       align: "center",
@@ -71,7 +71,7 @@ export function offerCoinKiosk(
     y + 60,
     190,
     46,
-    "🎟️ Watch Ad for\nAdditional Tickets",
+    "🪙 Watch Ad for\nAdditional Gold Coins",
     Theme.accent,
     Theme.accentHover,
     () => {
