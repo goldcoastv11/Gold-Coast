@@ -80,7 +80,7 @@ export class CoinFlipScene extends Phaser.Scene {
       () => this.flip("tails")
     );
 
-    makeButton(this, 400, 450, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () => {
+    const walkAwayBtn = makeButton(this, 400, 450, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () => {
       // Leaving without ever flipping shouldn't leave a stale flag behind
       // - a LATER, unrelated visit to Coin Flip would otherwise incorrectly
       // show the tutorial highlight again. See resolveFlip() for the
@@ -88,6 +88,18 @@ export class CoinFlipScene extends Phaser.Scene {
       gameState.tutorialAwaitingGamePlay = false;
       fadeToScene(this, "OverworldScene");
     });
+    // Onboarding tutorial's "Play a Game" hands-on step - per user
+    // direction, WALK AWAY needs to be unclickable here: it exits back to
+    // the Overworld WITHOUT setting tutorialResumeAtSkinAttendant (by
+    // design - leaving without playing shouldn't count as "played"), so
+    // using it mid-tutorial silently dropped the player out of the
+    // tutorial with no Skin Attendant step ever appearing. Disabling it
+    // for this one step forces a real round to be played (or the
+    // Overworld instruction bubble's own Skip button, before ever walking
+    // in) instead of a dead end.
+    if (gameState.tutorialAwaitingGamePlay) {
+      walkAwayBtn.setEnabled(false);
+    }
 
     this.betControl = makeBetControl(this, 400, 486, () => {});
 
