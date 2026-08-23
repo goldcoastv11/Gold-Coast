@@ -219,12 +219,19 @@ export interface BetControl {
 }
 
 /**
- * Shared "Bet: N GC  [-] [+]" stepper, backed by gameState.betAmount so the
- * chosen size carries over between games. Click the amount itself to type a
+ * Shared "Bet Amount" stepper, backed by gameState.betAmount so the chosen
+ * size carries over between games. Click the amount itself to type a
  * custom value on the keyboard (digits, Backspace, Enter to confirm, Escape
  * to cancel). Call refresh() if something else changes betAmount while this
  * control is on screen. Call onChange after every adjustment so the caller
  * can update any payout previews.
+ *
+ * Layout: [½] [-] [amount] [+] [2x] - the quick half/double buttons are a
+ * deliberate Stake-style convention (every Stake Originals bet input has
+ * exactly this ½/2x pair beside the stepper) added as part of the "match
+ * Stake's UI" pass. Kept to the exact same height/vertical footprint as
+ * before (only wider, not taller) so it drops into every existing scene's
+ * already-tuned vertical layout with no other per-scene changes needed.
  */
 export function makeBetControl(
   scene: Phaser.Scene,
@@ -248,7 +255,7 @@ export function makeBetControl(
 
   const refresh = () => {
     if (editing) return;
-    label.setText(`Bet: ${gameState.betAmount} GC  ✎`);
+    label.setText(`Bet: ${gameState.betAmount} Tickets  ✎`);
   };
 
   const renderEditLabel = () => {
@@ -327,8 +334,30 @@ export function makeBetControl(
     refresh();
     onChange();
   });
+  // Stake-style quick half/double buttons, outside the -/+ pair - same Y,
+  // just wider overall (see this function's doc comment).
+  const halfBtn = makeButton(scene, -142, 0, 32, 32, "½", Theme.neutral, Theme.neutralHover, () => {
+    if (editing) stopEdit(false);
+    gameState.setBet(gameState.betAmount / 2);
+    refresh();
+    onChange();
+  });
+  const doubleBtn = makeButton(scene, 142, 0, 32, 32, "2×", Theme.neutral, Theme.neutralHover, () => {
+    if (editing) stopEdit(false);
+    gameState.setBet(gameState.betAmount * 2);
+    refresh();
+    onChange();
+  });
 
-  container.add([inset, label, hitZone, minusBtn.container, plusBtn.container]);
+  container.add([
+    inset,
+    label,
+    hitZone,
+    halfBtn.container,
+    minusBtn.container,
+    plusBtn.container,
+    doubleBtn.container
+  ]);
   refresh();
 
   scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -344,6 +373,8 @@ export function makeBetControl(
       if (editing && !enabled) stopEdit(false);
       minusBtn.setEnabled(enabled);
       plusBtn.setEnabled(enabled);
+      halfBtn.setEnabled(enabled);
+      doubleBtn.setEnabled(enabled);
     },
     destroy: () => {
       scene.input.keyboard?.off("keydown", onKeyDown);
@@ -351,6 +382,8 @@ export function makeBetControl(
       hitZone.destroy();
       minusBtn.destroy();
       plusBtn.destroy();
+      halfBtn.destroy();
+      doubleBtn.destroy();
       container.destroy();
     }
   };
