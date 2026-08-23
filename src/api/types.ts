@@ -11,11 +11,10 @@
 export interface MeResponse {
   username: string;
   goldCoins: number;
-  stakeCoins: number;
+  tickets: number;
   skinsOwned: string[];
   equippedSkin: string;
   lastPosition: { x: number; y: number } | null;
-  playthrough: { required: number; wagered: number };
   attendantClaim: { lastClaimedAt: string | null };
   adReward: { lastClaimedAt: string | null };
   /**
@@ -36,7 +35,6 @@ export type GcMultiplier = 0.5 | 1 | 2;
 export interface SignupBonusInfo {
   gcMultiplier: GcMultiplier;
   gcAmount: number;
-  scAmount: number;
 }
 
 /** POST /auth/signup */
@@ -81,7 +79,6 @@ export interface EquipSkinResponse {
 export interface AttendantClaimGrant {
   gcMultiplier: GcMultiplier;
   gcAmount: number;
-  scAmount: number;
 }
 
 /** POST /claim-bonus (200) */
@@ -119,7 +116,8 @@ export interface ApiErrorBody {
 
 // ---- Games (#36 - server-authoritative RNG/payout) ----
 
-export type Currency = "GC" | "SC";
+/** Every `payout` field below is now TICKETS, not GC - see repo-root CLAUDE.md's "arcade token" model. */
+export type Currency = "GC" | "TICKETS";
 
 /** POST /games/dice/play */
 export interface DicePlayResult {

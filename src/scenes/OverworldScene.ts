@@ -1410,7 +1410,7 @@ export class OverworldScene extends Phaser.Scene {
       .setDepth(201);
 
     const balance = this.add
-      .text(400, 288, `Tickets: ${gameState.goldCoins}   |   SC: ${gameState.stakeCoins}`, {
+      .text(400, 288, `Tickets: ${gameState.goldCoins}   |   SC: ${gameState.tickets}`, {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -1470,7 +1470,7 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private updateHud() {
-    this.hudText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
+    this.hudText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.tickets}`);
   }
 
   /** Turns a /skins/buy or /skins/equip failure into a short user-facing toast message. */

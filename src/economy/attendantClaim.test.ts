@@ -13,7 +13,7 @@ describe("Coin Kiosk claim (formerly the Chip Attendant's, #18/#19) - GC only, n
     if (!outcome.ok) return;
     expect(outcome.gcTransaction.type).toBe("AD_REWARD_GC");
     expect(getBalance(ledger, "GC")).toBe(GC_MULTIPLIER_BASE); // default multiplier 1x
-    expect(getBalance(ledger, "SC")).toBe(0);
+    expect(getBalance(ledger, "TICKETS")).toBe(0);
   });
 
   it("is available immediately when never claimed before", () => {
@@ -34,7 +34,7 @@ describe("Coin Kiosk claim (formerly the Chip Attendant's, #18/#19) - GC only, n
 
     // balance must be unchanged by the blocked attempt
     expect(getBalance(ledger, "GC")).toBe(GC_MULTIPLIER_BASE);
-    expect(getBalance(ledger, "SC")).toBe(0);
+    expect(getBalance(ledger, "TICKETS")).toBe(0);
   });
 
   it("allows a claim again once the cooldown has fully elapsed", () => {
@@ -45,7 +45,7 @@ describe("Coin Kiosk claim (formerly the Chip Attendant's, #18/#19) - GC only, n
     const outcome = claimAttendantBonus(ledger, 1_000_000, 1, readyAt);
     expect(outcome.ok).toBe(true);
     expect(getBalance(ledger, "GC")).toBe(GC_MULTIPLIER_BASE * 2);
-    expect(getBalance(ledger, "SC")).toBe(0);
+    expect(getBalance(ledger, "TICKETS")).toBe(0);
   });
 });
 

@@ -1,10 +1,13 @@
 /**
- * Skin shop backend - the API the "floor" front-end should build against.
+ * Skin shop (Item Shop) backend - the API the "floor" front-end should
+ * build against.
  *
- * Economy rule: skins are purchased with GC only, never SC, and skin
- * purchase logic is kept fully separate from SC/redemption/playthrough
- * logic - this module never imports from playthrough.ts or redemption.ts,
- * and never touches the SC side of a LedgerState.
+ * Economy rule: skins are purchased with TICKETS only - the arcade-prize
+ * currency won from playing games (see ledger.ts's doc comment for the
+ * full "arcade token" model: GC to play, TICKETS won from playing). This
+ * used to be GC; changed so there's an actual reason to play the games
+ * beyond chasing a bigger GC balance - TICKETS earned from winning are
+ * what unlock real, spendable items.
  *
  * Ownership (`unlockedSkins: string[]`) is passed in and mutated in place,
  * same pattern as LedgerState - this module has no persistence/storage
@@ -45,22 +48,22 @@ export function ownsSkin(unlockedSkins: readonly string[], id: string): boolean 
   return unlockedSkins.includes(id);
 }
 
-/** Whether the current GC balance covers this skin's price. Does not check ownership. */
+/** Whether the current TICKETS balance covers this skin's price. Does not check ownership. */
 export function canAffordSkin(ledger: LedgerState, id: string): boolean {
   const skin = getSkin(id);
   if (!skin) return false;
-  return getBalance(ledger, "GC") >= skin.price;
+  return getBalance(ledger, "TICKETS") >= skin.price;
 }
 
 export type PurchaseSkinOutcome =
   | { ok: true; skin: SkinDef; transaction: Transaction }
   | { ok: false; reason: "NOT_FOUND" }
   | { ok: false; reason: "ALREADY_OWNED"; skin: SkinDef }
-  | { ok: false; reason: "INSUFFICIENT_GC"; skin: SkinDef; balanceGc: number };
+  | { ok: false; reason: "INSUFFICIENT_TICKETS"; skin: SkinDef; balanceTickets: number };
 
 /**
- * Attempts to buy skin `id` with GC. On success, debits the ledger
- * (SKIN_PURCHASE_GC transaction) and pushes `id` onto `unlockedSkins`.
+ * Attempts to buy skin `id` with TICKETS. On success, debits the ledger
+ * (SKIN_PURCHASE_TICKETS transaction) and pushes `id` onto `unlockedSkins`.
  * Returns a discriminated result instead of throwing - check `.ok` and, on
  * failure, `.reason` to show the right UI state (already owned vs can't
  * afford vs unknown skin id).
@@ -74,12 +77,12 @@ export function purchaseSkin(
   if (!skin) return { ok: false, reason: "NOT_FOUND" };
   if (ownsSkin(unlockedSkins, id)) return { ok: false, reason: "ALREADY_OWNED", skin };
 
-  const balanceGc = getBalance(ledger, "GC");
-  if (balanceGc < skin.price) {
-    return { ok: false, reason: "INSUFFICIENT_GC", skin, balanceGc };
+  const balanceTickets = getBalance(ledger, "TICKETS");
+  if (balanceTickets < skin.price) {
+    return { ok: false, reason: "INSUFFICIENT_TICKETS", skin, balanceTickets };
   }
 
-  const transaction = applyTransaction(ledger, "GC", "SKIN_PURCHASE_GC", -skin.price, {
+  const transaction = applyTransaction(ledger, "TICKETS", "SKIN_PURCHASE_TICKETS", -skin.price, {
     skinId: skin.id
   });
   unlockedSkins.push(id);

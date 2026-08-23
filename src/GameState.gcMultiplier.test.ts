@@ -20,13 +20,13 @@ describe("GameState #27 GC multiplier passthrough", () => {
     const result = gameState.login("liam", "pw");
     expect(result).toEqual({ ok: true, isNew: true });
     expect(gameState.goldCoins).toBe(GC_MULTIPLIER_BASE);
-    expect(gameState.stakeCoins).toBe(25); // SC leg unaffected
+    expect(gameState.tickets).toBe(0); // no starting TICKETS - only ever won by playing
   });
 
   it("login() with an explicit multiplier scales the signup GC grant", () => {
     gameState.login("mia", "pw", 2);
     expect(gameState.goldCoins).toBe(GC_MULTIPLIER_BASE * 2);
-    expect(gameState.stakeCoins).toBe(25); // SC leg still flat
+    expect(gameState.tickets).toBe(0);
   });
 
   it("the multiplier is ignored on re-login (no repeat signup grant)", () => {
@@ -47,13 +47,13 @@ describe("GameState #27 GC multiplier passthrough", () => {
     expect(gameState.goldCoins).toBe(gcBefore + GC_MULTIPLIER_BASE);
   });
 
-  it("claimAttendantBonus() with an explicit multiplier scales the GC grant, no SC leg at all", () => {
+  it("claimAttendantBonus() with an explicit multiplier scales the GC grant, no TICKETS leg at all", () => {
     gameState.login("peter", "pw");
     const gcBefore = gameState.goldCoins;
-    const scBefore = gameState.stakeCoins;
+    const ticketsBefore = gameState.tickets;
     const outcome = gameState.claimAttendantBonus(0.5);
     expect(outcome.ok).toBe(true);
     expect(gameState.goldCoins).toBe(gcBefore + GC_MULTIPLIER_BASE * 0.5);
-    expect(gameState.stakeCoins).toBe(scBefore); // no SC leg any more, regardless of multiplier
+    expect(gameState.tickets).toBe(ticketsBefore); // no TICKETS leg, regardless of multiplier
   });
 });

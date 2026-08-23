@@ -5,10 +5,10 @@
  * POST /auth/login endpoints (see src/api/client.ts) instead of the old
  * localStorage-hashed fake auth, and hydrates this class from the server's
  * response (or GET /me on a silent session restore) via
- * `hydrateFromServer()` below - balances/skins/position/playthrough/
- * attendant-claim cooldown are now server-authoritative for a logged-in
- * session. Position saves, skin buy/equip, and the attendant claim are
- * likewise wired to their real endpoints from OverworldScene.ts.
+ * `hydrateFromServer()` below - balances/skins/position/attendant-claim
+ * cooldown are now server-authoritative for a logged-in session. Position
+ * saves, skin buy/equip, and the attendant claim are likewise wired to
+ * their real endpoints from OverworldScene.ts.
  *
  * What's still local/placeholder: the legacy `login()`/`purchaseSkin()`/
  * `claimAttendantBonus()` methods and the economy/*.ts ledger they call
@@ -27,31 +27,16 @@
  * warnings historically in this file for why that's not acceptable beyond
  * a POC.
  *
- * Economy note: GC and SC balances live behind the transaction ledger in
- * src/economy/ledger.ts - see that module and repo-root CLAUDE.md for the
- * rules (SC never sold directly, 1x playthrough before redemption, skins
- * are GC-only, ad rewards are GC-only, etc). GameState is the persistence
- * + convenience layer on top; it should never assign to a balance number
- * directly - everything routes through applyTransaction (or the
- * dedicated economy/*.ts helpers that call it).
+ * Economy note ("arcade token" model - see ledger.ts's doc comment and
+ * repo-root CLAUDE.md): GC (what you spend to play) and TICKETS (what
+ * winning a game pays out, spent in the Item Shop) live behind the
+ * transaction ledger in src/economy/ledger.ts. GameState is the
+ * persistence + convenience layer on top; it should never assign to a
+ * balance number directly - everything routes through applyTransaction
+ * (or the dedicated economy/*.ts helpers that call it).
  */
 
-import {
-  Currency,
-  LedgerState,
-  Transaction,
-  applyTransaction,
-  createLedger,
-  getBalance
-} from "./economy/ledger";
-import {
-  PlaythroughState,
-  createPlaythroughState,
-  isPlaythroughCleared,
-  playthroughProgressFraction,
-  recordScWager,
-  remainingPlaythrough
-} from "./economy/playthrough";
+import { Currency, LedgerState, Transaction, applyTransaction, createLedger, getBalance } from "./economy/ledger";
 import { grantSignupBonus } from "./economy/signupBonus";
 import { GcMultiplier } from "./economy/gcMultiplier";
 import {
@@ -68,7 +53,6 @@ import {
   PurchaseSkinOutcome,
   purchaseSkin as purchaseSkinInternal
 } from "./economy/skinShop";
-import { RedemptionOutcome, redeemSc as redeemScInternal } from "./economy/redemption";
 import {
   PlaceBetOutcome,
   ResolveBetOutcome,
@@ -119,7 +103,6 @@ const PROFILES_KEY = "casinoPocProfiles";
 interface StoredProfile {
   passwordHash: string;
   ledger: LedgerState;
-  playthrough: PlaythroughState;
   betAmount: number;
   currentSkin: string;
   unlockedSkins: string[];
@@ -131,7 +114,7 @@ interface StoredProfile {
   attendantClaimedAt?: number | null;
 }
 
-/** Shape of profiles written before the ledger existed (flat goldCoins/stakeCoins numbers). */
+/** Shape of profiles written before the ledger existed (flat goldCoins/stakeCoins numbers - "stakeCoins" predates the "arcade token" rebrand, back when the second currency was SC/"Sweeps Coins"). */
 interface LegacyStoredProfile {
   passwordHash: string;
   goldCoins: number;
@@ -149,17 +132,19 @@ function isLegacyProfile(p: StoredProfile | LegacyStoredProfile): p is LegacySto
 
 /**
  * Migrates a pre-ledger profile (flat goldCoins/stakeCoins numbers) into
- * the ledger shape. Existing SC is treated as already-cleared (no
- * retroactive playthrough lock) since we have no record of how it was
- * granted - only newly-granted SC from this point on is gated. Never
- * claimed the attendant bonus under this shape, so its cooldown starts
- * fresh (null - available immediately).
+ * the ledger shape. The old "stakeCoins" balance (SC, under the retired
+ * two-currency sweepstakes model) carries straight over into the new
+ * TICKETS balance 1:1, purely so an old local profile doesn't lose its
+ * balance outright in the migration - the two currencies meant different
+ * things, but there's no more meaningful mapping available than a direct
+ * numeric carry-over for a POC's local-only save data. Never claimed the
+ * attendant bonus under this shape, so its cooldown starts fresh (null -
+ * available immediately).
  */
 function migrateLegacyProfile(legacy: LegacyStoredProfile): StoredProfile {
   return {
     passwordHash: legacy.passwordHash,
     ledger: createLedger(legacy.goldCoins, legacy.stakeCoins),
-    playthrough: createPlaythroughState(),
     betAmount: legacy.betAmount,
     currentSkin: legacy.currentSkin,
     unlockedSkins: legacy.unlockedSkins,
@@ -205,7 +190,6 @@ export type LoginResult =
 
 class GameState {
   private _ledger: LedgerState = createLedger(0, 0);
-  private _playthrough: PlaythroughState = createPlaythroughState();
   private _currentSkin = "player";
   private _betAmount = 25;
   /** ms-since-epoch of the last successful attendant claim (#18/#19), or null if never claimed. */
@@ -253,22 +237,18 @@ class GameState {
   }
 
   /**
-   * Read-only by design (economy rule: SC is NEVER sold/minted outside the
-   * signup bonus and package-bonus paths). Unlike goldCoins, there is
-   * intentionally NO legacy `set stakeCoins` bridge here - QA flagged that
-   * a generic delta-based setter would let a future `gameState.stakeCoins
-   * += X` silently mint SC with no ledger-level guard (ledger.ts now
-   * rejects a crediting ADJUST_SC too, as defense in depth, but the real
-   * fix is not exposing the footgun at all). No current call site ever
-   * assigned to this property (confirmed by grep across every scene), so
-   * removing it is a pure hardening, not a behavior change.
+   * Read-only by design (economy rule: TICKETS are NEVER sold/minted -
+   * they're only ever won by playing a game, see ledger.ts's "arcade
+   * token" model doc comment). No legacy `set tickets` bridge - a
+   * generic delta-based setter would let a future `gameState.tickets +=
+   * X` silently mint TICKETS with no ledger-level guard.
    *
-   * To move SC, use the dedicated ledger-backed methods below:
-   * grant credits via `purchasePackage()` or the signup-bonus flow in
-   * `login()`; debit via `redeemSc()`; track wagering via `recordScWager()`.
+   * To move TICKETS, use the dedicated ledger-backed methods below:
+   * credit via `resolveBet()` (a game round's win); debit via
+   * `purchaseSkin()` (the Item Shop).
    */
-  get stakeCoins() {
-    return getBalance(this._ledger, "SC");
+  get tickets() {
+    return getBalance(this._ledger, "TICKETS");
   }
 
   get currentSkin() {
@@ -334,68 +314,44 @@ class GameState {
 
   // ---- Economy: ledger-backed operations ----
   // These delegate to src/economy/*.ts (pure, unit-testable) and persist
-  // afterwards. Prefer these over the legacy goldCoins/stakeCoins setters
-  // for any new call site.
+  // afterwards. Prefer these over the legacy goldCoins setter for any new
+  // call site.
 
   /** Read-only view of every transaction recorded for the active profile. */
   get transactions(): readonly Transaction[] {
     return this._ledger.transactions;
   }
 
-  get playthroughRequired() {
-    return this._playthrough.required;
-  }
-  get playthroughWagered() {
-    return this._playthrough.wagered;
-  }
-  get playthroughRemaining() {
-    return remainingPlaythrough(this._playthrough);
-  }
-  get playthroughProgress() {
-    return playthroughProgressFraction(this._playthrough);
-  }
-  get isScRedeemable() {
-    return isPlaythroughCleared(this._playthrough);
-  }
-
-  /** Records SC wagered in a game toward clearing the playthrough requirement. Call BEFORE deducting the wager. */
-  recordScWager(amount: number) {
-    recordScWager(this._playthrough, amount);
-    this.save();
-  }
-
   /**
-   * #20 - currency-aware bet lifecycle. Foundational ledger API for games
-   * to wager either GC or SC (previously GC-only via the legacy goldCoins
-   * setter). See src/economy/betting.ts for the full integration guide;
-   * short version:
-   *   const bet = gameState.placeBet(currency, amount);
+   * #20 - bet lifecycle, "arcade token" model. See src/economy/betting.ts
+   * for the full integration guide; short version:
+   *   const bet = gameState.placeBet(amount);
    *   if (!bet.ok) {/* show why, don't start the round *\/ }
    *   // ...run the round...
-   *   gameState.resolveBet(currency, payoutAmount); // 0 payout = total loss, valid
+   *   gameState.resolveBet(ticketsPayout); // 0 payout = total loss, valid
    *
-   * placeBet debits `currency` and, when `currency` is "SC", also counts
-   * `amount` toward clearing the playthrough requirement (recordScWager) -
-   * wagering SC is what clears it, regardless of win/lose. Not wired into
-   * any game scene yet - that integration (plus a GC/SC bet-toggle in the
-   * UI) is a follow-up for games/floor.
+   * placeBet always debits GC (the only wagerable currency now); resolveBet
+   * always credits TICKETS (the only currency a round can win). Not wired
+   * into any game scene yet - that integration is a follow-up for
+   * games/floor (real gameplay already goes through the server-
+   * authoritative equivalent, server/src/games/shared.ts).
    */
-  placeBet(currency: Currency, amount: number): PlaceBetOutcome {
-    const outcome = placeBetInternal(this._ledger, this._playthrough, currency, amount);
+  placeBet(amount: number): PlaceBetOutcome {
+    const outcome = placeBetInternal(this._ledger, amount);
     if (outcome.ok) this.save();
     return outcome;
   }
 
-  /** See `placeBet` above. Credits the round's gross payout (stake + winnings) in `currency`; pass 0 for a total loss. */
-  resolveBet(currency: Currency, payoutAmount: number): ResolveBetOutcome {
-    const outcome = resolveBetInternal(this._ledger, currency, payoutAmount);
+  /** See `placeBet` above. Credits the round's TICKETS payout; pass 0 for a total loss. */
+  resolveBet(ticketsPayout: number): ResolveBetOutcome {
+    const outcome = resolveBetInternal(this._ledger, ticketsPayout);
     if (outcome.transaction) this.save();
     return outcome;
   }
 
-  /** Buys a GC package tier, granting its GC plus its non-linear SC bonus gift (see economy/packages.ts). */
+  /** Buys a GC package tier (see economy/packages.ts). */
   purchasePackage(packageId: string): PackagePurchaseOutcome {
-    const result = purchasePackageInternal(this._ledger, this._playthrough, packageId);
+    const result = purchasePackageInternal(this._ledger, packageId);
     if (result.ok) this.save();
     return result;
   }
@@ -407,18 +363,11 @@ class GameState {
     return tx;
   }
 
-  /** Attempts to redeem `amountSc` of Sweeps Coins (must be playthrough-cleared and >= MIN_SC_REDEMPTION). */
-  redeemSc(amountSc: number): RedemptionOutcome {
-    const outcome = redeemScInternal(this._ledger, this._playthrough, amountSc);
-    if (outcome.ok) this.save();
-    return outcome;
-  }
-
   ownsSkin(id: string): boolean {
     return this.unlockedSkins.includes(id);
   }
 
-  /** Attempts to purchase a skin with GC. Returns false if already owned or can't afford it (see economy/skinShop.ts for the detailed-reason version). */
+  /** Attempts to purchase a skin with TICKETS. Returns false if already owned or can't afford it (see economy/skinShop.ts for the detailed-reason version). */
   purchaseSkin(id: string): boolean {
     const outcome: PurchaseSkinOutcome = purchaseSkinInternal(
       this._ledger,
@@ -506,9 +455,9 @@ class GameState {
    * resolved shuffle-cup outcome (0.5x/1x/2x, see economy/gcMultiplier.ts)
    * for the signup bonus's GC leg, from games/floor's mini-game (#28/#29).
    * Defaults to 1 (= 1000 GC, the pre-#27 fixed amount), so existing call
-   * sites (e.g. LoginScene.ts) work unchanged until that's wired up. The
-   * 25 SC signup bonus is unaffected either way. Ignored when logging into
-   * an existing profile (no new bonus is granted on re-login).
+   * sites (e.g. LoginScene.ts) work unchanged until that's wired up.
+   * Ignored when logging into an existing profile (no new bonus is
+   * granted on re-login).
    */
   login(usernameRaw: string, password: string, gcMultiplier: GcMultiplier = 1): LoginResult {
     const username = usernameRaw.trim();
@@ -527,9 +476,8 @@ class GameState {
         ? migrateLegacyProfile(existingRaw)
         : existingRaw;
 
-      this._ledger = createLedger(existing.ledger.gc, existing.ledger.sc);
+      this._ledger = createLedger(existing.ledger.gc, existing.ledger.tickets);
       this._ledger.transactions = [...existing.ledger.transactions];
-      this._playthrough = { ...existing.playthrough };
       this._betAmount = existing.betAmount;
       this._currentSkin = existing.currentSkin;
       this.unlockedSkins = [...existing.unlockedSkins];
@@ -541,20 +489,18 @@ class GameState {
 
     // New username - create a fresh profile with default starting state,
     // including the no-deposit signup bonus (#27: GC leg resolved from
-    // gcMultiplier, SC leg flat 25, both with the SC playthrough lock).
+    // gcMultiplier).
     this._ledger = createLedger(0, 0);
-    this._playthrough = createPlaythroughState();
     this._betAmount = 25;
     this._currentSkin = "player";
     this.unlockedSkins = ["player"];
     this._attendantClaimedAt = null;
     this.activeUsername = username;
-    grantSignupBonus(this._ledger, this._playthrough, gcMultiplier);
+    grantSignupBonus(this._ledger, gcMultiplier);
 
     profiles[username] = {
       passwordHash: hash,
       ledger: this._ledger,
-      playthrough: this._playthrough,
       betAmount: this._betAmount,
       currentSkin: this._currentSkin,
       unlockedSkins: this.unlockedSkins,
@@ -569,9 +515,9 @@ class GameState {
    * MeResponse (the `user` field of POST /auth/signup, POST /auth/login,
    * POST /skins/buy|equip, POST /claim-bonus, or a plain GET /me) instead
    * of a localStorage profile. Call this after every one of those calls
-   * succeeds so every getter below (goldCoins, stakeCoins, unlockedSkins,
-   * currentSkin, lastPlayerPosition, playthrough*, attendantClaim*)
-   * reflects the server's authoritative state.
+   * succeeds so every getter below (goldCoins, tickets, unlockedSkins,
+   * currentSkin, lastPlayerPosition, attendantClaim*) reflects the
+   * server's authoritative state.
    *
    * Deliberately does NOT call `save()` - there is no more local profile to
    * write; the server is the source of truth for a hydrated session. The
@@ -583,8 +529,7 @@ class GameState {
    */
   hydrateFromServer(me: MeResponse) {
     this.activeUsername = me.username;
-    this._ledger = createLedger(me.goldCoins, me.stakeCoins);
-    this._playthrough = { required: me.playthrough.required, wagered: me.playthrough.wagered };
+    this._ledger = createLedger(me.goldCoins, me.tickets);
     this.unlockedSkins = [...me.skinsOwned];
     this._currentSkin = me.equippedSkin;
     this.lastPlayerPosition = me.lastPosition ? { x: me.lastPosition.x, y: me.lastPosition.y } : null;
@@ -610,7 +555,6 @@ class GameState {
     profiles[this.activeUsername] = {
       passwordHash,
       ledger: this._ledger,
-      playthrough: this._playthrough,
       betAmount: this._betAmount,
       currentSkin: this._currentSkin,
       unlockedSkins: this.unlockedSkins,

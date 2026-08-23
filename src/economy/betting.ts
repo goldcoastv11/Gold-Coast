@@ -1,135 +1,86 @@
 /**
- * Foundational, currency-aware bet lifecycle (#20).
+ * Foundational bet lifecycle (#20) - "arcade token" model.
  *
- * Every game currently wagers GC only, going straight at
- * `gameState.goldCoins -=/+= amount` (which is itself ledger-backed
- * internally, just not currency-generic or semantically-typed as a wager -
- * see the ADJUST_GC comment in ledger.ts). This module is the ledger-side
- * foundation for letting games wager SC too, per the standard sweepstakes
- * model: SC is wagerable anytime (no playthrough gate on placing a bet -
- * that would be backwards, since wagering SC is HOW the playthrough
- * requirement clears), and only redemption is gated on playthrough being
- * cleared (see redemption.ts / playthrough.ts).
+ * Every game wagers GC only (the token you spend to play, from the Coin
+ * Kiosk or a real-money package purchase) and pays out TICKETS only (the
+ * prize currency, spent in the Item Shop) - see repo-root CLAUDE.md and
+ * ledger.ts's doc comment for the full model. GC is always spent whether a
+ * round is won or lost, exactly like inserting an arcade token; a win
+ * doesn't return/grow GC, it credits TICKETS instead.
  *
- * Scope note: this is ledger-layer plumbing only. Wiring it into the bet
- * control UI (a GC/SC toggle) and into each game scene's win/lose flow is
- * an explicit follow-up for games/floor, not done here - see the
- * "Integration guide for games/floor" doc comment below.
+ * Real gameplay is server-authoritative (server/src/games/shared.ts's
+ * settleSingleShotBet/placeWager/settlePayout are the equivalent that
+ * actually runs) - this client-side module isn't wired into any scene's
+ * win/lose flow, same as it never was. It exists as ledger-layer plumbing
+ * and, more importantly now, as the surface economy.qa.test.ts's
+ * independent invariant checks exercise.
  *
- * ---- Integration guide for games/floor ----
+ * ---- Usage ----
  * For each round of play:
- *   1. Call `placeBet(ledger, playthrough, currency, amount)` when the
- *      player commits to a bet. Check `.ok` - on `false`, the bet was
- *      rejected (bad amount or insufficient balance in that currency) and
- *      nothing was debited; show that in the UI and don't start the round.
- *      On `true`, `amount` has already been debited from `currency` and,
- *      if `currency === "SC"`, that amount already counted toward clearing
- *      the playthrough requirement (regardless of whether the round is won
- *      or lost - wagering is what counts, not winning).
+ *   1. Call `placeBet(ledger, amount)`. Check `.ok` - on `false`, the bet
+ *      was rejected (bad amount or insufficient GC) and nothing was
+ *      debited. On `true`, `amount` GC has already been debited.
  *   2. Run the game's own round logic (deal cards, spin reels, etc.) -
  *      unrelated to this module.
- *   3. Call `resolveBet(ledger, currency, payoutAmount)` with the same
- *      currency and however much the round paid out (0 for a total loss -
- *      that's valid and intentionally a no-op credit, not an error; pass
- *      the gross return, e.g. a 2x win on a 10 SC bet resolves with
- *      payoutAmount 20, not just the 10 profit).
+ *   3. Call `resolveBet(ledger, ticketsPayout)` with however many TICKETS
+ *      the round paid out (0 for a loss - valid, a no-op).
  *
- * `placeBet`/`resolveBet` operate on one currency per call - a single game
- * round is either a GC round or an SC round, never a mix. If/when the UI
- * adds a GC/SC toggle, that's what should decide which `currency` a given
- * round's placeBet/resolveBet pair uses.
- *
- * On GameState, these are exposed as `gameState.placeBet(currency, amount)`
- * and `gameState.resolveBet(currency, payoutAmount)`.
+ * On GameState, these are exposed as `gameState.placeBet(amount)` and
+ * `gameState.resolveBet(ticketsPayout)`.
  */
 
-import {
-  Currency,
-  LedgerState,
-  Transaction,
-  applyTransaction,
-  canAfford,
-  getBalance
-} from "./ledger";
-import { PlaythroughState, recordScWager } from "./playthrough";
+import { LedgerState, Transaction, applyTransaction, canAfford, getBalance } from "./ledger";
 
 export type PlaceBetOutcome =
-  | { ok: true; currency: Currency; amount: number; transaction: Transaction }
-  | { ok: false; reason: "INVALID_AMOUNT"; currency: Currency; amount: number }
-  | { ok: false; reason: "INSUFFICIENT_BALANCE"; currency: Currency; amount: number; balance: number };
+  | { ok: true; amount: number; transaction: Transaction }
+  | { ok: false; reason: "INVALID_AMOUNT"; amount: number }
+  | { ok: false; reason: "INSUFFICIENT_BALANCE"; amount: number; balance: number };
 
-/**
- * Debits `amount` of `currency` as a wager (WAGER_GC/WAGER_SC transaction).
- * If `currency` is "SC", also records `amount` toward the playthrough
- * requirement via `recordScWager` - wagering SC is what clears it,
- * independent of whether the round is later won or lost. Never throws;
- * check `.ok`.
- */
-export function placeBet(
-  ledger: LedgerState,
-  playthrough: PlaythroughState,
-  currency: Currency,
-  amount: number
-): PlaceBetOutcome {
+/** Debits `amount` GC as a wager (WAGER_GC transaction). Never throws; check `.ok`. */
+export function placeBet(ledger: LedgerState, amount: number): PlaceBetOutcome {
   if (!Number.isFinite(amount) || amount <= 0) {
-    return { ok: false, reason: "INVALID_AMOUNT", currency, amount };
+    return { ok: false, reason: "INVALID_AMOUNT", amount };
   }
 
-  if (!canAfford(ledger, currency, amount)) {
+  if (!canAfford(ledger, "GC", amount)) {
     return {
       ok: false,
       reason: "INSUFFICIENT_BALANCE",
-      currency,
       amount,
-      balance: getBalance(ledger, currency)
+      balance: getBalance(ledger, "GC")
     };
   }
 
-  const type = currency === "GC" ? "WAGER_GC" : "WAGER_SC";
-  const transaction = applyTransaction(ledger, currency, type, -amount);
-
-  if (currency === "SC") {
-    recordScWager(playthrough, amount);
-  }
-
-  return { ok: true, currency, amount, transaction };
+  const transaction = applyTransaction(ledger, "GC", "WAGER_GC", -amount);
+  return { ok: true, amount, transaction };
 }
 
 export type ResolveBetOutcome = {
   ok: true;
-  currency: Currency;
   payout: number;
   /** null when payout is 0 (a total loss) - there's nothing to credit, so no transaction is recorded. */
   transaction: Transaction | null;
 };
 
 /**
- * Credits `payoutAmount` of `currency` as a round's payout (PAYOUT_GC/
- * PAYOUT_SC transaction). Pass the gross return (stake + winnings), not
- * just profit. `payoutAmount` of 0 is valid (a total loss) and simply
- * records no transaction, since applyTransaction rejects a zero amount -
- * callers can unconditionally call this after every round without special
- * casing a loss. Throws only on a malformed (negative/non-finite) amount,
- * which indicates a bug in the caller's payout math, not a normal game
- * outcome.
+ * Credits `ticketsPayout` TICKETS as a round's win (GAME_WIN_TICKETS
+ * transaction). `ticketsPayout` of 0 is valid (a loss) and simply records
+ * no transaction, since applyTransaction rejects a zero amount - callers
+ * can unconditionally call this after every round without special-casing
+ * a loss. Throws only on a malformed (negative/non-finite) amount, which
+ * indicates a bug in the caller's payout math, not a normal game outcome.
  */
-export function resolveBet(
-  ledger: LedgerState,
-  currency: Currency,
-  payoutAmount: number
-): ResolveBetOutcome {
-  if (!Number.isFinite(payoutAmount) || payoutAmount < 0) {
+export function resolveBet(ledger: LedgerState, ticketsPayout: number): ResolveBetOutcome {
+  if (!Number.isFinite(ticketsPayout) || ticketsPayout < 0) {
     throw new Error(
-      `resolveBet: payoutAmount must be a non-negative finite number, got ${payoutAmount}`
+      `resolveBet: ticketsPayout must be a non-negative finite number, got ${ticketsPayout}`
     );
   }
 
-  if (payoutAmount === 0) {
-    return { ok: true, currency, payout: 0, transaction: null };
+  if (ticketsPayout === 0) {
+    return { ok: true, payout: 0, transaction: null };
   }
 
-  const type = currency === "GC" ? "PAYOUT_GC" : "PAYOUT_SC";
-  const transaction = applyTransaction(ledger, currency, type, payoutAmount);
-
-  return { ok: true, currency, payout: payoutAmount, transaction };
+  const transaction = applyTransaction(ledger, "TICKETS", "GAME_WIN_TICKETS", ticketsPayout);
+  return { ok: true, payout: ticketsPayout, transaction };
 }

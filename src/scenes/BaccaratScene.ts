@@ -314,6 +314,6 @@ export class BaccaratScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
+    this.balanceText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.tickets}`);
   }
 }

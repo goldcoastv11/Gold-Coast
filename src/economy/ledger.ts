@@ -1,21 +1,29 @@
 /**
  * Transaction ledger — the single source of truth for GC (Gold Coin) and
- * SC (Sweeps Coin) balances.
+ * TICKETS balances.
  *
- * Per the project economy rules (see repo-root CLAUDE.md):
- *   - GC and SC are separate ledgers (tracked as two fields on one
- *     LedgerState, never conflated or convertible into one another).
- *   - No code anywhere should mutate a balance number directly - every
- *     change (purchase, payout, wager, bonus, redemption, skin buy, ad
- *     reward) must go through `applyTransaction` so there is always a full,
- *     inspectable audit trail.
+ * Per the project economy rules (see repo-root CLAUDE.md), this is the
+ * "arcade token" model: GC is what you spend to play (from the Coin Kiosk,
+ * free, or a real-money package purchase - see packages.ts), and is always
+ * spent whether a round is won or lost, exactly like inserting a token
+ * into an arcade cabinet. Winning a round doesn't return/grow your GC - it
+ * pays out TICKETS instead, a completely separate currency with no
+ * real-money value, spendable only in the Item Shop. This replaced an
+ * earlier GC/SC ("Sweeps Coin") sweepstakes-style model entirely - there
+ * is no real-money redemption of anything in this game any more.
+ *
+ * GC and TICKETS are separate ledgers (tracked as two fields on one
+ * LedgerState, never conflated or convertible into one another). No code
+ * anywhere should mutate a balance number directly - every change
+ * (purchase, payout, wager, bonus, skin buy) must go through
+ * `applyTransaction` so there is always a full, inspectable audit trail.
  *
  * This module is intentionally pure/side-effect-free (no localStorage, no
  * DOM, no Phaser) so it's trivial to unit test - it just mutates the
  * LedgerState object it's given and returns the resulting Transaction.
  */
 
-export type Currency = "GC" | "SC";
+export type Currency = "GC" | "TICKETS";
 
 /**
  * Every distinct reason a balance can change. Keeping this as a closed
@@ -23,33 +31,25 @@ export type Currency = "GC" | "SC";
  * you every code path that can move money, and QA can assert on it.
  */
 export type TransactionType =
-  // SC bonus - the ONLY two legitimate sources of SC (never sold directly)
-  | "SIGNUP_BONUS_SC"
-  | "PACKAGE_BONUS_SC"
   // GC leg of the signup bonus (#27 - resolved GC amount, see
-  // economy/gcMultiplier.ts). Separate from SIGNUP_BONUS_SC above so each
-  // currency's grant is independently auditable even though both happen
-  // as part of the same signup event.
+  // economy/gcMultiplier.ts).
   | "SIGNUP_BONUS_GC"
-  // GC purchase
+  // Real-money GC purchase
   | "PACKAGE_GC"
-  // GC-only skin shop
-  | "SKIN_PURCHASE_GC"
-  // GC-only ad-reward refill
+  // GC-only ad-reward refill (Coin Kiosk's ad-gated claim)
   | "AD_REWARD_GC"
-  // SC redemption (cash-out), always a debit
-  | "REDEMPTION_SC"
-  // Gameplay wagers/payouts, tagged by currency
+  // A game round's TICKETS win - the only way TICKETS are ever credited.
+  | "GAME_WIN_TICKETS"
+  // TICKETS spent in the Item Shop - the only way TICKETS are ever debited.
+  | "SKIN_PURCHASE_TICKETS"
+  // Gameplay wagers, always GC (arcade token model - the bet is spent
+  // whether the round is won or lost; see GAME_WIN_TICKETS for the payout)
   | "WAGER_GC"
-  | "WAGER_SC"
-  | "PAYOUT_GC"
-  | "PAYOUT_SC"
   // Generic adjustment - used only as a bridge for legacy call sites
   // (existing game scenes that do `gameState.goldCoins -= bet`) until
-  // they're migrated to call WAGER_GC/PAYOUT_GC explicitly. Still goes
-  // through the ledger, still fully audited.
-  | "ADJUST_GC"
-  | "ADJUST_SC";
+  // they're migrated to call WAGER_GC explicitly. Still goes through the
+  // ledger, still fully audited.
+  | "ADJUST_GC";
 
 export interface Transaction {
   id: string;
@@ -66,7 +66,7 @@ export interface Transaction {
 
 export interface LedgerState {
   gc: number;
-  sc: number;
+  tickets: number;
   transactions: Transaction[];
 }
 
@@ -87,22 +87,17 @@ function nextTransactionId(): string {
   return `tx_${Date.now().toString(36)}_${txCounter.toString(36)}`;
 }
 
-export function createLedger(initialGc = 0, initialSc = 0): LedgerState {
-  return { gc: initialGc, sc: initialSc, transactions: [] };
+export function createLedger(initialGc = 0, initialTickets = 0): LedgerState {
+  return { gc: initialGc, tickets: initialTickets, transactions: [] };
 }
 
 /**
- * The one and only place a GC or SC balance number is allowed to change.
- * Mutates `state` in place and appends a Transaction record; returns that
- * record. Throws InsufficientBalanceError rather than letting a balance go
- * negative - callers that want a friendlier UX should check affordability
- * (e.g. via getBalance) before calling this and surface their own message.
- *
- * Hardening (economy rule: SC is NEVER sold/minted outside the signup
- * bonus and package-bonus paths): a positive (crediting) "ADJUST_SC" is
- * rejected outright. ADJUST_SC exists only as a debit-capable bridge for
- * legacy call sites - it must never be the thing that puts new SC into a
- * balance. Real SC credits must use SIGNUP_BONUS_SC or PACKAGE_BONUS_SC.
+ * The one and only place a GC or TICKETS balance number is allowed to
+ * change. Mutates `state` in place and appends a Transaction record;
+ * returns that record. Throws InsufficientBalanceError rather than letting
+ * a balance go negative - callers that want a friendlier UX should check
+ * affordability (e.g. via getBalance) before calling this and surface
+ * their own message.
  */
 export function applyTransaction(
   state: LedgerState,
@@ -117,15 +112,7 @@ export function applyTransaction(
     );
   }
 
-  if (currency === "SC" && type === "ADJUST_SC" && amount > 0) {
-    throw new Error(
-      "applyTransaction: ADJUST_SC cannot credit SC. SC may only be granted " +
-        "via SIGNUP_BONUS_SC (signupBonus.ts) or PACKAGE_BONUS_SC " +
-        "(packages.ts) - see repo-root CLAUDE.md. ADJUST_SC may only debit."
-    );
-  }
-
-  const balanceKey = currency === "GC" ? "gc" : "sc";
+  const balanceKey = currency === "GC" ? "gc" : "tickets";
   const current = state[balanceKey];
   const next = current + amount;
 
@@ -149,7 +136,7 @@ export function applyTransaction(
 }
 
 export function getBalance(state: LedgerState, currency: Currency): number {
-  return currency === "GC" ? state.gc : state.sc;
+  return currency === "GC" ? state.gc : state.tickets;
 }
 
 /** True if a debit of `amount` from `currency` would succeed without throwing. */
