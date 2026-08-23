@@ -191,53 +191,58 @@ export class BootScene extends Phaser.Scene {
    * darker fleck pattern so it doesn't read as a dead flat void. Drawn
    * procedurally (see class doc comment) instead of a loaded PNG.
    */
+  /**
+   * Outer plaza floor, 16x16 - flat near-black, with only the faintest
+   * darker fleck so it doesn't read as a dead flat void. Per user
+   * direction ("I need the floor to be quieter so the games pop"), kept
+   * deliberately close to featureless - anything busier competes with the
+   * white game cabinets for attention.
+   */
   private createFloorTanTexture() {
     const s = 16;
     const g = this.add.graphics();
     g.fillStyle(0x14161c, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x0e0f14, 1);
-    g.fillCircle(4, 4, 1);
-    g.fillCircle(11, 9, 1);
-    g.fillCircle(7, 13, 0.8);
+    g.fillStyle(0x101218, 1);
+    g.fillCircle(4, 4, 0.8);
+    g.fillCircle(11, 9, 0.8);
     g.generateTexture("floor_tan", s, s);
     g.destroy();
   }
 
   /**
-   * Gaming-floor "rug" tile, 16x16 - a dark maroon-black patterned carpet,
-   * the classic arcade/bowling-alley carpet look. `carpet_blue` (below) is
-   * the existing 1-in-5-tile accent inside this same rug area. Bordered in
-   * orange (was a near-black internal pattern line, per user direction -
-   * a near-black line on an already near-black tile just read as "black
-   * carpet grid," not an intentional accent).
+   * Gaming-floor "rug" tile, 16x16 - a flat, quiet dark navy-black fill.
+   * Per user direction, simplified twice over: first from a busier
+   * pattern-line version, then further after "the floor needs to be
+   * quieter so the games pop" - no per-tile border/grid line at all now
+   * (an earlier orange-bordered version read as a loud repeating lattice
+   * across the whole rug, the opposite of quiet), just the barest hint of
+   * fleck texture so it doesn't read as a dead flat void. `createCarpet
+   * RedTexture` below matches the same quiet treatment even though
+   * nothing currently places that key (kept for parity/future use).
    */
-  private createCarpetRedTexture() {
-    const s = 16;
-    const g = this.add.graphics();
-    g.fillStyle(0x2a0f10, 1);
-    g.fillRect(0, 0, s, s);
-    g.lineStyle(1, PALETTE.coral, 0.9);
-    g.strokeRect(0.5, 0.5, s - 1, s - 1);
-    g.fillStyle(PALETTE.coral, 0.25);
-    g.fillCircle(4, 4, 1.1);
-    g.fillCircle(12, 12, 1.1);
-    g.generateTexture("carpet_red", s, s);
-    g.destroy();
-  }
-
-  /** Rug accent tile (1-in-5, see buildFloor()) - a dark navy-black variant of carpet_red, same orange border treatment. */
   private createCarpetBlueTexture() {
     const s = 16;
     const g = this.add.graphics();
     g.fillStyle(0x0f1526, 1);
     g.fillRect(0, 0, s, s);
-    g.lineStyle(1, PALETTE.coral, 0.9);
-    g.strokeRect(0.5, 0.5, s - 1, s - 1);
-    g.fillStyle(PALETTE.sky, 0.25);
-    g.fillCircle(4, 4, 1.1);
-    g.fillCircle(12, 12, 1.1);
+    g.fillStyle(0x0c111f, 1);
+    g.fillCircle(4, 4, 0.8);
+    g.fillCircle(12, 12, 0.8);
     g.generateTexture("carpet_blue", s, s);
+    g.destroy();
+  }
+
+  /** Same quiet treatment as createCarpetBlueTexture, unused key kept for parity/future use - see that method's doc comment. */
+  private createCarpetRedTexture() {
+    const s = 16;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a0f10, 1);
+    g.fillRect(0, 0, s, s);
+    g.fillStyle(0x210c0d, 1);
+    g.fillCircle(4, 4, 0.8);
+    g.fillCircle(12, 12, 0.8);
+    g.generateTexture("carpet_red", s, s);
     g.destroy();
   }
 

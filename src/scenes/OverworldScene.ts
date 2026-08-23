@@ -1775,19 +1775,16 @@ export class OverworldScene extends Phaser.Scene {
     for (let x = 0; x < MAP_COLS; x++) {
       for (let y = 0; y < MAP_ROWS; y++) {
         const inRug = x > 16 && x < 64 && y > 10 && y < 46;
-        let key = "floor_tan";
-        if (inRug) {
-          // "floor_tan"/"carpet_red"/"carpet_blue" are Kenney RPG Urban
-          // Pack tiles (see BootScene.ts preload). The rug used to be
-          // dominantly carpet_red - per user request ("change the main
-          // floor from red to something that makes the games pop"), the
-          // roles are flipped: cool gray-blue flagstone (carpet_blue) is
-          // now the dominant rug fill, with a sparse warm-tan (floor_tan)
-          // accent. A cool, calmer floor sits behind the furniture - warm
-          // terracotta cabinets, mint felt tables, gold/coral accents -
-          // without competing with it the way a saturated red rug did.
-          key = (x + y) % 5 === 0 ? "floor_tan" : "carpet_blue";
-        }
+        // "floor_tan"/"carpet_blue" are procedurally-drawn dark tiles (see
+        // BootScene.ts). Per user direction ("I need the floor to be
+        // quieter so the games pop"), the rug is now a single uniform fill
+        // - it used to alternate with a 1-in-5 floor_tan accent tile in a
+        // visible diagonal stripe, which (combined with carpet_blue's own
+        // per-tile pattern - see that texture's doc comment) added up to
+        // more visual noise competing with the now-white game cabinets for
+        // attention than an intentional accent. One flat, quiet fill lets
+        // the furniture be the thing your eye lands on.
+        const key = inRug ? "carpet_blue" : "floor_tan";
         this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key);
       }
     }
