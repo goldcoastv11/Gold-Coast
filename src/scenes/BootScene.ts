@@ -212,14 +212,15 @@ export class BootScene extends Phaser.Scene {
 
   /**
    * Gaming-floor "rug" tile, 16x16 - a flat, quiet dark navy-black fill.
-   * Per user direction, simplified twice over: first from a busier
-   * pattern-line version, then further after "the floor needs to be
-   * quieter so the games pop" - no per-tile border/grid line at all now
-   * (an earlier orange-bordered version read as a loud repeating lattice
-   * across the whole rug, the opposite of quiet), just the barest hint of
-   * fleck texture so it doesn't read as a dead flat void. `createCarpet
-   * RedTexture` below matches the same quiet treatment even though
-   * nothing currently places that key (kept for parity/future use).
+   * Simplified twice over: first from a busier pattern-line version, then
+   * further after "the floor needs to be quieter so the games pop" (no
+   * per-tile border/grid line - an earlier orange-bordered version read as
+   * a loud repeating lattice across the whole rug). Per a follow-up
+   * direction ("add a little bit of orange... just a little bit"), one
+   * small low-alpha orange fleck is back in alongside the existing near-
+   * black ones - present on every tile but faint/small enough to read as
+   * a subtle warm sparkle throughout, not a repeating loud pattern like
+   * the removed border was.
    */
   private createCarpetBlueTexture() {
     const s = 16;
@@ -229,6 +230,8 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(0x0c111f, 1);
     g.fillCircle(4, 4, 0.8);
     g.fillCircle(12, 12, 0.8);
+    g.fillStyle(PALETTE.coral, 0.18);
+    g.fillCircle(9, 5, 0.9);
     g.generateTexture("carpet_blue", s, s);
     g.destroy();
   }
