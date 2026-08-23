@@ -218,7 +218,7 @@ export class VideoPokerScene extends Phaser.Scene {
 
   private deal() {
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -270,7 +270,7 @@ export class VideoPokerScene extends Phaser.Scene {
         this.busy = false;
         this.actionBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
-        this.showApiError(err, "Not enough Gold Coins!");
+        this.showApiError(err, "Not enough Tickets!");
       });
   }
 
@@ -311,7 +311,7 @@ export class VideoPokerScene extends Phaser.Scene {
           if (res.multiplier === 1) {
             this.messageText.setText(`${res.rank} - push, bet returned`).setColor(Theme.textGold);
           } else {
-            this.messageText.setText(`${res.rank}! +${res.payout} GC`).setColor(Theme.textAccent);
+            this.messageText.setText(`${res.rank}! +${res.payout} Tickets`).setColor(Theme.textAccent);
             popIn(this, this.messageText);
           }
         } else {
@@ -343,7 +343,7 @@ export class VideoPokerScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

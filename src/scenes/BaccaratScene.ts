@@ -215,7 +215,7 @@ export class BaccaratScene extends Phaser.Scene {
     if (this.dealing) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -272,7 +272,7 @@ export class BaccaratScene extends Phaser.Scene {
         );
       } else {
         this.messageText
-          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} GC`)
+          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} Tickets`)
           .setColor(Theme.textAccent);
         popIn(this, this.messageText);
       }
@@ -294,7 +294,7 @@ export class BaccaratScene extends Phaser.Scene {
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(true));
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
     } else if (err instanceof NetworkError) {
       this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
@@ -304,7 +304,7 @@ export class BaccaratScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

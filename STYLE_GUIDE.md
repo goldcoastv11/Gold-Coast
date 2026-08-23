@@ -1,4 +1,16 @@
-# Style Guide — "Bright Social-Hub" Reskin
+# Style Guide — "Bright Social-Hub" Reskin (SUPERSEDED)
+
+> **Superseded by the "Arcade Nights" reskin** (Gold Coast Arcade rebrand -
+> dark charcoal/navy surfaces, orange + white brand accents, per direction
+> "look more like Dave and Busters"). The palette/direction notes below no
+> longer reflect the live UI - `Theme.ts` and `BootScene.ts`'s `PALETTE`
+> constant are the source of truth for current colors. This doc is kept
+> because its **asset sourcing/licensing/attribution sections (the Kenney
+> "RPG Urban Pack" CC0 pack, character sheet layout, tile file locations)
+> are still accurate and still in use** - only the *color* direction below
+> is stale. Notably, direction note 2's "never pure black" rule is now
+> explicitly inverted: true dark/near-black surfaces are the whole point of
+> the new direction, not something to avoid.
 
 Task #21. Goal: restyle the whole game to evoke Animal Jam's aesthetic — bright,
 saturated, playful, nature/social-hub vibe — **without copying any of Animal

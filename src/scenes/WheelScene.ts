@@ -276,7 +276,7 @@ export class WheelScene extends Phaser.Scene {
     if (this.spinning) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -314,7 +314,7 @@ export class WheelScene extends Phaser.Scene {
     const { multiplier, payout } = res.result;
 
     if (payout > 0) {
-      this.messageText.setText(`Landed on ${multiplier}x! +${payout} GC`).setColor(Theme.textAccent);
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.legendText);
     } else {
       this.messageText.setText("Landed on 0x - you lose").setColor(Theme.textDanger);
@@ -334,7 +334,7 @@ export class WheelScene extends Phaser.Scene {
     Object.values(this.riskButtons).forEach((b) => b?.setEnabled(true));
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
     } else if (err instanceof NetworkError) {
       this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
@@ -344,7 +344,7 @@ export class WheelScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

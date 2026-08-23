@@ -186,7 +186,7 @@ export class DragonTowerScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -243,7 +243,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.busy = false;
         this.startBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
-        this.showApiError(err, "Not enough Gold Coins!");
+        this.showApiError(err, "Not enough Tickets!");
       });
   }
 
@@ -338,7 +338,7 @@ export class DragonTowerScene extends Phaser.Scene {
         if (res.reachedTop) {
           this.active = false;
           this.revealTower(res.badIndexPerRow ?? [], null);
-          this.messageText.setText(`Reached the top! +${res.payout ?? 0} GC`).setColor(Theme.textAccent);
+          this.messageText.setText(`Reached the top! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
           this.endRun();
           return;
@@ -370,7 +370,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.busy = false;
         this.active = false;
         this.revealTower(res.badIndexPerRow, null);
-        this.messageText.setText(`Cashed out! +${res.payout} GC`).setColor(Theme.textAccent);
+        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
         this.endRun();
       })
@@ -411,7 +411,7 @@ export class DragonTowerScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

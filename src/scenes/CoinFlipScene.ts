@@ -139,7 +139,7 @@ export class CoinFlipScene extends Phaser.Scene {
     if (this.flipping) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -188,7 +188,7 @@ export class CoinFlipScene extends Phaser.Scene {
 
     const { result, won, payout } = res.result;
     if (won) {
-      this.messageText.setText(`${result.toUpperCase()}! You win +${payout} GC`).setColor(Theme.textAccent);
+      this.messageText.setText(`${result.toUpperCase()}! You win +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.coinText);
     } else {
       this.messageText.setText(`${result.toUpperCase()} - you lose`).setColor(Theme.textDanger);
@@ -227,7 +227,7 @@ export class CoinFlipScene extends Phaser.Scene {
     this.coinText.setText("🪙");
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
     } else if (err instanceof NetworkError) {
       this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
@@ -242,7 +242,7 @@ export class CoinFlipScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

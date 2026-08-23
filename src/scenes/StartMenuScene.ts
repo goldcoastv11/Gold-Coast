@@ -23,11 +23,11 @@ export class StartMenuScene extends Phaser.Scene {
     makePanel(this, 400, 300, 460, 340);
 
     this.add
-      .text(400, 200, "🎰", { fontSize: "64px" })
+      .text(400, 200, "🕹️", { fontSize: "64px" })
       .setOrigin(0.5);
 
     this.add
-      .text(400, 270, "GOLD COAST CASINO", {
+      .text(400, 270, "GOLD COAST ARCADE", {
         fontSize: "26px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -58,7 +58,7 @@ export class StartMenuScene extends Phaser.Scene {
       365,
       240,
       56,
-      "ENTER CASINO",
+      "ENTER ARCADE",
       Theme.accent,
       Theme.accentHover,
       () => fadeToScene(this, "OverworldScene", { startTutorial: data?.startTutorial })

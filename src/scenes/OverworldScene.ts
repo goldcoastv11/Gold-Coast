@@ -422,13 +422,14 @@ export class OverworldScene extends Phaser.Scene {
       fadeToScene(this, "StartMenuScene");
     });
 
-    // Skin Attendant - buy new looks for your character
+    // Item Shop (was "Skin Attendant" - rebrand only, same skin-purchase
+    // mechanic underneath) - buy new looks for your character
     const skinAttendant = this.physics.add.staticSprite(40 * TILE, 18 * TILE, "skin_000", 1);
     this.physics.add.collider(this.player, skinAttendant);
     this.registerStation(
       skinAttendant,
-      "Skin Attendant",
-      "Press E to browse skins",
+      "Item Shop",
+      "Press E to browse the Item Shop",
       () => this.openSkinPanel("shop")
     );
 
@@ -570,7 +571,7 @@ export class OverworldScene extends Phaser.Scene {
     const steps: TutorialStep[] = [
       {
         title: "Welcome to Gold Coast!",
-        text: "You just played the Shuffle Cups for your starting Gold Coins - shuffle, pick a cup, and reveal your prize. You'll see that again any time you get a bonus."
+        text: "You just played the Shuffle Cups for your starting Tickets - shuffle, pick a cup, and reveal your prize. You'll see that again any time you get a bonus."
       },
       {
         title: "This Is You",
@@ -721,8 +722,8 @@ export class OverworldScene extends Phaser.Scene {
         40 * TILE,
         18 * TILE,
         40,
-        "Skin Attendant",
-        "Walk up to the Skin Attendant and press E, then buy a skin to wear it!",
+        "Item Shop",
+        "Walk up to the Item Shop and press E, then buy a skin to wear it!",
         // Skip means "skip THIS step" (per user direction) - this is the
         // LAST step though, so "move to the next one" has nowhere left to
         // go and is the same as finishing.
@@ -1357,7 +1358,7 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private updateHud() {
-    this.hudText.setText(`🪙 ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
+    this.hudText.setText(`🎟️ ${gameState.goldCoins}   💰 ${gameState.stakeCoins}`);
   }
 
   /** Turns a /skins/buy or /skins/equip failure into a short user-facing toast message. */
@@ -1365,7 +1366,7 @@ export class OverworldScene extends Phaser.Scene {
     if (err instanceof ApiError) {
       switch (err.code) {
         case "INSUFFICIENT_GC":
-          return "Not enough Gold Coins.";
+          return "Not enough Tickets.";
         case "ALREADY_OWNED":
           return "You already own that.";
         case "NOT_FOUND":
@@ -1456,7 +1457,7 @@ export class OverworldScene extends Phaser.Scene {
       elements.push(panel);
 
       const title = this.add
-        .text(400, 105, mode === "shop" ? "🧥 Skin Attendant" : "👕 Wardrobe", {
+        .text(400, 105, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
           fontSize: "20px",
           color: Theme.textGold,
           fontStyle: "bold"
@@ -1470,7 +1471,7 @@ export class OverworldScene extends Phaser.Scene {
         .text(
           400,
           130,
-          mode === "shop" ? `You have ${gameState.goldCoins} GC` : "Pick a look to wear",
+          mode === "shop" ? `You have ${gameState.goldCoins} Tickets` : "Pick a look to wear",
           { fontSize: "13px", color: Theme.textMuted }
         )
         .setOrigin(0.5)
@@ -1485,7 +1486,7 @@ export class OverworldScene extends Phaser.Scene {
             280,
             mode === "shop"
               ? "You own every skin!"
-              : "Nothing owned yet.\nVisit the Skin Attendant to buy one.",
+              : "Nothing owned yet.\nVisit the Item Shop to buy one.",
             { fontSize: "14px", color: Theme.textMuted, align: "center" }
           )
           .setOrigin(0.5)
@@ -1525,7 +1526,7 @@ export class OverworldScene extends Phaser.Scene {
 
         if (mode === "shop") {
           const priceLabel = this.add
-            .text(370, y, `${def.price} GC`, { fontSize: "13px", color: Theme.textMuted })
+            .text(370, y, `${def.price} Tickets`, { fontSize: "13px", color: Theme.textMuted })
             .setOrigin(0, 0.5)
             .setScrollFactor(0)
             .setDepth(201);
@@ -1704,11 +1705,17 @@ export class OverworldScene extends Phaser.Scene {
    * GAME_STATIONS/NPC/attendant sprites and their name labels visually - it
    * can't break interaction radii.
    *
-   * "plant" is a procedurally-drawn Bright Social-Hub texture now (see
+   * "plant" is a procedurally-drawn "Arcade Nights" texture (see
    * BootScene.ts's createPlantTexture) at the same 48x64 footprint the old
    * Jephed plant.png used, so placement/origin/scale below is unchanged.
    * tree_accent/lamp_post/bench_prop/market_stall/hedge are the existing
-   * Kenney pieces, untouched.
+   * bright Kenney "RPG Urban Pack" pieces - that pack has no dark-arcade
+   * equivalent to swap onto (same gap BootScene.ts's floor/wall/carpet
+   * tiles had), so instead of leaving them jarringly bright against the new
+   * dark floor, they're tinted down via `setTint()` right here at placement
+   * - a dark navy-slate tint for most of them, and a warm amber tint on the
+   * lamp posts specifically so they read as "lit at night" rather than just
+   * dimmed, matching the Dave & Buster's-at-night direction.
    */
   private buildDecorations() {
     // Plants, same spots as before (still clear of "games"' Baccarat
@@ -1724,27 +1731,27 @@ export class OverworldScene extends Phaser.Scene {
       this.add.image(col * TILE, row * TILE, "plant").setOrigin(0.5);
     }
     // One autumn-toned tree for a bit of the pack's color variety, tucked
-    // beside the existing top-right tree cluster. Kenney-sourced, out of
-    // #41's scope - see buildDecorations()'s doc comment.
-    this.add.image(70 * TILE, 6 * TILE, "tree_accent").setOrigin(0.5).setScale(2);
+    // beside the existing top-right tree cluster.
+    this.add.image(70 * TILE, 6 * TILE, "tree_accent").setOrigin(0.5).setScale(2).setTint(0x4a5578);
 
     // Lamp posts flanking the main north-south path down to the exit door
-    // (40,51) - well clear of Plinko (52,36) and Video Poker (67,48).
-    this.add.image(36 * TILE, 44 * TILE, "lamp_post").setOrigin(0.5, 1).setScale(1.75);
-    this.add.image(44 * TILE, 44 * TILE, "lamp_post").setOrigin(0.5, 1).setScale(1.75);
+    // (40,51) - well clear of Plinko (52,36) and Video Poker (67,48). Amber
+    // tint so they read as glowing at night rather than just dimmed.
+    this.add.image(36 * TILE, 44 * TILE, "lamp_post").setOrigin(0.5, 1).setScale(1.75).setTint(0xffb347);
+    this.add.image(44 * TILE, 44 * TILE, "lamp_post").setOrigin(0.5, 1).setScale(1.75).setTint(0xffb347);
 
-    // Benches flanking the Chip Attendant (40,28) - a small "town square"
-    // gathering nook, 3+ tiles from the NPC's own interaction radius.
-    this.add.image(37 * TILE, 31 * TILE, "bench_prop").setOrigin(0.5).setScale(1.5);
-    this.add.image(43 * TILE, 31 * TILE, "bench_prop").setOrigin(0.5).setScale(1.5);
+    // Benches flanking the Coin Kiosk (40,28) - a small "town square"
+    // gathering nook, 3+ tiles from the station's own interaction radius.
+    this.add.image(37 * TILE, 31 * TILE, "bench_prop").setOrigin(0.5).setScale(1.5).setTint(0x4a5578);
+    this.add.image(43 * TILE, 31 * TILE, "bench_prop").setOrigin(0.5).setScale(1.5).setTint(0x4a5578);
 
-    // Market stall beside the Skin Attendant (40,18) - reinforces the
-    // "market stall" social-hub read from STYLE_GUIDE direction note 4.
-    this.add.image(35 * TILE, 17 * TILE, "market_stall").setOrigin(0.5).setScale(1.5);
+    // Market stall beside the Item Shop (40,18) - reinforces the "market
+    // stall" social-hub read.
+    this.add.image(35 * TILE, 17 * TILE, "market_stall").setOrigin(0.5).setScale(1.5).setTint(0x4a5578);
 
     // Low hedges as garden-patch accents near a couple of the tree spots.
-    this.add.image(4 * TILE, 12 * TILE, "hedge").setOrigin(0.5).setScale(1.5);
-    this.add.image(66 * TILE, 8 * TILE, "hedge").setOrigin(0.5).setScale(1.5);
+    this.add.image(4 * TILE, 12 * TILE, "hedge").setOrigin(0.5).setScale(1.5).setTint(0x4a5578);
+    this.add.image(66 * TILE, 8 * TILE, "hedge").setOrigin(0.5).setScale(1.5).setTint(0x4a5578);
   }
 
   private buildWalls() {

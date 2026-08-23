@@ -113,7 +113,7 @@ export class PlinkoScene extends Phaser.Scene {
     if (this.dropping) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -138,7 +138,7 @@ export class PlinkoScene extends Phaser.Scene {
         this.dropBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
         if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-          this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+          this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
         } else if (err instanceof NetworkError) {
           this.messageText.setText(err.message).setColor(Theme.textDanger);
         } else {
@@ -170,9 +170,9 @@ export class PlinkoScene extends Phaser.Scene {
     popIn(this, label);
 
     if (multiplier >= 1) {
-      this.messageText.setText(`Landed on ${multiplier}x! +${payout} GC`).setColor(Theme.textAccent);
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Theme.textAccent);
     } else {
-      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} GC`).setColor(Theme.textDanger);
+      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} Tickets`).setColor(Theme.textDanger);
     }
 
     this.updateBalance();
@@ -183,7 +183,7 @@ export class PlinkoScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

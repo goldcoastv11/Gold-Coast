@@ -1,4 +1,4 @@
-# Casino POC
+# Gold Coast Arcade
 
 A minimal, runnable proof of concept: log in with a username/password, then
 walk around a Pokémon-style pixel-art casino floor with nine playable games,
@@ -17,7 +17,7 @@ Built with **Phaser 3** + **TypeScript** + **Vite**.
   creates a fresh profile; an existing one checks the password. See
   "Login is NOT real security" below before relying on this for anything.
 - `src/scenes/StartMenuScene.ts` — title screen showing who's logged in, an
-  "Enter Casino" button, and a "Log Out" button (back to `LoginScene`)
+  "Enter Arcade" button, and a "Log Out" button (back to `LoginScene`)
 - `src/scenes/OverworldScene.ts` — a large casino floor (80x56 tiles, roughly
   60% bigger than before) that the camera only shows a portion of at a time,
   so you have to walk around to see the whole room. Chip attendant sits in

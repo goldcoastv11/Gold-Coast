@@ -6,44 +6,51 @@ import { fadeToScene } from "../ui/sceneTransition";
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
  * character spritesheets and every purchasable skin.
  *
- * Furniture-reskin pass (see STYLE_GUIDE.md "Furniture reskin" section):
- * the floor/wall/carpet ground tiles and every procedurally-drawn game
- * cabinet/table texture below were moved onto the "Bright Social-Hub"
- * palette (task #41 had previously reverted an earlier attempt at this back
- * to the old dark-casino Jephed look - this pass redoes it, this time
- * closing out STYLE_GUIDE.md's "Future: casino furniture" gap for the
- * actual gambling furniture too, not just floor/wall/carpet). Theme.ts/
- * uiHelpers.ts (chrome's bright UI palette) and the player/NPC/dealer
- * character spritesheets below (characters' Kenney rig) are unrelated to
- * this pass and untouched.
+ * "Arcade Nights" reskin (Gold Coast Arcade rebrand): every procedurally-
+ * drawn game cabinet/table texture below moved off the old "Bright
+ * Social-Hub" pastel palette onto a dark charcoal-navy body with orange/
+ * gold/white accents, per direction ("look more like Dave and Busters").
+ * Key names are kept stable (cabinet, felt, mint, coral, cream, etc.) even
+ * though most no longer literally match their old color - every
+ * create*Texture() method below references PALETTE by name, so re-pointing
+ * the values here is what makes the new look cascade everywhere without
+ * touching each drawing method. The floor/wall/carpet ground tiles (below,
+ * in preload()/create()) used to be pre-cut PNGs from the old Kenney
+ * "RPG Urban Pack" - that pack is a bright town/plaza kit with no dark
+ * equivalent, so those four are now drawn procedurally too (createFloorTan
+ * Texture/createCarpetRedTexture/createCarpetBlueTexture/createWallTexture),
+ * same technique as the furniture, instead of hunting for pre-made dark
+ * tile art. Theme.ts/uiHelpers.ts (chrome UI palette) is a separate token
+ * set with its own new dark values, kept in sync by hand (not literally
+ * shared) since this file has no import relationship to it.
  */
 const PALETTE = {
-  /** Warm dark-brown outline used on every drawn shape - STYLE_GUIDE.md direction note 2: never pure black. */
-  outline: 0x5c2e22,
-  /** Terracotta - "building-like" furniture body (direction note 5). */
-  cabinet: 0xdc8652,
-  /** Darker terracotta - trim/base/plinth accents. */
-  cabinetDark: 0xc77b47,
-  /** Cream screen/panel background (STYLE_GUIDE.md Background `#FFF6E9`). */
-  screen: 0xfff6e9,
-  /** Pale sky-blue alt panel (STYLE_GUIDE.md Background-alt `#EAF7FB`). */
-  screenAlt: 0xeaf7fb,
-  /** Deep saturated mint felt for card/dice tables - a shaded-down version of Primary, not desaturated. */
-  felt: 0x1f9b78,
-  /** Primary mint-teal `#3BD2AB`. */
-  mint: 0x3bd2ab,
-  /** Success/positive bright mint `#42DFAB`. */
-  mintBright: 0x42dfab,
-  /** Secondary sky blue `#59B6D8`. */
-  sky: 0x59b6d8,
-  /** Accent coral-orange `#FF7143`. */
-  coral: 0xff7143,
-  /** Accent-warm gold-orange `#F5AA57`. */
-  gold: 0xf5aa57,
-  /** Danger/warning muted brick-red `#C2504D`. */
-  danger: 0xc2504d,
-  /** Warm off-white cream `#FFF6E9`. */
-  cream: 0xfff6e9
+  /** Near-black outline used on every drawn shape. */
+  outline: 0x05070c,
+  /** Dark navy-blue - "cabinet" furniture body (was terracotta). */
+  cabinet: 0x1a2138,
+  /** Darker navy - trim/base/plinth accents. */
+  cabinetDark: 0x101725,
+  /** Dark slate "screen" panel background, reads as a lit arcade-cabinet screen against the navy body (was cream). */
+  screen: 0x131a2c,
+  /** Even darker alt panel (was pale sky blue). */
+  screenAlt: 0x0d1220,
+  /** Rich royal-blue felt for card/dice tables - saturated enough to read as "felt" against the near-black cabinet rail. */
+  felt: 0x1b3a6b,
+  /** Bright green - "positive/safe" grid-cell color (mines' safe cells, keno default cells, plant foliage) - kept as a green functional accent (universal win/safe signal), just repointed brighter for a dark bg (was mint-teal). */
+  mint: 0x2ecc71,
+  /** Lighter green variant. */
+  mintBright: 0x5eeba0,
+  /** Electric mid-blue - secondary accent (was sky blue). */
+  sky: 0x3d7fd9,
+  /** Vivid orange - primary brand accent, matches Theme.accent (was coral-orange). */
+  coral: 0xff7a29,
+  /** Amber-gold - jackpot/highlight accent, matches Theme.gold. */
+  gold: 0xffb347,
+  /** Red - danger/loss accent, matches Theme.danger. */
+  danger: 0xe0473f,
+  /** Near-white - card faces / light UI elements on dark furniture (was warm cream). */
+  cream: 0xf5f6fa
 } as const;
 
 export class BootScene extends Phaser.Scene {
@@ -52,19 +59,14 @@ export class BootScene extends Phaser.Scene {
   }
 
   preload() {
-    // Environment ground/wall tiles - "Bright Social-Hub" furniture-reskin
-    // pass (see STYLE_GUIDE.md "Furniture reskin" section): swapped off the
-    // old dark Jephed pack onto pre-cut tiles from the same Kenney "RPG
-    // Urban Pack" already used for the decorative props below, closing the
-    // gap STYLE_GUIDE.md's "Future: casino furniture" section flagged. Same
-    // key names as before (floor_tan/carpet_red/carpet_blue/wall) so nothing
-    // in OverworldScene.buildFloor()/buildWalls() needed to change - only
-    // the pixels under each key moved. All four are native 16x16, same as
-    // the tiles they replace, so no scale adjustments needed either.
-    this.load.image("floor_tan", "assets/kenney_rpg_urban_pack/Tiles/tile_0109.png"); // plain cream/tan plaza floor
-    this.load.image("carpet_red", "assets/kenney_rpg_urban_pack/Tiles/tile_0018.png"); // warm red brick rug fill
-    this.load.image("carpet_blue", "assets/kenney_rpg_urban_pack/Tiles/tile_0036.png"); // cool gray-blue flagstone accent (1-in-5 tile)
-    this.load.image("wall", "assets/kenney_rpg_urban_pack/Tiles/tile_0182.png"); // terracotta brick - direction note 5 "building-like" treatment
+    // Environment ground/wall tiles - "Arcade Nights" reskin: the old Kenney
+    // "RPG Urban Pack" tiles here were a bright cream-plaza/terracotta-brick
+    // pack with no dark-arcade equivalent, so floor_tan/carpet_red/
+    // carpet_blue/wall are now drawn procedurally instead (see
+    // createFloorTanTexture/createCarpetRedTexture/createCarpetBlueTexture/
+    // createWallTexture in create()) rather than loaded from PNGs. Same key
+    // names as before so nothing in OverworldScene.buildFloor()/buildWalls()
+    // needed to change - only where the pixels under each key come from.
     // "plant" is now drawn procedurally (see createPlantTexture) instead of
     // loaded from a PNG - same 48x64 footprint as the old Jephed asset, so
     // buildDecorations()'s placement/origin needed no changes.
@@ -153,6 +155,10 @@ export class BootScene extends Phaser.Scene {
       if (skin.id === "player") continue;
       this.createLegacySkinWalkAnims(skin.textureKey, skin.id);
     }
+    this.createFloorTanTexture();
+    this.createCarpetRedTexture();
+    this.createCarpetBlueTexture();
+    this.createWallTexture();
     this.createExitDoorTexture();
     this.createMinesTexture();
     this.createDiceTexture();
@@ -177,9 +183,81 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * A simple drawn door - Bright Social-Hub palette (STYLE_GUIDE.md): warm
-   * dark-brown outline (never pure black), terracotta panel, gold-orange
-   * knob, rounded corners throughout.
+   * Main plaza floor tile, 16x16 - flat near-black charcoal with a faint
+   * darker fleck pattern so it doesn't read as a dead flat void. Drawn
+   * procedurally (see class doc comment) instead of a loaded PNG.
+   */
+  private createFloorTanTexture() {
+    const s = 16;
+    const g = this.add.graphics();
+    g.fillStyle(0x14161c, 1);
+    g.fillRect(0, 0, s, s);
+    g.fillStyle(0x0e0f14, 1);
+    g.fillCircle(4, 4, 1);
+    g.fillCircle(11, 9, 1);
+    g.fillCircle(7, 13, 0.8);
+    g.generateTexture("floor_tan", s, s);
+    g.destroy();
+  }
+
+  /**
+   * Gaming-floor "rug" tile, 16x16 - a dark maroon-black patterned carpet,
+   * the classic arcade/bowling-alley carpet look. `carpet_blue` (below) is
+   * the existing 1-in-5-tile accent inside this same rug area.
+   */
+  private createCarpetRedTexture() {
+    const s = 16;
+    const g = this.add.graphics();
+    g.fillStyle(0x2a0f10, 1);
+    g.fillRect(0, 0, s, s);
+    g.fillStyle(0x3d1416, 1);
+    g.fillRect(0, 0, s, 1);
+    g.fillRect(0, 8, s, 1);
+    g.fillStyle(PALETTE.coral, 0.25);
+    g.fillCircle(4, 4, 1.1);
+    g.fillCircle(12, 12, 1.1);
+    g.generateTexture("carpet_red", s, s);
+    g.destroy();
+  }
+
+  /** Rug accent tile (1-in-5, see buildFloor()) - a dark navy-black variant of carpet_red. */
+  private createCarpetBlueTexture() {
+    const s = 16;
+    const g = this.add.graphics();
+    g.fillStyle(0x0f1526, 1);
+    g.fillRect(0, 0, s, s);
+    g.fillStyle(0x18213a, 1);
+    g.fillRect(0, 0, s, 1);
+    g.fillRect(0, 8, s, 1);
+    g.fillStyle(PALETTE.sky, 0.25);
+    g.fillCircle(4, 4, 1.1);
+    g.fillCircle(12, 12, 1.1);
+    g.generateTexture("carpet_blue", s, s);
+    g.destroy();
+  }
+
+  /**
+   * Perimeter wall tile, 16x16 - dark navy brick with a thin glowing-orange
+   * baseboard trim line, the "neon strip along the wall" touch real arcades
+   * use (was a terracotta-brick Kenney tile).
+   */
+  private createWallTexture() {
+    const s = 16;
+    const g = this.add.graphics();
+    g.fillStyle(0x161c30, 1);
+    g.fillRect(0, 0, s, s);
+    g.lineStyle(1, 0x0a0e1a, 1);
+    g.strokeRect(0, 0, s, 8);
+    g.strokeRect(0, 8, s, 8);
+    g.fillStyle(PALETTE.coral, 1);
+    g.fillRect(0, s - 2, s, 2);
+    g.generateTexture("wall", s, s);
+    g.destroy();
+  }
+
+  /**
+   * A simple drawn door - "Arcade Nights" palette: near-black outline, dark
+   * navy panel, gold-orange knob, rounded corners throughout.
    */
   private createExitDoorTexture() {
     const w = 40;

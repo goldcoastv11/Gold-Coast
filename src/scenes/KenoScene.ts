@@ -397,7 +397,7 @@ export class KenoScene extends Phaser.Scene {
       return;
     }
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -448,7 +448,7 @@ export class KenoScene extends Phaser.Scene {
     const picksCount = res.result.picks.length;
     if (payout > 0) {
       this.messageText
-        .setText(`${hits}/${picksCount} matched - ${multiplier}x! +${payout} GC`)
+        .setText(`${hits}/${picksCount} matched - ${multiplier}x! +${payout} Tickets`)
         .setColor(Theme.textAccent);
     } else {
       this.messageText.setText(`${hits}/${picksCount} matched - not enough to win`).setColor(Theme.textDanger);
@@ -472,7 +472,7 @@ export class KenoScene extends Phaser.Scene {
     this.betControl?.setEnabled(true);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
     } else if (err instanceof NetworkError) {
       this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
@@ -482,7 +482,7 @@ export class KenoScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

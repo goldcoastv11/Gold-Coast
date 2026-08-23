@@ -142,7 +142,7 @@ export class RouletteScene extends Phaser.Scene {
     if (this.spinning) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -180,7 +180,7 @@ export class RouletteScene extends Phaser.Scene {
 
     if (won) {
       this.messageText
-        .setText(`${number} ${color.toUpperCase()} — you win +${payout} GC`)
+        .setText(`${number} ${color.toUpperCase()} — you win +${payout} Tickets`)
         .setColor(Theme.textAccent);
       popIn(this, this.resultText);
     } else {
@@ -199,7 +199,7 @@ export class RouletteScene extends Phaser.Scene {
     this.resultText.setText("?").setColor(Theme.textPrimary);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
     } else if (err instanceof NetworkError) {
       this.messageText.setText(err.message).setColor(Theme.textDanger);
     } else {
@@ -213,7 +213,7 @@ export class RouletteScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

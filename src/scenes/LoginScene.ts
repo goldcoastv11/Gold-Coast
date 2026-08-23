@@ -70,10 +70,10 @@ export class LoginScene extends Phaser.Scene {
 
     makePanel(this, 400, 300, 460, 460);
 
-    this.add.text(400, 110, "🎰", { fontSize: "48px" }).setOrigin(0.5);
+    this.add.text(400, 110, "🕹️", { fontSize: "48px" }).setOrigin(0.5);
 
     this.add
-      .text(400, 160, "GOLD COAST CASINO", {
+      .text(400, 160, "GOLD COAST ARCADE", {
         fontSize: "22px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -81,7 +81,7 @@ export class LoginScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     // Sign Up / Sign In tabs - see class doc comment for why this replaced
-    // the old single "ENTER CASINO" button that tried signup then silently
+    // the old single "ENTER ARCADE" button that tried signup then silently
     // fell back to login. renderTabs() (re)draws both to reflect `mode`.
     this.renderTabs();
 

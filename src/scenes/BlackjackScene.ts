@@ -151,7 +151,7 @@ export class BlackjackScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -216,7 +216,7 @@ export class BlackjackScene extends Phaser.Scene {
         this.busy = false;
         this.newHandBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
-        this.showApiError(err, "Not enough Gold Coins!");
+        this.showApiError(err, "Not enough Tickets!");
       });
   }
 
@@ -307,7 +307,7 @@ export class BlackjackScene extends Phaser.Scene {
 
   private resolveMessage(outcome: BlackjackOutcome | null, payout: number) {
     if (outcome === "win") {
-      this.messageText.setText(`You win! +${payout} GC`).setColor(Theme.textAccent);
+      this.messageText.setText(`You win! +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.messageText);
     } else if (outcome === "push") {
       this.messageText.setText("Push - bet returned").setColor(Theme.textMuted);
@@ -407,7 +407,7 @@ export class BlackjackScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}   Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}   Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

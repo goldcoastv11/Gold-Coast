@@ -1,53 +1,59 @@
 /**
  * Shared visual theme so every game screen and the coin panel match.
  *
- * "Bright Social-Hub" reskin (task #22) — palette and direction sourced from
- * `STYLE_GUIDE.md` (task #21): saturated mint-teal / sky-blue / coral-orange,
- * warm cream backdrops, thick warm dark-brown outlines (never pure black),
- * rounded shapes, no neon glow. Replaces the old dark-neon-casino theme.
+ * "Arcade Nights" reskin (Gold Coast Arcade rebrand): dark charcoal-black /
+ * navy-blue surfaces with vivid orange + white brand accents, per direction
+ * ("look more like Dave and Busters - blacks and dark blues as primary
+ * colors, orange and white as secondary"). Replaces the previous "Bright
+ * Social-Hub" pastel palette (see STYLE_GUIDE.md - superseded, kept only
+ * for its still-accurate asset-licensing/attribution sections). The old
+ * "never pure black" rule is explicitly OVER-RIDDEN here - true dark
+ * surfaces are the whole point of this direction now, not something to
+ * avoid.
  *
- * Key names are kept stable (bgDark, panel, accent, etc.) even though a few
- * no longer literally match their name (e.g. `bgDark` now holds a light
- * cream) — every scene references these tokens by name via Theme.ts /
- * uiHelpers.ts, so re-pointing the values here is what makes the new look
- * cascade everywhere without touching call sites.
+ * Key names are kept stable (bgDark, panel, accent, etc.) even though most
+ * no longer literally match their name's original color (e.g. `bgDark` was
+ * a light cream under the old theme; it's an actual dark charcoal now) -
+ * every scene references these tokens by name via Theme.ts / uiHelpers.ts,
+ * so re-pointing the values here is what makes the new look cascade
+ * everywhere without touching call sites.
  */
 export const Theme = {
   // --- Surfaces ---
-  bgDark: 0xfff6e9, // scene/world backdrop - warm cream (STYLE_GUIDE "Background")
-  panel: 0xfdf3e1, // rounded panel/card fill - warm off-white (STYLE_GUIDE "Panel / card fill")
-  panelBorder: 0x8a5a3b, // warm mid-brown outline stroke - never pure black (direction note 2)
-  inset: 0xeaf7fb, // inset "well" fill (reel cells, balance pills) - pale sky blue (STYLE_GUIDE "Background-alt")
-  outline: 0x5c2e22, // darker warm-brown line art - card/board strokes, dividers, pins
+  bgDark: 0x0e0f14, // scene/world backdrop - near-black charcoal
+  panel: 0x1a2138, // rounded panel/card fill - dark navy-blue
+  panelBorder: 0x2e3a5c, // steel-blue structural outline
+  inset: 0x12182a, // inset "well" fill (reel cells, balance pills) - recessed near-black navy
+  outline: 0x05070c, // near-black line art - card/board strokes, dividers, pins
 
   // --- Brand / actions ---
-  accent: 0x3bd2ab, // primary mint-teal (STYLE_GUIDE "Primary") - main buttons / positive actions
-  accentHover: 0x6fe3c5,
-  secondary: 0x59b6d8, // sky blue (STYLE_GUIDE "Secondary") - headers / secondary panels / info
-  secondaryHover: 0x8ccbe6,
-  danger: 0xc2504d, // brick-red (STYLE_GUIDE "Danger / warning") - negative actions / losses
-  dangerHover: 0xd47a77,
-  neutral: 0xc6bc9f, // neutral sand (STYLE_GUIDE "Neutral sand") - plain/secondary buttons
-  neutralHover: 0xd9d0b6,
-  gold: 0xf5aa57, // accent-warm gold-orange (STYLE_GUIDE "Accent-warm") - cash-out / jackpot highlights
-  goldHover: 0xf8c489,
-  success: 0x42dfab, // bright green (STYLE_GUIDE "Success / positive")
+  accent: 0xff7a29, // vivid orange (Secondary/brand accent) - main buttons / positive actions / CTAs
+  accentHover: 0xff9552,
+  secondary: 0x2f5fbf, // electric dark blue (Primary family) - headers / secondary panels / info
+  secondaryHover: 0x4a7ad9,
+  danger: 0xe0473f, // red - negative actions / losses
+  dangerHover: 0xf06860,
+  neutral: 0x39435c, // muted slate-blue - plain/secondary buttons
+  neutralHover: 0x4c5878,
+  gold: 0xffb347, // amber-gold - cash-out / jackpot highlights, distinct from primary orange accent
+  goldHover: 0xffc774,
+  success: 0x33d17a, // bright green - win states (universal "safe/win" signal, kept as a functional accent)
 
-  // --- Soft tint fills (pale, for zone bars / cell states - readable on light bg) ---
-  winZone: 0xbff0de, // pale mint - "this side wins" fills
-  loseZone: 0xf3cfc9, // pale coral - "this side loses" fills
+  // --- Soft tint fills (zone bars / cell states - now darker/desaturated for a dark bg) ---
+  winZone: 0x1f6b4a, // deep muted green - "this side wins" fills
+  loseZone: 0x6b2620, // deep muted red - "this side loses" fills
 
   // --- Playing cards (used by Blackjack/VideoPoker/Baccarat/HiLo) ---
-  cardFace: 0xfdf9f0,
-  cardBorder: 0x5c2e22,
-  cardTextBlack: "#3a2a20",
-  cardTextRed: "#c2504d",
+  cardFace: 0xf5f0e6,
+  cardBorder: 0x141824,
+  cardTextBlack: "#1a1d24",
+  cardTextRed: "#c0392b",
 
   // --- Text ---
-  textPrimary: "#2b2340", // deep plum-navy (STYLE_GUIDE "Text - primary")
-  textMuted: "#6b5b73", // muted mauve-gray (STYLE_GUIDE "Text - secondary / muted")
-  textGold: "#b9762b",
-  textAccent: "#1f8e73",
-  textDanger: "#9c3f3d",
-  textOnDark: "#fdf3e1" // light label text for dark-fill buttons (string form of `panel`) - keep in sync if `panel` changes
+  textPrimary: "#f5f6fa", // near-white - primary readable text on dark surfaces
+  textMuted: "#9aa3bd", // muted steel-gray-blue - secondary/muted text
+  textGold: "#ffb347",
+  textAccent: "#ff8a3d",
+  textDanger: "#ff6b60",
+  textOnDark: "#f5f6fa" // label text for dark-fill buttons - same near-white as textPrimary now that most surfaces are dark (keep in sync if `panel` changes)
 };

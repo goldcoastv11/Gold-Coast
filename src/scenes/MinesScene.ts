@@ -181,7 +181,7 @@ export class MinesScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -246,7 +246,7 @@ export class MinesScene extends Phaser.Scene {
         this.busy = false;
         this.startBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
-        this.showApiError(err, "Not enough Gold Coins!");
+        this.showApiError(err, "Not enough Tickets!");
       });
   }
 
@@ -344,7 +344,7 @@ export class MinesScene extends Phaser.Scene {
           // without the server needing to send them explicitly.
           const mines = Array.from({ length: TOTAL_TILES }, (_, i) => i).filter((i) => !this.revealed.has(i));
           this.revealMines(mines);
-          this.messageText.setText(`Board cleared! +${res.payout ?? 0} GC`).setColor(Theme.textAccent);
+          this.messageText.setText(`Board cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
           this.endRound();
           return;
@@ -376,7 +376,7 @@ export class MinesScene extends Phaser.Scene {
         this.busy = false;
         this.active = false;
         this.revealMines(res.minePositions);
-        this.messageText.setText(`Cashed out! +${res.payout} GC`).setColor(Theme.textAccent);
+        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
         this.endRound();
       })
@@ -415,7 +415,7 @@ export class MinesScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }

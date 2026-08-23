@@ -259,7 +259,7 @@ export class HiLoScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Tickets!").setColor(Theme.textDanger);
       return;
     }
 
@@ -323,7 +323,7 @@ export class HiLoScene extends Phaser.Scene {
         this.busy = false;
         this.startBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
-        this.showApiError(err, "Not enough Gold Coins!");
+        this.showApiError(err, "Not enough Tickets!");
       });
   }
 
@@ -392,7 +392,7 @@ export class HiLoScene extends Phaser.Scene {
 
         if (res.deckExhausted) {
           this.active = false;
-          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} GC`).setColor(Theme.textAccent);
+          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
           this.endRun();
           return;
@@ -434,7 +434,7 @@ export class HiLoScene extends Phaser.Scene {
         gameState.hydrateFromServer(res.user);
         this.busy = false;
         this.active = false;
-        this.messageText.setText(`Cashed out! +${res.payout} GC`).setColor(Theme.textAccent);
+        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
         this.endRun();
       })
@@ -470,7 +470,7 @@ export class HiLoScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(
-      `Gold Coins: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
+      `Tickets: ${gameState.goldCoins}      Stake Coins: ${gameState.stakeCoins}`
     );
   }
 }
