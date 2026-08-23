@@ -1,14 +1,28 @@
 // Prisma schema for casino-poc's server-authoritative backend.
 //
 // Mirrors the client's economy shapes (src/economy/*.ts) - see that code and
-// repo-root CLAUDE.md for the rules this schema exists to support:
-//   - GC and SC are separate ledgers (balances.gold_coins / balances.stake_coins)
+// repo-root CLAUDE.md for the current "arcade token" economy rules:
+//   - GC (spend to play) and TICKETS (won from playing, spent in the Item
+//     Shop) are separate ledgers (balances.gold_coins / balances.tickets)
 //   - every balance change is one row in `transactions` (currency/type mirror
 //     ledger.ts's Currency/TransactionType unions) - nothing else may write
-//     gold_coins/stake_coins
-//   - SC redemption is gated on playthrough_progress + a minimum threshold
-//   - skins are GC-only and structurally separate (skins_owned/equipped_skin
-//     never reference sc/playthrough tables)
+//     gold_coins/tickets
+//   - skins are TICKETS-only and structurally separate from GC
+//
+// History: this used to be a GC/SC ("Sweeps Coin") sweepstakes-style model
+// with a 1x playthrough requirement and real-money SC redemption
+// (playthrough_progress table, REDEMPTION_SC/SIGNUP_BONUS_SC/etc.
+// transaction types, MIN_SC_REDEMPTION). That model is retired - see the
+// Currency/TransactionType enums and PlaythroughProgress model below for
+// what's kept around unused rather than destructively migrated away (same
+// philosophy as the ROUND_REFUND_GC/SC values already had: additive-only
+// schema changes, no enum-value removal or table drops for a pure
+// after-the-fact cleanup with no functional benefit). The `Balance.tickets`
+// field is intentionally still mapped to the physical `stake_coins` column
+// for the same reason - only the Prisma-side name changed, not the
+// database - the numeric value carries over as-is, same "no meaningful
+// mapping better than a direct carry-over for existing data" call made on
+// the client (see GameState.ts's migrateLegacyProfile doc comment).
 
 generator client {
   provider = "prisma-client-js"
@@ -48,17 +62,22 @@ model User {
 // One row per user. Two independent balances - never conflated, never
 // mutated directly outside the ledger core (see src/economy/ledger.ts on
 // the server, which is the only code allowed to touch these two columns).
+// `tickets` is intentionally still mapped to the old `stake_coins` physical
+// column - see this file's header comment.
 model Balance {
-  userId     String @id @map("user_id")
-  user       User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  goldCoins  Int    @default(0) @map("gold_coins")
-  stakeCoins Int    @default(0) @map("stake_coins")
+  userId    String @id @map("user_id")
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  goldCoins Int    @default(0) @map("gold_coins")
+  tickets   Int    @default(0) @map("stake_coins")
 
   @@map("balances")
 }
 
 enum Currency {
   GC
+  TICKETS
+  // Retired (see this file's header comment) - kept, unused, rather than a
+  // destructive enum-type recreation.
   SC
 }
 
@@ -66,18 +85,29 @@ enum Currency {
 // union on the client 1:1 so the audit trail is comparable and QA can grep
 // for a type to find every code path that can move money.
 enum TransactionType {
-  SIGNUP_BONUS_SC
-  PACKAGE_BONUS_SC
   SIGNUP_BONUS_GC
   PACKAGE_GC
-  SKIN_PURCHASE_GC
   AD_REWARD_GC
-  REDEMPTION_SC
   WAGER_GC
-  WAGER_SC
-  PAYOUT_GC
-  PAYOUT_SC
   ADJUST_GC
+  // The only way TICKETS are ever credited - a game round's win.
+  GAME_WIN_TICKETS
+  // The only way TICKETS are ever debited - an Item Shop purchase.
+  SKIN_PURCHASE_TICKETS
+  // A GC payout - NOT retired, still used by Triple Chance
+  // (routes/games.ts), which is GC-in/GC-out (double-or-nothing on GC just
+  // received from the Coin Kiosk), not one of the 14 GC-wager/TICKETS-
+  // payout games that go through GAME_WIN_TICKETS instead.
+  PAYOUT_GC
+  // Retired (see this file's header comment) - the old GC/SC sweepstakes
+  // model's SC-side transaction types, kept unused rather than a
+  // destructive enum-type recreation.
+  SIGNUP_BONUS_SC
+  PACKAGE_BONUS_SC
+  SKIN_PURCHASE_GC
+  REDEMPTION_SC
+  WAGER_SC
+  PAYOUT_SC
   ADJUST_SC
   // UNUSED - reserved, do not wire up without fresh sign-off. Added for a
   // proposed #42 follow-up (auto-refund an abandoned round's wager if
@@ -141,8 +171,9 @@ model LastPosition {
   @@map("last_position")
 }
 
-// Mirrors src/economy/playthrough.ts's PlaythroughState (required/wagered)
-// 1:1 - see that file for the semantics.
+// RETIRED - the playthrough/redemption model this backed no longer exists
+// (see this file's header comment). Left in place, unused, rather than a
+// destructive table drop.
 model PlaythroughProgress {
   userId    String @id @map("user_id")
   user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)

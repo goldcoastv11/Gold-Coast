@@ -7,18 +7,16 @@
 
 import { TxClient } from "./economy/ledger";
 import { getBalance } from "./economy/ledger";
-import { getPlaythroughState } from "./economy/playthrough";
 import { listOwnedSkins, getEquippedSkin } from "./economy/skinShop";
 import { prisma } from "./db";
 
 export interface MeResponse {
   username: string;
   goldCoins: number;
-  stakeCoins: number;
+  tickets: number;
   skinsOwned: string[];
   equippedSkin: string;
   lastPosition: { x: number; y: number } | null;
-  playthrough: { required: number; wagered: number };
   attendantClaim: { lastClaimedAt: string | null };
   adReward: { lastClaimedAt: string | null };
   /**
@@ -68,21 +66,19 @@ async function getAdRewardLastClaimedAt(userId: string): Promise<string | null> 
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
   const [
     goldCoins,
-    stakeCoins,
+    tickets,
     skinsOwned,
     equippedSkin,
     lastPosition,
-    playthrough,
     attendantClaim,
     adRewardLastClaimedAt,
     activeRound
   ] = await Promise.all([
     getBalance(tx, userId, "GC"),
-    getBalance(tx, userId, "SC"),
+    getBalance(tx, userId, "TICKETS"),
     listOwnedSkins(tx, userId),
     getEquippedSkin(tx, userId),
     tx.lastPosition.findUnique({ where: { userId } }),
-    getPlaythroughState(tx, userId),
     tx.attendantClaim.findUnique({ where: { userId } }),
     getAdRewardLastClaimedAt(userId),
     tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } })
@@ -91,11 +87,10 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
   return {
     username,
     goldCoins,
-    stakeCoins,
+    tickets,
     skinsOwned,
     equippedSkin,
     lastPosition: lastPosition ? { x: lastPosition.x, y: lastPosition.y } : null,
-    playthrough,
     attendantClaim: {
       lastClaimedAt: attendantClaim?.lastClaimedAt ? attendantClaim.lastClaimedAt.toISOString() : null
     },

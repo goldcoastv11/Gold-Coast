@@ -51,8 +51,10 @@ describe("POST /games/triplechance/play (#46 - bonus round after a shuffle-cup G
         expect(res.body.result.payout).toBe(0);
         expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 100);
       }
-      // Never touches SC in any way, win or lose.
-      expect(res.body.user.stakeCoins).toBe(before.body.stakeCoins);
+      // Never touches TICKETS in any way, win or lose - Triple Chance is
+      // GC-in/GC-out, chained onto the Coin Kiosk's shuffle-cup GC win, not
+      // one of the TICKETS-paying games.
+      expect(res.body.user.tickets).toBe(before.body.tickets);
     }
 
     expect(sawWin).toBe(true);
@@ -153,19 +155,19 @@ describe("POST /games/triplechance/play (#46 - bonus round after a shuffle-cup G
     expect(res.body.code).toBe("INSUFFICIENT_BALANCE");
   });
 
-  it("ignores any client-supplied currency - always settles in GC", async () => {
+  it("ignores any client-supplied currency field - always settles in GC", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    // Even if a client tried to sneak an SC currency through, the route
-    // never reads it - settleSingleShotBet is always called with "GC".
+    // Even if a client tried to sneak a currency field through, the route
+    // never reads it - Triple Chance always settles GC-in/GC-out.
     const res = await request(app)
       .post("/games/triplechance/play")
       .set(authed(token))
       .send({ betAmount: 100, currency: "SC" });
 
     expect(res.status).toBe(200);
-    expect(res.body.user.stakeCoins).toBe(before.body.stakeCoins);
+    expect(res.body.user.tickets).toBe(before.body.tickets);
     const expectedGold = res.body.result.won ? before.body.goldCoins + 200 : before.body.goldCoins - 100;
     expect(res.body.user.goldCoins).toBe(expectedGold);
   });

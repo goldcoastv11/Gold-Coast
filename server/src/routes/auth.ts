@@ -51,7 +51,7 @@ router.post("/signup", asyncHandler(async (req, res) => {
     const user = await tx.user.create({
       data: { username, email: email ?? null, passwordHash }
     });
-    await tx.balance.create({ data: { userId: user.id, goldCoins: 0, stakeCoins: 0 } });
+    await tx.balance.create({ data: { userId: user.id, goldCoins: 0, tickets: 0 } });
     await tx.equippedSkin.create({ data: { userId: user.id, skinId: "player" } });
 
     const bonus = await grantSignupBonus(tx, user.id, multiplier);
@@ -67,8 +67,7 @@ router.post("/signup", asyncHandler(async (req, res) => {
     user: result.me,
     signupBonus: {
       gcMultiplier: multiplier,
-      gcAmount: result.bonus.gcAmount,
-      scAmount: result.bonus.scAmount
+      gcAmount: result.bonus.gcAmount
     }
   });
 }));

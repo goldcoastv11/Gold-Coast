@@ -1,8 +1,16 @@
 /**
- * Economy routes: attendant claim, GC package purchase, SC redemption.
+ * Economy routes: Coin Kiosk claim, GC package purchase.
  * All authenticated; all wrap their DB work in a single
  * `prisma.$transaction` so the ledger write(s) + related-table updates
- * (playthrough, cooldown, meta) are all-or-nothing per request.
+ * (cooldown, meta) are all-or-nothing per request.
+ *
+ * History: this used to also have a `POST /redeem` (SC redemption) route,
+ * back when this game used a two-currency GC/SC sweepstakes model with a
+ * real-money redemption path. That whole model was replaced with the
+ * current "arcade token" one (GC to play, TICKETS won from playing, spent
+ * in the Item Shop, no real-money value at all) - see repo-root CLAUDE.md
+ * and economy/ledger.ts's doc comment. There's nothing left to redeem for
+ * cash, so that route is gone, not just unused.
  */
 
 import { Router } from "express";
@@ -12,13 +20,12 @@ import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { claimAttendantBonus } from "../economy/attendantClaim";
 import { pickRandomGcMultiplier } from "../economy/gcMultiplier";
 import { listPackages, purchasePackage } from "../economy/packages";
-import { redeemSc, MIN_SC_REDEMPTION } from "../economy/redemption";
 import { serializeMe } from "../serializers";
 import { asyncHandler } from "../asyncHandler";
 
 const router = Router();
 
-// ---- Attendant claim ----
+// ---- Coin Kiosk claim ----
 // GC leg's multiplier is resolved server-side here (never trusts the
 // client's shuffle-cup animation outcome) - see economy/gcMultiplier.ts.
 router.post(
@@ -42,11 +49,7 @@ router.post(
     return res.json({
       granted: {
         gcMultiplier: multiplier,
-        gcAmount: outcome.gcTransaction.amount,
-        // No SC leg any more (see economy/attendantClaim.ts) - scAmount is
-        // kept in the response shape (rather than dropped) so the client
-        // doesn't need a second response shape for this one endpoint.
-        scAmount: 0
+        gcAmount: outcome.gcTransaction.amount
       },
       user: me
     });
@@ -78,39 +81,10 @@ router.post(
 
     const me = await prisma.$transaction((tx) => serializeMe(tx, userId, username));
     return res.json({
-      granted: { gcAmount: outcome.gcTransaction.amount, scAmount: outcome.scBonusTransaction.amount },
+      granted: { gcAmount: outcome.gcTransaction.amount },
       pkg: outcome.pkg,
       user: me
     });
-  })
-);
-
-// ---- SC redemption ----
-const RedeemSchema = z.object({ amountSc: z.number().positive() });
-
-router.post(
-  "/redeem",
-  requireAuth,
-  asyncHandler(async (req, res) => {
-    const { userId, username } = req as AuthedRequest;
-    const parsed = RedeemSchema.safeParse(req.body);
-    if (!parsed.success) {
-      return res.status(400).json({ error: "Invalid redemption payload", code: "INVALID_INPUT" });
-    }
-
-    const outcome = await prisma.$transaction((tx) => redeemSc(tx, userId, parsed.data.amountSc));
-
-    if (!outcome.ok) {
-      return res.status(400).json({
-        error: "Redemption not eligible",
-        code: outcome.eligibility.reason,
-        minimumSc: MIN_SC_REDEMPTION,
-        eligibility: outcome.eligibility
-      });
-    }
-
-    const me = await prisma.$transaction((tx) => serializeMe(tx, userId, username));
-    return res.json({ redeemedSc: outcome.amountSc, user: me });
   })
 );
 

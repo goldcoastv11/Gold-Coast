@@ -7,7 +7,7 @@ import { AD_REWARD_GC_AMOUNT, AD_REWARD_COOLDOWN_MS } from "../src/economy/adRew
 beforeEach(resetDb);
 
 describe("POST /ads/claim (simulated ad-reward GC refill)", () => {
-  it("grants a fixed GC amount and never touches SC", async () => {
+  it("grants a fixed GC amount and never touches TICKETS", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
@@ -16,9 +16,7 @@ describe("POST /ads/claim (simulated ad-reward GC refill)", () => {
     expect(res.status).toBe(200);
     expect(res.body.granted.gcAmount).toBe(AD_REWARD_GC_AMOUNT);
     expect(res.body.user.goldCoins).toBe(before.body.goldCoins + AD_REWARD_GC_AMOUNT);
-    expect(res.body.user.stakeCoins).toBe(before.body.stakeCoins); // SC untouched
-    // No playthrough interaction either - GC has no playthrough requirement of its own.
-    expect(res.body.user.playthrough.required).toBe(before.body.playthrough.required);
+    expect(res.body.user.tickets).toBe(before.body.tickets); // TICKETS untouched
   });
 
   it("enforces the server-side cooldown - a second immediate claim is rejected", async () => {

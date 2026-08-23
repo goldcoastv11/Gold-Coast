@@ -18,7 +18,8 @@ import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { serializeMe } from "../serializers";
 import { asyncHandler } from "../asyncHandler";
-import { BetAmountSchema, CurrencySchema, settleSingleShotBet, placeWager, settlePayout } from "../games/shared";
+import { BetAmountSchema, settleSingleShotBet, placeWager, settlePayout } from "../games/shared";
+import { applyTransaction } from "../economy/ledger";
 import { DICE_TARGET_MIN, DICE_TARGET_MAX, playDice } from "../games/dice";
 import { playCoinFlip } from "../games/coinflip";
 import { playRoulette } from "../games/roulette";
@@ -89,7 +90,6 @@ const router = Router();
 
 const DicePlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   target: z.number().int().min(DICE_TARGET_MIN).max(DICE_TARGET_MAX)
 });
 
@@ -102,12 +102,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid dice play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, target } = parsed.data;
+    const { betAmount, target } = parsed.data;
 
     const result = playDice(betAmount, target);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "dice", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "dice", betAmount, result.payout, {
         target,
         roll: result.roll
       });
@@ -123,8 +123,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const MinesStartSchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -136,13 +135,13 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid mines start payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     try {
       const [roundId, publicState, me] = await prisma.$transaction(async (tx) => {
-        await placeWager(tx, userId, "mines", currency, betAmount, {});
+        await placeWager(tx, userId, "mines", betAmount, {});
         const state = newMinesState();
-        const id = await createRound(tx, userId, "mines", betAmount, currency, state);
+        const id = await createRound(tx, userId, "mines", betAmount, "GC", state);
         const meResult = await serializeMe(tx, userId, username);
         return [id, publicMinesState(state), meResult] as const;
       });
@@ -196,7 +195,7 @@ router.post(
 
         if (pick.boardCleared) {
           const payout = Math.round(round.betAmount * publicState.multiplier);
-          await settlePayout(tx, userId, "mines", round.currency, payout, { roundId, picksMade: publicState.picksMade });
+          await settlePayout(tx, userId, "mines", payout, { roundId, picksMade: publicState.picksMade });
           await closeRound(tx, roundId);
           const me = await serializeMe(tx, userId, username);
           return {
@@ -256,7 +255,7 @@ router.post(
 
         const multiplier = minesMultiplier(picksMade);
         const payout = Math.round(round.betAmount * multiplier);
-        await settlePayout(tx, userId, "mines", round.currency, payout, { roundId, picksMade });
+        await settlePayout(tx, userId, "mines", payout, { roundId, picksMade });
         await closeRound(tx, roundId);
 
         const me = await serializeMe(tx, userId, username);
@@ -282,7 +281,6 @@ router.post(
 
 const CoinFlipPlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   guess: z.enum(["heads", "tails"])
 });
 
@@ -295,12 +293,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid coinflip play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, guess } = parsed.data;
+    const { betAmount, guess } = parsed.data;
 
     const result = playCoinFlip(betAmount, guess);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "coinflip", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "coinflip", betAmount, result.payout, {
         guess,
         result: result.result
       });
@@ -317,7 +315,6 @@ router.post(
 
 const RoulettePlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   bet: z.enum(["red", "black", "green"])
 });
 
@@ -330,12 +327,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid roulette play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, bet } = parsed.data;
+    const { betAmount, bet } = parsed.data;
 
     const result = playRoulette(betAmount, bet);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "roulette", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "roulette", betAmount, result.payout, {
         bet,
         number: result.number
       });
@@ -352,7 +349,6 @@ router.post(
 
 const LimboPlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   target: z.number().min(LIMBO_TARGET_MIN).max(LIMBO_TARGET_MAX)
 });
 
@@ -365,12 +361,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid limbo play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, target } = parsed.data;
+    const { betAmount, target } = parsed.data;
 
     const result = playLimbo(betAmount, target);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "limbo", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "limbo", betAmount, result.payout, {
         target,
         crashPoint: result.crashPoint
       });
@@ -386,8 +382,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const PlinkoPlaySchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -399,12 +394,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid plinko play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     const result = playPlinko(betAmount);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "plinko", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "plinko", betAmount, result.payout, {
         slotIndex: result.slotIndex
       });
       return serializeMe(tx, userId, username);
@@ -419,8 +414,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const SlotsPlaySchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -432,12 +426,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid slots play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     const result = playSlots(betAmount);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "slots", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "slots", betAmount, result.payout, {
         reels: result.reels
       });
       return serializeMe(tx, userId, username);
@@ -453,7 +447,6 @@ router.post(
 
 const KenoPlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   picks: z
     .array(z.number().int().min(0).max(KENO_TOTAL_NUMBERS - 1))
     .min(1)
@@ -470,12 +463,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid keno play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, picks } = parsed.data;
+    const { betAmount, picks } = parsed.data;
 
     const result = playKeno(betAmount, picks);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "keno", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "keno", betAmount, result.payout, {
         picks,
         hits: result.hits
       });
@@ -492,7 +485,6 @@ router.post(
 
 const WheelPlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   risk: z.enum(["low", "medium", "high"])
 });
 
@@ -505,12 +497,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid wheel play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, risk } = parsed.data;
+    const { betAmount, risk } = parsed.data;
 
     const result = playWheel(betAmount, risk);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "wheel", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "wheel", betAmount, result.payout, {
         risk,
         landingIndex: result.landingIndex
       });
@@ -527,7 +519,6 @@ router.post(
 
 const BaccaratPlaySchema = z.object({
   betAmount: BetAmountSchema,
-  currency: CurrencySchema,
   betType: z.enum(["player", "banker", "tie"])
 });
 
@@ -540,12 +531,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid baccarat play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency, betType } = parsed.data;
+    const { betAmount, betType } = parsed.data;
 
     const result = playBaccarat(betAmount, betType);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "baccarat", currency, betAmount, result.payout, {
+      await settleSingleShotBet(tx, userId, "baccarat", betAmount, result.payout, {
         betType,
         outcome: result.outcome
       });
@@ -561,8 +552,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const DragonTowerStartSchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -574,13 +564,13 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid dragontower start payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     try {
       const [roundId, publicState, me] = await prisma.$transaction(async (tx) => {
-        await placeWager(tx, userId, "dragontower", currency, betAmount, {});
+        await placeWager(tx, userId, "dragontower", betAmount, {});
         const state = newDragonTowerState();
-        const id = await createRound(tx, userId, "dragontower", betAmount, currency, state);
+        const id = await createRound(tx, userId, "dragontower", betAmount, "GC", state);
         const meResult = await serializeMe(tx, userId, username);
         return [id, publicDragonTowerState(state), meResult] as const;
       });
@@ -634,7 +624,7 @@ router.post(
 
         if (pick.reachedTop) {
           const payout = Math.round(round.betAmount * publicState.multiplier);
-          await settlePayout(tx, userId, "dragontower", round.currency, payout, {
+          await settlePayout(tx, userId, "dragontower", payout, {
             roundId,
             currentRow: publicState.currentRow
           });
@@ -696,7 +686,7 @@ router.post(
 
         const multiplier = DRAGON_TOWER_MULTIPLIERS[round.state.currentRow - 1];
         const payout = Math.round(round.betAmount * multiplier);
-        await settlePayout(tx, userId, "dragontower", round.currency, payout, { roundId, currentRow: round.state.currentRow });
+        await settlePayout(tx, userId, "dragontower", payout, { roundId, currentRow: round.state.currentRow });
         await closeRound(tx, roundId);
 
         const me = await serializeMe(tx, userId, username);
@@ -721,8 +711,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const HiLoStartSchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -734,13 +723,13 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid hilo start payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     try {
       const [roundId, publicState, me] = await prisma.$transaction(async (tx) => {
-        await placeWager(tx, userId, "hilo", currency, betAmount, {});
+        await placeWager(tx, userId, "hilo", betAmount, {});
         const state = newHiLoState();
-        const id = await createRound(tx, userId, "hilo", betAmount, currency, state);
+        const id = await createRound(tx, userId, "hilo", betAmount, "GC", state);
         const meResult = await serializeMe(tx, userId, username);
         return [id, publicHiLoState(state), meResult] as const;
       });
@@ -789,7 +778,7 @@ router.post(
         if (result.deckExhausted) {
           // Deck exhausted - nothing left to guess against, auto cash out.
           const payout = Math.round(round.betAmount * publicState.multiplier);
-          await settlePayout(tx, userId, "hilo", round.currency, payout, {
+          await settlePayout(tx, userId, "hilo", payout, {
             roundId,
             correctGuesses: publicState.correctGuesses
           });
@@ -837,7 +826,7 @@ router.post(
 
         const publicState = publicHiLoState(round.state);
         const payout = Math.round(round.betAmount * publicState.multiplier);
-        await settlePayout(tx, userId, "hilo", round.currency, payout, { roundId, correctGuesses: round.state.correctGuesses });
+        await settlePayout(tx, userId, "hilo", payout, { roundId, correctGuesses: round.state.correctGuesses });
         await closeRound(tx, roundId);
 
         const me = await serializeMe(tx, userId, username);
@@ -864,8 +853,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const BlackjackStartSchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -877,11 +865,11 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid blackjack start payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     try {
       const outcome = await prisma.$transaction(async (tx) => {
-        await placeWager(tx, userId, "blackjack", currency, betAmount, {});
+        await placeWager(tx, userId, "blackjack", betAmount, {});
         let state = newBlackjackState();
 
         if (isNaturalBlackjack(state)) {
@@ -892,15 +880,15 @@ router.post(
           state = standResult.state;
           const multiplier = blackjackPayoutMultiplier(standResult.outcome);
           const payout = Math.round(betAmount * multiplier);
-          await settlePayout(tx, userId, "blackjack", currency, payout, { outcome: standResult.outcome });
+          await settlePayout(tx, userId, "blackjack", payout, { outcome: standResult.outcome });
 
-          const roundId = await createRound(tx, userId, "blackjack", betAmount, currency, state);
+          const roundId = await createRound(tx, userId, "blackjack", betAmount, "GC", state);
           await closeRound(tx, roundId);
           const me = await serializeMe(tx, userId, username);
           return { roundId, state: publicBlackjackState(state, standResult.outcome), payout, user: me };
         }
 
-        const roundId = await createRound(tx, userId, "blackjack", betAmount, currency, state);
+        const roundId = await createRound(tx, userId, "blackjack", betAmount, "GC", state);
         const me = await serializeMe(tx, userId, username);
         return { roundId, state: publicBlackjackState(state), payout: null, user: me };
       });
@@ -973,7 +961,7 @@ router.post(
         const multiplier = blackjackPayoutMultiplier(standResult.outcome);
         const payout = Math.round(round.betAmount * multiplier);
 
-        await settlePayout(tx, userId, "blackjack", round.currency, payout, { roundId, outcome: standResult.outcome });
+        await settlePayout(tx, userId, "blackjack", payout, { roundId, outcome: standResult.outcome });
         await closeRound(tx, roundId);
 
         const me = await serializeMe(tx, userId, username);
@@ -996,8 +984,7 @@ router.post(
 // ---------------------------------------------------------------------
 
 const VideoPokerDealSchema = z.object({
-  betAmount: BetAmountSchema,
-  currency: CurrencySchema
+  betAmount: BetAmountSchema
 });
 
 router.post(
@@ -1009,13 +996,13 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid videopoker deal payload", code: "INVALID_INPUT" });
     }
-    const { betAmount, currency } = parsed.data;
+    const { betAmount } = parsed.data;
 
     try {
       const [roundId, hand, me] = await prisma.$transaction(async (tx) => {
-        await placeWager(tx, userId, "videopoker", currency, betAmount, {});
+        await placeWager(tx, userId, "videopoker", betAmount, {});
         const state = newVideoPokerState();
-        const id = await createRound(tx, userId, "videopoker", betAmount, currency, state);
+        const id = await createRound(tx, userId, "videopoker", betAmount, "GC", state);
         const meResult = await serializeMe(tx, userId, username);
         return [id, publicHand(state), meResult] as const;
       });
@@ -1051,7 +1038,7 @@ router.post(
         const round = await loadActiveRound<VideoPokerRoundState>(tx, userId, "videopoker", roundId);
         const draw = applyVideoPokerDraw(round.state, holds, round.betAmount);
 
-        await settlePayout(tx, userId, "videopoker", round.currency, draw.payout, { roundId, rank: draw.rank });
+        await settlePayout(tx, userId, "videopoker", draw.payout, { roundId, rank: draw.rank });
         await closeRound(tx, roundId);
 
         const me = await serializeMe(tx, userId, username);
@@ -1127,12 +1114,16 @@ router.post(
 
 // ---------------------------------------------------------------------
 // Triple Chance (#46, single-shot) - bonus round offered after every
-// shuffle-cup GC win (signup bonus, attendant claim). GC only, no currency
-// param accepted from the client - see games/triplechance.ts's header for
-// the full mechanic/trust-boundary writeup. betAmount intentionally uses
-// its own bounds (not games/shared.ts's BET_MIN/BET_MAX), since a wager
-// here is a shuffle-cup win (500-2000 GC to start) or a chained previous
-// Triple Chance payout, not a player-configured bet-slider amount.
+// shuffle-cup GC win (signup bonus, attendant claim). GC in, GC out - NOT
+// routed through games/shared.ts's settleSingleShotBet (that function
+// always pays TICKETS now, see its doc comment), because this round is
+// double-or-nothing on GC the player just received from the Coin Kiosk's
+// ad-gated shuffle-cup claim, not a "wager GC to win TICKETS" game round -
+// see games/triplechance.ts's header for the full mechanic/trust-boundary
+// writeup. betAmount intentionally uses its own bounds (not
+// games/shared.ts's BET_MIN/BET_MAX), since a wager here is a shuffle-cup
+// win (500-2000 GC to start) or a chained previous Triple Chance payout,
+// not a player-configured bet-slider amount.
 // ---------------------------------------------------------------------
 
 const TripleChancePlaySchema = z.object({
@@ -1153,9 +1144,20 @@ router.post(
     const result = playTripleChance(betAmount);
 
     const me = await prisma.$transaction(async (tx) => {
-      await settleSingleShotBet(tx, userId, "triplechance", "GC", betAmount, result.payout, {
-        won: result.won
-      });
+      await applyTransaction(tx, userId, "GC", "WAGER_GC", -betAmount, { game: "triplechance", won: result.won });
+      if (result.payout > 0) {
+        // PAYOUT_GC - a GC game payout, exactly what this is (double-or-
+        // nothing on GC just received from the Coin Kiosk). Not retired
+        // along with the rest of the SC-era types even though it's grouped
+        // with them in schema.prisma's enum ordering/comment - it's simply
+        // unused by the 14 GC-wager/TICKETS-payout games now that they go
+        // through GAME_WIN_TICKETS instead, but it's still the right type
+        // for this one GC-in/GC-out exception.
+        await applyTransaction(tx, userId, "GC", "PAYOUT_GC", result.payout, {
+          game: "triplechance",
+          won: result.won
+        });
+      }
       return serializeMe(tx, userId, username);
     });
 

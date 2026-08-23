@@ -1,12 +1,15 @@
 /**
- * Transaction ledger - the single source of truth for GC (Gold Coin) and SC
- * (Sweeps Coin) balances, server-side.
+ * Transaction ledger - the single source of truth for GC (Gold Coin) and
+ * TICKETS balances, server-side.
  *
  * Mirrors casino-poc/src/economy/ledger.ts's rules exactly (see repo-root
- * CLAUDE.md):
- *   - GC and SC are separate ledgers (balances.gold_coins / .stake_coins),
- *     never conflated or convertible into one another.
- *   - No code anywhere is allowed to write balances.gold_coins/stake_coins
+ * CLAUDE.md, "arcade token" model):
+ *   - GC (spend to play) and TICKETS (won from playing, spent in the Item
+ *     Shop) are separate ledgers (balances.gold_coins / .tickets - the
+ *     `tickets` Prisma field is mapped onto the pre-existing `stake_coins`
+ *     physical column, see schema.prisma's header comment), never
+ *     conflated or convertible into one another.
+ *   - No code anywhere is allowed to write balances.gold_coins/tickets
  *     directly - `applyTransaction` (below) is the ONLY function that may.
  *     It always inserts one `transactions` row in the same DB transaction
  *     as the balance update, so there's a complete, inspectable audit
@@ -73,6 +76,8 @@ async function creditOrDebitBalance(
     return rows.length > 0 ? rows[0].gold_coins : null;
   }
 
+  // TICKETS - physical column is still named stake_coins, see this file's
+  // header comment and schema.prisma's.
   const rows = await tx.$queryRaw<{ stake_coins: number }[]>`
     UPDATE balances
     SET stake_coins = stake_coins + ${amount}
@@ -89,11 +94,9 @@ async function creditOrDebitBalance(
  * transaction (`tx`). Throws `InsufficientBalanceError` rather than
  * letting a balance go negative.
  *
- * Hardening ported 1:1 from the client (economy rule: SC is NEVER sold or
- * minted outside the signup bonus and package-bonus paths): a positive
- * (crediting) "ADJUST_SC" is rejected outright. ADJUST_SC exists only as a
- * debit-capable bridge - real SC credits must use SIGNUP_BONUS_SC or
- * PACKAGE_BONUS_SC.
+ * Hardening (economy rule: TICKETS are NEVER sold or minted - they're only
+ * ever won by playing a game): a positive (crediting) amount is rejected
+ * for every TransactionType except GAME_WIN_TICKETS.
  */
 export async function applyTransaction(
   tx: TxClient,
@@ -107,11 +110,10 @@ export async function applyTransaction(
     throw new Error(`applyTransaction: amount must be a non-zero finite number, got ${amount}`);
   }
 
-  if (currency === "SC" && type === "ADJUST_SC" && amount > 0) {
+  if (currency === "TICKETS" && amount > 0 && type !== "GAME_WIN_TICKETS") {
     throw new Error(
-      "applyTransaction: ADJUST_SC cannot credit SC. SC may only be granted via " +
-        "SIGNUP_BONUS_SC (economy/signupBonus.ts) or PACKAGE_BONUS_SC " +
-        "(economy/packages.ts) - see repo-root CLAUDE.md. ADJUST_SC may only debit."
+      `applyTransaction: TICKETS may only be credited via GAME_WIN_TICKETS (got type ${type}) - ` +
+        "see repo-root CLAUDE.md. TICKETS are only ever won by playing, never sold or minted."
     );
   }
 
@@ -120,7 +122,7 @@ export async function applyTransaction(
     // Insufficient balance (or no balances row at all) - fetch the current
     // value just for a helpful error message; nothing was written above.
     const balance = await tx.balance.findUnique({ where: { userId } });
-    const current = balance ? (currency === "GC" ? balance.goldCoins : balance.stakeCoins) : 0;
+    const current = balance ? (currency === "GC" ? balance.goldCoins : balance.tickets) : 0;
     throw new InsufficientBalanceError(currency, current, amount);
   }
 
@@ -149,7 +151,7 @@ export async function applyTransaction(
 export async function getBalance(tx: TxClient, userId: string, currency: Currency): Promise<number> {
   const balance = await tx.balance.findUnique({ where: { userId } });
   if (!balance) return 0;
-  return currency === "GC" ? balance.goldCoins : balance.stakeCoins;
+  return currency === "GC" ? balance.goldCoins : balance.tickets;
 }
 
 export async function canAfford(

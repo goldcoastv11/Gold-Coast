@@ -3,12 +3,11 @@ import request from "supertest";
 import { app } from "../src/app";
 import { resetDb, signupUser, authed } from "./helpers";
 import { GC_MULTIPLIERS, GC_MULTIPLIER_BASE } from "../src/economy/gcMultiplier";
-import { SIGNUP_BONUS_SC } from "../src/economy/signupBonus";
 
 beforeEach(resetDb);
 
 describe("POST /auth/signup", () => {
-  it("creates a user, issues a JWT, and grants the signup bonus (GC via server-resolved multiplier + flat 25 SC)", async () => {
+  it("creates a user, issues a JWT, and grants the signup bonus (GC via server-resolved multiplier, no starting TICKETS)", async () => {
     const res = await request(app).post("/auth/signup").send({ username: "alice", password: "hunter22" });
 
     expect(res.status).toBe(201);
@@ -21,12 +20,8 @@ describe("POST /auth/signup", () => {
     expect(res.body.signupBonus.gcAmount).toBe(GC_MULTIPLIER_BASE * res.body.signupBonus.gcMultiplier);
     expect(res.body.user.goldCoins).toBe(res.body.signupBonus.gcAmount);
 
-    // SC leg is flat regardless of the GC multiplier.
-    expect(res.body.signupBonus.scAmount).toBe(SIGNUP_BONUS_SC);
-    expect(res.body.user.stakeCoins).toBe(SIGNUP_BONUS_SC);
-
-    // Playthrough requirement registered for the SC bonus.
-    expect(res.body.user.playthrough).toEqual({ required: SIGNUP_BONUS_SC, wagered: 0 });
+    // No starting TICKETS - only ever won by playing a game.
+    expect(res.body.user.tickets).toBe(0);
 
     // Default skin/equip state.
     expect(res.body.user.skinsOwned).toEqual(["player"]);
@@ -93,7 +88,7 @@ describe("POST /auth/login", () => {
     const after = await request(app).get("/me").set(authed(token));
 
     expect(after.body.goldCoins).toBe(before.body.goldCoins);
-    expect(after.body.stakeCoins).toBe(before.body.stakeCoins);
+    expect(after.body.tickets).toBe(before.body.tickets);
   });
 });
 

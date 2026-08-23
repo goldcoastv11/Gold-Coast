@@ -7,11 +7,11 @@ import { DRAGON_TOWER_MULTIPLIERS, DRAGON_TOWER_ROWS } from "../src/games/dragon
 beforeEach(resetDb);
 
 describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
-  it("start debits the wager and creates a round without revealing badIndexPerRow", async () => {
+  it("start debits the GC wager and creates a round without revealing badIndexPerRow", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 20, currency: "GC" });
+    const res = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 20 });
 
     expect(res.status).toBe(200);
     expect(res.body.roundId).toBeTruthy();
@@ -22,8 +22,8 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
 
   it("rejects a second start while a round is active", async () => {
     const { token } = await signupUser();
-    await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
-    const second = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
+    const second = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
     expect(second.status).toBe(409);
   });
 
@@ -36,7 +36,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     // 3/4 columns are safe, so this converges in ~1.33 attempts on average.
     let cleared = false;
     for (let attempt = 0; attempt < 20 && !cleared; attempt++) {
-      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
       const res = await request(app).post("/games/dragontower/pick").set(authed(token)).send({ roundId: start.body.roundId, col: 0 });
       if (res.body.isBad) continue;
       cleared = true;
@@ -60,7 +60,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     let goldBeforeBust = 0;
     for (let attempt = 0; attempt < 20 && !bust; attempt++) {
       const before = await request(app).get("/me").set(authed(token));
-      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
       const roundId = start.body.roundId;
 
       for (let row = 0; row < DRAGON_TOWER_ROWS; row++) {
@@ -79,13 +79,13 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(bust!.body.user.goldCoins).toBe(goldBeforeBust - 10);
   });
 
-  it("cash-out after clearing a row credits bet * the exact published multiplier", async () => {
+  it("cash-out after clearing a row credits TICKETS = bet * the exact published multiplier", async () => {
     const { token } = await signupUser();
 
     let roundId: string | null = null;
     let preCashout: request.Response | null = null;
     for (let attempt = 0; attempt < 20 && !roundId; attempt++) {
-      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 50, currency: "GC" });
+      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 50 });
       const res = await request(app).post("/games/dragontower/pick").set(authed(token)).send({ roundId: start.body.roundId, col: 0 });
       if (!res.body.isBad) {
         roundId = start.body.roundId;
@@ -98,19 +98,22 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(cashout.status).toBe(200);
     expect(cashout.body.multiplier).toBe(DRAGON_TOWER_MULTIPLIERS[0]);
     expect(cashout.body.payout).toBe(Math.round(50 * DRAGON_TOWER_MULTIPLIERS[0]));
-    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins + cashout.body.payout);
+    // Cash-out payout is TICKETS - GC was already spent at start().
+    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins);
+    expect(cashout.body.user.tickets).toBe(preCashout!.body.tickets + cashout.body.payout);
   });
 
-  it("reaching the top auto-cashes-out, pays the max multiplier, and reveals badIndexPerRow", async () => {
+  it("reaching the top auto-cashes-out, pays the max multiplier in TICKETS, and reveals badIndexPerRow", async () => {
     const { token } = await signupUser();
 
     // Same "restart on bust" shape as the other tests, just chasing a full
     // clear (all ROWS picks safe) instead of a single safe pick.
     let top: request.Response | null = null;
     let goldBefore = 0;
+    let ticketsBefore = 0;
     for (let attempt = 0; attempt < 200 && !top; attempt++) {
       const before = await request(app).get("/me").set(authed(token));
-      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
       const roundId = start.body.roundId;
 
       let busted = false;
@@ -122,6 +125,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
       if (!busted && last!.body.reachedTop) {
         top = last;
         goldBefore = before.body.goldCoins;
+        ticketsBefore = before.body.tickets;
       }
     }
 
@@ -130,27 +134,28 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(top!.body.multiplier).toBe(DRAGON_TOWER_MULTIPLIERS[DRAGON_TOWER_MULTIPLIERS.length - 1]);
     expect(top!.body.payout).toBe(Math.round(10 * DRAGON_TOWER_MULTIPLIERS[DRAGON_TOWER_MULTIPLIERS.length - 1]));
     expect(top!.body.badIndexPerRow).toHaveLength(DRAGON_TOWER_ROWS);
-    expect(top!.body.user.goldCoins).toBe(goldBefore - 10 + top!.body.payout);
+    expect(top!.body.user.goldCoins).toBe(goldBefore - 10);
+    expect(top!.body.user.tickets).toBe(ticketsBefore + top!.body.payout);
   });
 
   it("rejects cashing out before clearing any row", async () => {
     const { token } = await signupUser();
-    const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
     const res = await request(app).post("/games/dragontower/cashout").set(authed(token)).send({ roundId: start.body.roundId });
     expect(res.status).toBe(400);
   });
 
   it("requires auth", async () => {
-    expect((await request(app).post("/games/dragontower/start").send({ betAmount: 10, currency: "GC" })).status).toBe(401);
+    expect((await request(app).post("/games/dragontower/start").send({ betAmount: 10 })).status).toBe(401);
   });
 });
 
 describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
-  it("start debits the wager and returns the first card without revealing the deck", async () => {
+  it("start debits the GC wager and returns the first card without revealing the deck", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 20, currency: "GC" });
+    const res = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 20 });
 
     expect(res.status).toBe(200);
     expect(res.body.roundId).toBeTruthy();
@@ -171,7 +176,7 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
 
   it("a correct guess increases correctGuesses and the multiplier, and keeps the round active", async () => {
     const { token } = await signupUser();
-    const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10 });
     const roundId = start.body.roundId;
     const { higherCount, lowerCount } = start.body.state;
     const direction = higherCount >= lowerCount ? "higher" : "lower";
@@ -202,7 +207,7 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
     let lost = false;
     for (let attempt = 0; attempt < 30 && !lost; attempt++) {
       const preStart = await request(app).get("/me").set(authed(token));
-      const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10 });
       const roundId = start.body.roundId;
       const { higherCount, lowerCount } = start.body.state;
       // Bias toward the worse-odds side to make a loss likely quickly -
@@ -239,14 +244,14 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
     expect(lost).toBe(true);
   });
 
-  it("cash-out after a correct guess credits bet * the current multiplier", async () => {
+  it("cash-out after a correct guess credits TICKETS = bet * the current multiplier", async () => {
     const { token } = await signupUser();
 
     let roundId: string | null = null;
     let mult = 0;
     let preCashout: request.Response | null = null;
     for (let attempt = 0; attempt < 30 && !roundId; attempt++) {
-      const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10 });
       const { higherCount, lowerCount } = start.body.state;
       const direction = higherCount >= lowerCount ? "higher" : "lower";
       const res = await request(app).post("/games/hilo/guess").set(authed(token)).send({ roundId: start.body.roundId, direction });
@@ -263,17 +268,18 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
     expect(cashout.status).toBe(200);
     expect(cashout.body.multiplier).toBe(mult);
     expect(cashout.body.payout).toBe(Math.round(10 * mult));
-    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins + cashout.body.payout);
+    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins);
+    expect(cashout.body.user.tickets).toBe(preCashout!.body.tickets + cashout.body.payout);
   });
 
   it("rejects cashing out before any correct guess", async () => {
     const { token } = await signupUser();
-    const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const start = await request(app).post("/games/hilo/start").set(authed(token)).send({ betAmount: 10 });
     const res = await request(app).post("/games/hilo/cashout").set(authed(token)).send({ roundId: start.body.roundId });
     expect(res.status).toBe(400);
   });
 
   it("requires auth", async () => {
-    expect((await request(app).post("/games/hilo/start").send({ betAmount: 10, currency: "GC" })).status).toBe(401);
+    expect((await request(app).post("/games/hilo/start").send({ betAmount: 10 })).status).toBe(401);
   });
 });

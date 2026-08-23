@@ -3,12 +3,12 @@ import { prisma } from "../src/db";
 import { applyTransaction, getBalance, InsufficientBalanceError } from "../src/economy/ledger";
 import { resetDb } from "./helpers";
 
-async function makeUser(gc = 0, sc = 0) {
+async function makeUser(gc = 0, tickets = 0) {
   const user = await prisma.user.create({
     data: {
       username: `ledger_user_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       passwordHash: "x",
-      balance: { create: { goldCoins: gc, stakeCoins: sc } }
+      balance: { create: { goldCoins: gc, tickets } }
     }
   });
   return user.id;
@@ -50,26 +50,32 @@ describe("applyTransaction (core ledger)", () => {
     expect(txs).toHaveLength(0);
   });
 
-  it("keeps GC and SC as fully separate ledgers", async () => {
+  it("keeps GC and TICKETS as fully separate ledgers", async () => {
     const userId = await makeUser(1000, 0);
-    await expect(prisma.$transaction((t) => applyTransaction(t, userId, "SC", "WAGER_SC", -1))).rejects.toThrow(
-      InsufficientBalanceError
-    );
+    await expect(
+      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "SKIN_PURCHASE_TICKETS", -1))
+    ).rejects.toThrow(InsufficientBalanceError);
     expect(await prisma.$transaction((t) => getBalance(t, userId, "GC"))).toBe(1000);
   });
 
-  it("rejects a crediting ADJUST_SC outright - SC may only be minted via SIGNUP_BONUS_SC/PACKAGE_BONUS_SC", async () => {
+  it("rejects crediting TICKETS via anything other than GAME_WIN_TICKETS", async () => {
     const userId = await makeUser(0, 100);
-    await expect(prisma.$transaction((t) => applyTransaction(t, userId, "SC", "ADJUST_SC", 50))).rejects.toThrow(
-      /ADJUST_SC cannot credit SC/
-    );
+    await expect(
+      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "ADJUST_GC" as never, 50))
+    ).rejects.toThrow(/TICKETS may only be credited via GAME_WIN_TICKETS/);
     // Balance untouched.
-    expect(await prisma.$transaction((t) => getBalance(t, userId, "SC"))).toBe(100);
+    expect(await prisma.$transaction((t) => getBalance(t, userId, "TICKETS"))).toBe(100);
   });
 
-  it("allows a debiting ADJUST_SC (legacy bridge, debit-only)", async () => {
+  it("allows crediting TICKETS via GAME_WIN_TICKETS - the one sanctioned path", async () => {
+    const userId = await makeUser(0, 0);
+    const tx = await prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "GAME_WIN_TICKETS", 250));
+    expect(tx.balanceAfter).toBe(250);
+  });
+
+  it("allows debiting TICKETS via SKIN_PURCHASE_TICKETS", async () => {
     const userId = await makeUser(0, 100);
-    const tx = await prisma.$transaction((t) => applyTransaction(t, userId, "SC", "ADJUST_SC", -30));
+    const tx = await prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "SKIN_PURCHASE_TICKETS", -30));
     expect(tx.balanceAfter).toBe(70);
   });
 

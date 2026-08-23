@@ -11,16 +11,17 @@ import { buildWheelSegments, WHEEL_SEGMENT_COUNT } from "../src/games/wheel";
 beforeEach(resetDb);
 
 describe("POST /games/coinflip/play", () => {
-  it("pays exactly 2x on a win, nothing on a loss", async () => {
+  it("pays exactly 2x TICKETS on a win, nothing on a loss; GC wager always spent", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/coinflip/play").set(authed(token)).send({ betAmount: 10, currency: "GC", guess: "heads" });
+    const res = await request(app).post("/games/coinflip/play").set(authed(token)).send({ betAmount: 10, guess: "heads" });
 
     expect(res.status).toBe(200);
     expect(res.body.result.won).toBe(res.body.result.result === "heads");
     expect(res.body.result.payout).toBe(res.body.result.won ? 20 : 0);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 
   it("lands close to 50/50 over many rounds", async () => {
@@ -28,7 +29,7 @@ describe("POST /games/coinflip/play", () => {
     let wins = 0;
     let trials = 0;
     for (let i = 0; i < 300; i++) {
-      const res = await request(app).post("/games/coinflip/play").set(authed(token)).send({ betAmount: 5, currency: "GC", guess: "heads" });
+      const res = await request(app).post("/games/coinflip/play").set(authed(token)).send({ betAmount: 5, guess: "heads" });
       if (res.status !== 200) break;
       trials++;
       if (res.body.result.won) wins++;
@@ -40,91 +41,96 @@ describe("POST /games/coinflip/play", () => {
 });
 
 describe("POST /games/roulette/play", () => {
-  it("pays the correct color multiplier and the number/color are consistent", async () => {
+  it("pays the correct color multiplier in TICKETS and the number/color are consistent", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/roulette/play").set(authed(token)).send({ betAmount: 10, currency: "GC", bet: "red" });
+    const res = await request(app).post("/games/roulette/play").set(authed(token)).send({ betAmount: 10, bet: "red" });
 
     expect(res.status).toBe(200);
     expect(res.body.result.color).toBe(colorOf(res.body.result.number));
     const won = res.body.result.color === "red";
     expect(res.body.result.won).toBe(won);
     expect(res.body.result.payout).toBe(won ? 10 * ROULETTE_PAYOUTS.red : 0);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 
   it("rejects an invalid bet color", async () => {
     const { token } = await signupUser();
-    const res = await request(app).post("/games/roulette/play").set(authed(token)).send({ betAmount: 10, currency: "GC", bet: "purple" });
+    const res = await request(app).post("/games/roulette/play").set(authed(token)).send({ betAmount: 10, bet: "purple" });
     expect(res.status).toBe(400);
   });
 });
 
 describe("POST /games/limbo/play", () => {
-  it("pays exactly bet * target on a win (crashPoint >= target), nothing on a loss", async () => {
+  it("pays exactly bet * target in TICKETS on a win (crashPoint >= target), nothing on a loss", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/limbo/play").set(authed(token)).send({ betAmount: 10, currency: "GC", target: 2 });
+    const res = await request(app).post("/games/limbo/play").set(authed(token)).send({ betAmount: 10, target: 2 });
 
     expect(res.status).toBe(200);
     const won = res.body.result.crashPoint >= 2;
     expect(res.body.result.won).toBe(won);
     expect(res.body.result.payout).toBe(won ? Math.round(10 * 2) : 0);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 
   it("rejects a target of 1x or less", async () => {
     const { token } = await signupUser();
-    const res = await request(app).post("/games/limbo/play").set(authed(token)).send({ betAmount: 10, currency: "GC", target: 1 });
+    const res = await request(app).post("/games/limbo/play").set(authed(token)).send({ betAmount: 10, target: 1 });
     expect(res.status).toBe(400);
   });
 });
 
 describe("POST /games/plinko/play", () => {
-  it("pays the multiplier for the landed slot, and the path is internally consistent with the slot", async () => {
+  it("pays the multiplier for the landed slot in TICKETS, and the path is internally consistent with the slot", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/plinko/play").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const res = await request(app).post("/games/plinko/play").set(authed(token)).send({ betAmount: 10 });
 
     expect(res.status).toBe(200);
     expect(res.body.result.path).toHaveLength(PLINKO_ROWS);
     expect(res.body.result.path[PLINKO_ROWS - 1]).toBe(res.body.result.slotIndex);
     expect(res.body.result.multiplier).toBe(PLINKO_MULTIPLIERS[res.body.result.slotIndex]);
     expect(res.body.result.payout).toBe(Math.round(10 * res.body.result.multiplier));
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 });
 
 describe("POST /games/slots/play", () => {
-  it("resolves 3 reels and pays according to 2-of-a-kind/3-of-a-kind matches", async () => {
+  it("resolves 3 reels and pays TICKETS according to 2-of-a-kind/3-of-a-kind matches", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/slots/play").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const res = await request(app).post("/games/slots/play").set(authed(token)).send({ betAmount: 10 });
 
     expect(res.status).toBe(200);
     expect(res.body.result.reels).toHaveLength(3);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 });
 
 describe("POST /games/keno/play", () => {
-  it("pays exactly the published combinatorial multiplier for the actual hit count", async () => {
+  it("pays exactly the published combinatorial multiplier in TICKETS for the actual hit count", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
     const picks = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 
-    const res = await request(app).post("/games/keno/play").set(authed(token)).send({ betAmount: 10, currency: "GC", picks });
+    const res = await request(app).post("/games/keno/play").set(authed(token)).send({ betAmount: 10, picks });
 
     expect(res.status).toBe(200);
     expect(res.body.result.drawn).toHaveLength(10);
     const expectedMult = kenoMultiplier(10, res.body.result.hits);
     expect(res.body.result.multiplier).toBe(expectedMult);
     expect(res.body.result.payout).toBe(Math.round(10 * expectedMult));
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 
   it("pays 0 below the minimum pay-hits threshold for that pick count", () => {
@@ -133,7 +139,7 @@ describe("POST /games/keno/play", () => {
 
   it("rejects duplicate picks", async () => {
     const { token } = await signupUser();
-    const res = await request(app).post("/games/keno/play").set(authed(token)).send({ betAmount: 10, currency: "GC", picks: [1, 1, 2] });
+    const res = await request(app).post("/games/keno/play").set(authed(token)).send({ betAmount: 10, picks: [1, 1, 2] });
     expect(res.status).toBe(400);
   });
 
@@ -142,7 +148,7 @@ describe("POST /games/keno/play", () => {
     const res = await request(app)
       .post("/games/keno/play")
       .set(authed(token))
-      .send({ betAmount: 10, currency: "GC", picks: Array.from({ length: 11 }, (_, i) => i) });
+      .send({ betAmount: 10, picks: Array.from({ length: 11 }, (_, i) => i) });
     expect(res.status).toBe(400);
   });
 
@@ -182,41 +188,43 @@ describe("POST /games/keno/play", () => {
 });
 
 describe("POST /games/wheel/play", () => {
-  it("pays exactly the segment the server landed on, and segments match the published per-risk layout", async () => {
+  it("pays exactly the segment the server landed on in TICKETS, and segments match the published per-risk layout", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/wheel/play").set(authed(token)).send({ betAmount: 10, currency: "GC", risk: "high" });
+    const res = await request(app).post("/games/wheel/play").set(authed(token)).send({ betAmount: 10, risk: "high" });
 
     expect(res.status).toBe(200);
     expect(res.body.result.segments).toEqual(buildWheelSegments("high"));
     expect(res.body.result.segments).toHaveLength(WHEEL_SEGMENT_COUNT);
     expect(res.body.result.multiplier).toBe(res.body.result.segments[res.body.result.landingIndex]);
     expect(res.body.result.payout).toBe(Math.round(10 * res.body.result.multiplier));
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 });
 
 describe("POST /games/baccarat/play", () => {
-  it("player bet pays 2x on a player win, pushes (1x) on a tie, loses on banker win", async () => {
+  it("player bet pays 2x TICKETS on a player win, pushes (1x) on a tie, loses on banker win", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/baccarat/play").set(authed(token)).send({ betAmount: 10, currency: "GC", betType: "player" });
+    const res = await request(app).post("/games/baccarat/play").set(authed(token)).send({ betAmount: 10, betType: "player" });
 
     expect(res.status).toBe(200);
     const { outcome } = res.body.result;
     if (outcome === "player") expect(res.body.result.payout).toBe(Math.round(10 * PLAYER_WIN_MULT));
     else if (outcome === "tie") expect(res.body.result.payout).toBe(10);
     else expect(res.body.result.payout).toBe(0);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
   });
 
-  it("banker bet pays 1.95x on a banker win", async () => {
+  it("banker bet pays 1.95x TICKETS on a banker win", async () => {
     const { token } = await signupUser();
     let found = false;
     for (let i = 0; i < 60 && !found; i++) {
-      const res = await request(app).post("/games/baccarat/play").set(authed(token)).send({ betAmount: 5, currency: "GC", betType: "banker" });
+      const res = await request(app).post("/games/baccarat/play").set(authed(token)).send({ betAmount: 5, betType: "banker" });
       if (res.status !== 200) break;
       if (res.body.result.outcome === "banker") {
         expect(res.body.result.payout).toBe(Math.round(5 * BANKER_WIN_MULT));
@@ -226,12 +234,12 @@ describe("POST /games/baccarat/play", () => {
     expect(found).toBe(true);
   });
 
-  it("tie bet pays 9x on a tie and loses on anything else", async () => {
+  it("tie bet pays 9x TICKETS on a tie and loses on anything else", async () => {
     const { token } = await signupUser();
     let sawTieWin = false;
     let sawTieLoss = false;
     for (let i = 0; i < 200 && !(sawTieWin && sawTieLoss); i++) {
-      const res = await request(app).post("/games/baccarat/play").set(authed(token)).send({ betAmount: 5, currency: "GC", betType: "tie" });
+      const res = await request(app).post("/games/baccarat/play").set(authed(token)).send({ betAmount: 5, betType: "tie" });
       if (res.status !== 200) break;
       if (res.body.result.outcome === "tie") {
         expect(res.body.result.payout).toBe(Math.round(5 * TIE_WIN_MULT));

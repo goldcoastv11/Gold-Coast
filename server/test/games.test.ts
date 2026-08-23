@@ -1,21 +1,37 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/app";
+import { prisma } from "../src/db";
+import { applyTransaction } from "../src/economy/ledger";
 import { resetDb, signupUser, authed } from "./helpers";
 import { diceMultiplier } from "../src/games/dice";
 import { minesMultiplier, MINES_COUNT, MINES_TOTAL_TILES } from "../src/games/mines";
 
 beforeEach(resetDb);
 
+/**
+ * In the arcade-token model, GC is spent on every play regardless of
+ * win/lose (wins pay TICKETS, not GC) - so a fixed-size trial loop
+ * genuinely can and does exhaust a fresh signup's finite GC balance well
+ * before finishing, the same class of bug games5.test.ts's `topUpGold`
+ * already guards against for Triple Chance. Seed a bankroll via the real
+ * ledger (ADJUST_GC) so a long probabilistic trial loop can actually run
+ * to completion.
+ */
+async function topUpGold(username: string, amount: number): Promise<void> {
+  const user = await prisma.user.findUniqueOrThrow({ where: { username } });
+  await prisma.$transaction((tx) => applyTransaction(tx, user.id, "GC", "ADJUST_GC", amount, { reason: "test bankroll top-up" }));
+}
+
 describe("POST /games/dice/play (single-shot reference)", () => {
-  it("resolves a round in one request: debits the wager, credits payout only on a win, matches the published multiplier formula", async () => {
+  it("resolves a round in one request: always debits GC, credits TICKETS only on a win, matches the published multiplier formula", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
     const res = await request(app)
       .post("/games/dice/play")
       .set(authed(token))
-      .send({ betAmount: 10, currency: "GC", target: 50 });
+      .send({ betAmount: 10, target: 50 });
 
     expect(res.status).toBe(200);
     expect(res.body.result.target).toBe(50);
@@ -23,19 +39,23 @@ describe("POST /games/dice/play (single-shot reference)", () => {
     expect(res.body.result.roll).toBeGreaterThanOrEqual(0);
     expect(res.body.result.roll).toBeLessThanOrEqual(99);
 
+    // The GC wager is always spent, win or lose - it's a play token, not a stake.
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+
     const won = res.body.result.roll < 50;
     expect(res.body.result.won).toBe(won);
     if (won) {
       expect(res.body.result.payout).toBe(Math.round(10 * diceMultiplier(50)));
-      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
+      expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
     } else {
       expect(res.body.result.payout).toBe(0);
-      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+      expect(res.body.user.tickets).toBe(before.body.tickets);
     }
   });
 
   it("lands close to the target win rate over many rounds (probabilistic, not a single deterministic check)", async () => {
-    const { token } = await signupUser();
+    const { token, username } = await signupUser();
+    await topUpGold(username, 10_000); // GC is spent every play now, win or lose - needs a real bankroll for 300 trials.
     const target = 50;
     const trials = 300;
     let wins = 0;
@@ -43,7 +63,7 @@ describe("POST /games/dice/play (single-shot reference)", () => {
       const res = await request(app)
         .post("/games/dice/play")
         .set(authed(token))
-        .send({ betAmount: 5, currency: "GC", target });
+        .send({ betAmount: 5, target });
       // Balance may run out partway through (that's fine/expected) - stop early rather than asserting on a 400.
       if (res.status !== 200) break;
       if (res.body.result.won) wins++;
@@ -53,29 +73,21 @@ describe("POST /games/dice/play (single-shot reference)", () => {
     expect(wins).toBeLessThan(200);
   });
 
-  it("rejects a bet the player can't afford (SC balance is always exactly 25 for a fresh signup)", async () => {
+  it("rejects a bet the player can't afford in GC", async () => {
     const { token } = await signupUser();
 
-    const res = await request(app)
-      .post("/games/dice/play")
-      .set(authed(token))
-      .send({ betAmount: 30, currency: "SC", target: 50 });
+    // Signup GC (500/1000/2000, always a multiple of 5) always spends
+    // exactly `betAmount` GC on the wager regardless of win/lose (the
+    // arcade-token model), so repeatedly betting the minimum drains the
+    // balance to exactly 0 - then one more bet must be rejected.
+    let last: request.Response;
+    do {
+      last = await request(app).post("/games/dice/play").set(authed(token)).send({ betAmount: 5, target: 50 });
+    } while (last.status === 200 && last.body.user.goldCoins > 0);
 
+    const res = await request(app).post("/games/dice/play").set(authed(token)).send({ betAmount: 5, target: 50 });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("INSUFFICIENT_BALANCE");
-  });
-
-  it("registers SC playthrough progress when betting SC", async () => {
-    const { token } = await signupUser();
-    const before = await request(app).get("/me").set(authed(token));
-
-    const res = await request(app)
-      .post("/games/dice/play")
-      .set(authed(token))
-      .send({ betAmount: 5, currency: "SC", target: 50 });
-
-    expect(res.status).toBe(200);
-    expect(res.body.user.playthrough.wagered).toBe(before.body.playthrough.wagered + 5);
   });
 
   it("rejects an out-of-range target", async () => {
@@ -83,23 +95,23 @@ describe("POST /games/dice/play (single-shot reference)", () => {
     const res = await request(app)
       .post("/games/dice/play")
       .set(authed(token))
-      .send({ betAmount: 10, currency: "GC", target: 3 });
+      .send({ betAmount: 10, target: 3 });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("INVALID_INPUT");
   });
 
   it("requires auth", async () => {
-    const res = await request(app).post("/games/dice/play").send({ betAmount: 10, currency: "GC", target: 50 });
+    const res = await request(app).post("/games/dice/play").send({ betAmount: 10, target: 50 });
     expect(res.status).toBe(401);
   });
 });
 
 describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () => {
-  it("start debits the wager, creates a round, and never reveals mine positions", async () => {
+  it("start debits GC, creates a round, and never reveals mine positions", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 20, currency: "GC" });
+    const res = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 20 });
 
     expect(res.status).toBe(200);
     expect(res.body.roundId).toBeTruthy();
@@ -110,10 +122,10 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
 
   it("rejects starting a second round while one is already active", async () => {
     const { token } = await signupUser();
-    const first = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const first = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });
     expect(first.status).toBe(200);
 
-    const second = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const second = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });
     expect(second.status).toBe(409);
     expect(second.body.code).toBe("ROUND_ALREADY_ACTIVE");
   });
@@ -129,7 +141,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     // safe, so this converges in ~1.14 attempts on average.
     let picked = false;
     for (let attempt = 0; attempt < 20 && !picked; attempt++) {
-      const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });
       const roundId = start.body.roundId;
       const res = await request(app).post("/games/mines/pick").set(authed(token)).send({ roundId, tileIndex: 0 });
       if (res.body.hitMine) continue;
@@ -146,7 +158,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
   it("hitting a mine ends the round with no payout and reveals the mine positions", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
-    const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });
     const roundId = start.body.roundId;
 
     // Keep picking until we hit a mine (guaranteed within MINES_TOTAL_TILES picks).
@@ -163,8 +175,9 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(hit!.status).toBe(200);
     expect(hit!.body.minePositions).toHaveLength(MINES_COUNT);
     expect(hit!.body.payout).toBe(0);
-    // Bet was already debited at start and never refunded - net loss of the full bet.
+    // Bet was already debited (GC) at start and never refunded - net loss of the full bet, no TICKETS.
     expect(hit!.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    expect(hit!.body.user.tickets).toBe(before.body.tickets);
 
     // Round is over - a further pick against the same roundId is rejected.
     const after = await request(app).post("/games/mines/pick").set(authed(token)).send({ roundId, tileIndex: 0 });
@@ -172,14 +185,14 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(after.body.code).toBe("NO_ACTIVE_ROUND");
   });
 
-  it("cash-out after at least one safe pick credits bet * the exact published multiplier, and closes the round", async () => {
+  it("cash-out after at least one safe pick credits TICKETS = bet * the exact published multiplier, and closes the round", async () => {
     const { token } = await signupUser();
 
     // Same "restart on a mine, don't keep polling the now-closed round"
     // pattern as the test above.
     let roundId: string | null = null;
     for (let attempt = 0; attempt < 20 && !roundId; attempt++) {
-      const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 40, currency: "GC" });
+      const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 40 });
       const res = await request(app).post("/games/mines/pick").set(authed(token)).send({ roundId: start.body.roundId, tileIndex: 0 });
       if (!res.body.hitMine) roundId = start.body.roundId;
     }
@@ -197,7 +210,9 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(cashout.body.multiplier).toBe(minesMultiplier(1));
     expect(cashout.body.payout).toBe(Math.round(40 * minesMultiplier(1)));
     expect(cashout.body.minePositions).toHaveLength(MINES_COUNT);
-    expect(cashout.body.user.goldCoins).toBe(preCashout.body.goldCoins + cashout.body.payout);
+    // Cash-out payout is TICKETS, not GC - GC was already spent at start().
+    expect(cashout.body.user.goldCoins).toBe(preCashout.body.goldCoins);
+    expect(cashout.body.user.tickets).toBe(preCashout.body.tickets + cashout.body.payout);
 
     // Round is closed - a second cash-out attempt is rejected, not double-paid.
     const again = await request(app).post("/games/mines/cashout").set(authed(token)).send({ roundId });
@@ -206,7 +221,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
 
   it("rejects cashing out before any tile has been revealed", async () => {
     const { token } = await signupUser();
-    const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });
 
     const res = await request(app).post("/games/mines/cashout").set(authed(token)).send({ roundId: start.body.roundId });
     expect(res.status).toBe(400);
@@ -216,7 +231,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
   it("rejects picking a round that belongs to someone else", async () => {
     const alice = await signupUser();
     const bob = await signupUser();
-    const start = await request(app).post("/games/mines/start").set(authed(alice.token)).send({ betAmount: 10, currency: "GC" });
+    const start = await request(app).post("/games/mines/start").set(authed(alice.token)).send({ betAmount: 10 });
 
     const res = await request(app)
       .post("/games/mines/pick")
@@ -231,7 +246,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
 
     let roundId: string | null = null;
     for (let attempt = 0; attempt < 20 && !roundId; attempt++) {
-      const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });
       const res = await request(app).post("/games/mines/pick").set(authed(token)).send({ roundId: start.body.roundId, tileIndex: 0 });
       if (!res.body.hitMine) roundId = start.body.roundId;
     }
@@ -243,7 +258,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
   });
 
   it("requires auth on every mines endpoint", async () => {
-    expect((await request(app).post("/games/mines/start").send({ betAmount: 10, currency: "GC" })).status).toBe(401);
+    expect((await request(app).post("/games/mines/start").send({ betAmount: 10 })).status).toBe(401);
     expect((await request(app).post("/games/mines/pick").send({ roundId: "x", tileIndex: 0 })).status).toBe(401);
     expect((await request(app).post("/games/mines/cashout").send({ roundId: "x" })).status).toBe(401);
   });

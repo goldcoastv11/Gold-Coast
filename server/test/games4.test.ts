@@ -7,11 +7,11 @@ import { VIDEO_POKER_PAYTABLE } from "../src/games/videopoker";
 beforeEach(resetDb);
 
 describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
-  it("start debits the wager, deals 2+2 cards, and hides the dealer's hole card unless it's a natural", async () => {
+  it("start debits the GC wager, deals 2+2 cards, and hides the dealer's hole card unless it's a natural", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 20, currency: "GC" });
+    const res = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 20 });
 
     expect(res.status).toBe(200);
     expect(res.body.roundId).toBeTruthy();
@@ -21,13 +21,14 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
 
     if (res.body.state.playerTotal === 21) {
       // Natural blackjack - the round auto-stands, dealer plays out and pays
-      // out within this same /start call, so goldCoins already reflects both
-      // the -20 debit AND the payout (win=40, push=20) - not a flat -20.
+      // out within this same /start call. The GC wager is spent regardless
+      // (-20 flat); any win (win=40, push=20) is credited as TICKETS, not GC.
       expect(res.body.state.status).toBe("resolved");
       expect(res.body.state.dealerHand).not.toBeNull();
       expect(["win", "push"]).toContain(res.body.state.outcome);
       expect(res.body.payout).toBe(res.body.state.outcome === "win" ? 40 : 20);
-      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20 + res.body.payout);
+      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20);
+      expect(res.body.user.tickets).toBe(before.body.tickets + res.body.payout);
     } else {
       expect(res.body.state.status).toBe("playing");
       expect(res.body.state.dealerHand).toBeNull();
@@ -49,11 +50,11 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
     // own "busting on hit" test already uses.
     let first: request.Response | null = null;
     for (let attempt = 0; attempt < 40 && (!first || first.body.state.status === "resolved"); attempt++) {
-      first = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      first = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10 });
     }
     expect(first!.body.state.status).toBe("playing");
 
-    const second = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const second = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10 });
     expect(second.status).toBe(409);
   });
 
@@ -69,7 +70,7 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
     let goldBeforeBust = 0;
     for (let attempt = 0; attempt < 40 && !bust; attempt++) {
       const before = await request(app).get("/me").set(authed(token));
-      const start = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10 });
       if (start.body.state.status === "resolved") continue; // natural blackjack, nothing to hit
       const roundId = start.body.roundId;
 
@@ -107,7 +108,7 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
     const { token } = await signupUser();
     let roundId: string | null = null;
     for (let attempt = 0; attempt < 40 && !roundId; attempt++) {
-      const start = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10 });
       if (start.body.state.status === "resolved") continue; // natural - already resolved via start, nothing to stand
       roundId = start.body.roundId;
       const stand = await request(app).post("/games/blackjack/stand").set(authed(token)).send({ roundId });
@@ -119,14 +120,14 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("standing runs the dealer to >=17 and settles win/push/lose with the correct payout", async () => {
+  it("standing runs the dealer to >=17 and settles win/push/lose, with any payout in TICKETS", async () => {
     const { token } = await signupUser();
 
     let roundId: string | null = null;
     let before: request.Response | null = null;
     for (let attempt = 0; attempt < 40 && !roundId; attempt++) {
       before = await request(app).get("/me").set(authed(token));
-      const start = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+      const start = await request(app).post("/games/blackjack/start").set(authed(token)).send({ betAmount: 10 });
       if (start.body.state.status === "resolved") continue; // skip naturals for this test, they auto-stand already
       roundId = start.body.roundId;
     }
@@ -141,7 +142,8 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
 
     const expectedMult = res.body.state.outcome === "win" ? 2 : res.body.state.outcome === "push" ? 1 : 0;
     expect(res.body.payout).toBe(10 * expectedMult);
-    expect(res.body.user.goldCoins).toBe(before!.body.goldCoins - 10 + res.body.payout);
+    expect(res.body.user.goldCoins).toBe(before!.body.goldCoins - 10);
+    expect(res.body.user.tickets).toBe(before!.body.tickets + res.body.payout);
 
     // Round is closed now - a further stand or hit must 404, not double-pay.
     const again = await request(app).post("/games/blackjack/stand").set(authed(token)).send({ roundId });
@@ -149,16 +151,16 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
   });
 
   it("requires auth", async () => {
-    expect((await request(app).post("/games/blackjack/start").send({ betAmount: 10, currency: "GC" })).status).toBe(401);
+    expect((await request(app).post("/games/blackjack/start").send({ betAmount: 10 })).status).toBe(401);
   });
 });
 
 describe("POST /games/videopoker/* (deal / draw)", () => {
-  it("deal debits the wager and returns a fresh 5-card hand", async () => {
+  it("deal debits the GC wager and returns a fresh 5-card hand", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
-    const res = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 20, currency: "GC" });
+    const res = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 20 });
 
     expect(res.status).toBe(200);
     expect(res.body.roundId).toBeTruthy();
@@ -172,14 +174,14 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
 
   it("rejects a second deal while a round is active", async () => {
     const { token } = await signupUser();
-    await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10, currency: "GC" });
-    const second = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
+    const second = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
     expect(second.status).toBe(409);
   });
 
-  it("holding all 5 cards on draw returns the exact same hand and scores it as dealt", async () => {
+  it("holding all 5 cards on draw returns the exact same hand, scores it as dealt, and pays TICKETS", async () => {
     const { token } = await signupUser();
-    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
     const dealtHand = deal.body.hand;
     const before = await request(app).get("/me").set(authed(token));
 
@@ -195,12 +197,14 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
     const expectedEntry = VIDEO_POKER_PAYTABLE.find((e) => e.rank === res.body.rank)!;
     expect(res.body.multiplier).toBe(expectedEntry.mult);
     expect(res.body.payout).toBe(10 * expectedEntry.mult);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins + res.body.payout);
+    // The GC wager was already spent at deal() - draw's payout is TICKETS.
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins);
+    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.payout);
   });
 
   it("holding nothing draws 5 fresh cards and scores according to the paytable", async () => {
     const { token } = await signupUser();
-    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
 
     const res = await request(app)
       .post("/games/videopoker/draw")
@@ -217,7 +221,7 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
 
   it("rejects a holds array that isn't exactly 5 entries", async () => {
     const { token } = await signupUser();
-    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
 
     const res = await request(app)
       .post("/games/videopoker/draw")
@@ -229,7 +233,7 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
 
   it("rejects drawing on a round that's already resolved", async () => {
     const { token } = await signupUser();
-    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10, currency: "GC" });
+    const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
     const holds = [true, true, true, true, true];
     await request(app).post("/games/videopoker/draw").set(authed(token)).send({ roundId: deal.body.roundId, holds });
 
@@ -238,6 +242,6 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
   });
 
   it("requires auth", async () => {
-    expect((await request(app).post("/games/videopoker/deal").send({ betAmount: 10, currency: "GC" })).status).toBe(401);
+    expect((await request(app).post("/games/videopoker/deal").send({ betAmount: 10 })).status).toBe(401);
   });
 });
