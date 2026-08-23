@@ -2,15 +2,29 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
 
-const WHEEL_CENTER_X = 400;
-const WHEEL_CENTER_Y = 292;
+// Stake-style layout: wheel centered in the shell's right-side display
+// area (see ui/uiHelpers.ts's makeGameShell), not the old canvas center -
+// the sidebar now occupies the left third of the screen. The display area
+// is ~430px wide (x: 360-790), comfortably wider than the wheel's 216px
+// diameter, so no scale-down is needed here.
+const WHEEL_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
+const WHEEL_CENTER_Y = GAME_SHELL_DISPLAY_CENTER_Y - 8;
 const WHEEL_RADIUS = 108;
 
 type RiskKey = "low" | "medium" | "high";
@@ -124,6 +138,7 @@ export class WheelScene extends Phaser.Scene {
   private messageText!: Phaser.GameObjects.Text;
   private spinBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("WheelScene");
@@ -140,22 +155,19 @@ export class WheelScene extends Phaser.Scene {
       this.tweens.killTweensOf(this.wheelContainer);
     });
 
-    makePanel(this, 400, 300, 480, 560);
-
-    this.add
-      .text(400, 42, "WHEEL", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 74, 380, 28, 14);
-    this.balanceText = this.add
-      .text(400, 74, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 104, () => {});
+    // Stake-style shell: left sidebar (title/balance/bet/message/Spin/
+    // Walk Away) + open right-side display area for the wheel/risk
+    // selector/legend - see ui/uiHelpers.ts's makeGameShell doc comment.
+    this.shell = makeGameShell(this, "WHEEL", "SPIN", {
+      onStart: () => this.spin(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.betControl = this.shell.betControl;
+    this.spinBtn = this.shell.startBtn;
+    this.messageText.setText("Pick a risk level and spin").setColor(Theme.textMuted);
 
     this.renderRiskButtons();
 
@@ -176,20 +188,12 @@ export class WheelScene extends Phaser.Scene {
       .setDepth(10);
 
     this.legendText = this.add
-      .text(400, 428, "", { fontSize: "11px", color: Theme.textGold, align: "center" })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 128, "", {
+        fontSize: "11px",
+        color: Theme.textGold,
+        align: "center"
+      })
       .setOrigin(0.5);
-
-    this.messageText = this.add
-      .text(400, 450, "Pick a risk level and spin", { fontSize: "13px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    this.spinBtn = makeButton(this, 400, 490, 200, 48, "SPIN", Theme.accent, Theme.accentHover, () =>
-      this.spin()
-    );
-
-    makeButton(this, 400, 542, 200, 32, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
 
     this.rebuildWheel();
     this.updateBalance();
@@ -199,14 +203,18 @@ export class WheelScene extends Phaser.Scene {
     Object.values(this.riskButtons).forEach((b) => b?.destroy());
     this.riskButtons = {};
 
-    const xs: Record<RiskKey, number> = { low: 280, medium: 400, high: 520 };
+    const xs: Record<RiskKey, number> = {
+      low: GAME_SHELL_DISPLAY_CENTER_X - 120,
+      medium: GAME_SHELL_DISPLAY_CENTER_X,
+      high: GAME_SHELL_DISPLAY_CENTER_X + 120
+    };
     (Object.keys(RISK_CONFIGS) as RiskKey[]).forEach((key) => {
       const cfg = RISK_CONFIGS[key];
       const selected = key === this.risk;
       this.riskButtons[key] = makeButton(
         this,
         xs[key],
-        134,
+        GAME_SHELL_DISPLAY_CENTER_Y - 166,
         110,
         30,
         cfg.label,

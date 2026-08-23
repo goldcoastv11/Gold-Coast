@@ -2,7 +2,16 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { CoinSide } from "../api/types";
@@ -13,9 +22,11 @@ export class CoinFlipScene extends Phaser.Scene {
   private balanceText!: Phaser.GameObjects.Text;
   private headsBtn?: UIButton;
   private tailsBtn?: UIButton;
+  private walkAwayBtn?: UIButton;
   private flipping = false;
   private flipTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
   /** Onboarding tutorial's "Play a Game" hands-on step - see gameState.tutorialAwaitingGamePlay's doc comment and OverworldScene.runHandsOnGameStep. */
   private tutorialHint?: Phaser.GameObjects.Text;
 
@@ -36,31 +47,35 @@ export class CoinFlipScene extends Phaser.Scene {
       }
     });
 
-    makePanel(this, 400, 300, 460, 420);
+    // Stake-style shell: left sidebar (title/balance/bet/message/
+    // Walk Away) + open right-side display area for the coin - see
+    // ui/uiHelpers.ts's makeGameShell doc comment. Coin Flip has two
+    // equally-primary actions (HEADS/TAILS), neither a generic "start", so
+    // the shell's own startBtn/cashOutBtn slot goes unused for anything
+    // visible here - the shell is still used for the sidebar chrome/
+    // onWalkAway wiring, with HEADS/TAILS built as their own buttons in the
+    // display area below.
+    this.shell = makeGameShell(this, "COIN FLIP", "FLIP", {
+      onStart: () => {},
+      onCashOut: () => {},
+      onWalkAway: () => this.leaveGame()
+    });
+    this.shell.startBtn.container.setVisible(false);
+    this.shell.startBtn.setEnabled(false);
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.betControl = this.shell.betControl;
+    this.walkAwayBtn = this.shell.walkAwayBtn;
+    this.messageText.setText("Pick a side to flip").setColor(Theme.textMuted);
 
-    this.add
-      .text(400, 130, "COIN FLIP", {
-        fontSize: "28px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 165, 340, 32, 16);
-    this.balanceText = this.add
-      .text(400, 165, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.coinText = this.add.text(400, 260, "🪙", { fontSize: "90px" }).setOrigin(0.5);
-
-    this.messageText = this.add
-      .text(400, 340, "Pick a side to flip", { fontSize: "16px", color: Theme.textMuted })
+    this.coinText = this.add
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 40, "🪙", { fontSize: "90px" })
       .setOrigin(0.5);
 
     this.headsBtn = makeButton(
       this,
-      300,
-      400,
+      GAME_SHELL_DISPLAY_CENTER_X - 100,
+      GAME_SHELL_DISPLAY_CENTER_Y + 100,
       160,
       50,
       "HEADS",
@@ -70,8 +85,8 @@ export class CoinFlipScene extends Phaser.Scene {
     );
     this.tailsBtn = makeButton(
       this,
-      500,
-      400,
+      GAME_SHELL_DISPLAY_CENTER_X + 100,
+      GAME_SHELL_DISPLAY_CENTER_Y + 100,
       160,
       50,
       "TAILS",
@@ -80,14 +95,6 @@ export class CoinFlipScene extends Phaser.Scene {
       () => this.flip("tails")
     );
 
-    const walkAwayBtn = makeButton(this, 400, 450, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () => {
-      // Leaving without ever flipping shouldn't leave a stale flag behind
-      // - a LATER, unrelated visit to Coin Flip would otherwise incorrectly
-      // show the tutorial highlight again. See resolveFlip() for the
-      // normal (played-a-real-round) path that also clears this.
-      gameState.tutorialAwaitingGamePlay = false;
-      fadeToScene(this, "OverworldScene");
-    });
     // Onboarding tutorial's "Play a Game" hands-on step - per user
     // direction, WALK AWAY needs to be unclickable here: it exits back to
     // the Overworld WITHOUT setting tutorialResumeAtSkinAttendant (by
@@ -98,13 +105,14 @@ export class CoinFlipScene extends Phaser.Scene {
     // Overworld instruction bubble's own Skip button, before ever walking
     // in) instead of a dead end.
     if (gameState.tutorialAwaitingGamePlay) {
-      walkAwayBtn.setEnabled(false);
+      this.walkAwayBtn.setEnabled(false);
     }
 
-    this.betControl = makeBetControl(this, 400, 486, () => {});
-
     this.add
-      .text(400, 516, "Pays 2x", { fontSize: "11px", color: Theme.textMuted })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 216, "Pays 2x", {
+        fontSize: "11px",
+        color: Theme.textMuted
+      })
       .setOrigin(0.5);
 
     // Onboarding tutorial's "Play a Game" hands-on step (see
@@ -120,25 +128,41 @@ export class CoinFlipScene extends Phaser.Scene {
     // tutorial.
     if (gameState.tutorialAwaitingGamePlay) {
       this.tutorialHint = this.add
-        .text(400, 30, "Tutorial: pick Heads or Tails to flip!", {
-          fontSize: "13px",
-          color: Theme.textGold,
-          fontStyle: "bold",
-          // Contrast sweep: this used to be a warm-cream "#fdf3e1e6" chip,
-          // a leftover from the old light theme - unreadable-ish (light
-          // gold text on a near-white chip) against the new dark palette.
-          // Text's own backgroundColor only accepts a CSS string (not a
-          // Theme.* numeric token), so this matches Theme.panel's hex at
-          // ~90% opacity instead, same pattern as OverworldScene's
-          // CHIP_BG_SOFT constant.
-          backgroundColor: "#1a2138e6",
-          padding: { x: 10, y: 6 }
-        })
+        .text(
+          GAME_SHELL_DISPLAY_CENTER_X,
+          GAME_SHELL_DISPLAY_CENTER_Y - 270,
+          "Tutorial: pick Heads or Tails to flip!",
+          {
+            fontSize: "13px",
+            color: Theme.textGold,
+            fontStyle: "bold",
+            // Contrast sweep: this used to be a warm-cream "#fdf3e1e6" chip,
+            // a leftover from the old light theme - unreadable-ish (light
+            // gold text on a near-white chip) against the new dark palette.
+            // Text's own backgroundColor only accepts a CSS string (not a
+            // Theme.* numeric token), so this matches Theme.panel's hex at
+            // ~90% opacity instead, same pattern as OverworldScene's
+            // CHIP_BG_SOFT constant.
+            backgroundColor: "#1a2138e6",
+            padding: { x: 10, y: 6 }
+          }
+        )
         .setOrigin(0.5)
         .setDepth(600);
     }
 
     this.updateBalance();
+  }
+
+  /**
+   * Leaving without ever flipping shouldn't leave a stale flag behind - a
+   * LATER, unrelated visit to Coin Flip would otherwise incorrectly show
+   * the tutorial highlight again. See resolveFlip() for the normal
+   * (played-a-real-round) path that also clears this.
+   */
+  private leaveGame() {
+    gameState.tutorialAwaitingGamePlay = false;
+    fadeToScene(this, "OverworldScene");
   }
 
   /** #36: the coin's real outcome is resolved server-side (POST /games/coinflip/play) - the flip animation here is purely cosmetic while the request is in flight. */

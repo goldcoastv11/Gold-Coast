@@ -2,7 +2,16 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -20,6 +29,7 @@ export class LimboScene extends Phaser.Scene {
   private balanceText!: Phaser.GameObjects.Text;
   private playBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("LimboScene");
@@ -36,42 +46,36 @@ export class LimboScene extends Phaser.Scene {
       this.tweens.killTweensOf(this);
     });
 
-    makePanel(this, 400, 300, 460, 420);
+    // Stake-style shell: left sidebar (title/balance/bet/message/Play/
+    // Walk Away) + open right-side display area for the climbing
+    // multiplier/target picker - see ui/uiHelpers.ts's makeGameShell doc
+    // comment.
+    this.shell = makeGameShell(this, "LIMBO", "PLAY", {
+      onStart: () => this.play(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.betControl = this.shell.betControl;
+    this.playBtn = this.shell.startBtn;
+    this.messageText.setText("Pick a target multiplier").setColor(Theme.textMuted);
 
-    this.add
-      .text(400, 130, "LIMBO", {
-        fontSize: "28px",
-        color: Theme.textAccent,
+    this.multiplierText = this.add
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 55, "1.00x", {
+        fontSize: "40px",
+        color: Theme.textPrimary,
         fontStyle: "bold"
       })
       .setOrigin(0.5);
 
-    makeInset(this, 400, 163, 340, 32, 16);
-    this.balanceText = this.add
-      .text(400, 163, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 195, () => {});
-
-    this.multiplierText = this.add
-      .text(400, 245, "1.00x", { fontSize: "40px", color: Theme.textPrimary, fontStyle: "bold" })
-      .setOrigin(0.5);
-
     this.targetText = this.add
-      .text(400, 280, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 20, "", {
+        fontSize: "14px",
+        color: Theme.textGold,
+        fontStyle: "bold"
+      })
       .setOrigin(0.5);
-
-    this.playBtn = makeButton(this, 400, 430, 200, 46, "PLAY", Theme.accent, Theme.accentHover, () =>
-      this.play()
-    );
-
-    this.messageText = this.add
-      .text(400, 388, "Pick a target multiplier", { fontSize: "13px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    makeButton(this, 400, 470, 200, 32, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
 
     this.renderPresets();
     this.updateTargetText();
@@ -82,11 +86,16 @@ export class LimboScene extends Phaser.Scene {
     this.presetButtons.forEach((b) => b.destroy());
     this.presetButtons = [];
 
-    const xs = [250, 350, 450, 550];
+    const xs = [
+      GAME_SHELL_DISPLAY_CENTER_X - 150,
+      GAME_SHELL_DISPLAY_CENTER_X - 50,
+      GAME_SHELL_DISPLAY_CENTER_X + 50,
+      GAME_SHELL_DISPLAY_CENTER_X + 150
+    ];
     PRESET_TARGETS.forEach((value, i) => {
       const row = i < 4 ? 0 : 1;
       const x = xs[i % 4];
-      const y = row === 0 ? 315 : 350;
+      const y = row === 0 ? GAME_SHELL_DISPLAY_CENTER_Y + 15 : GAME_SHELL_DISPLAY_CENTER_Y + 50;
       const selected = value === this.target;
       const btn = makeButton(
         this,

@@ -2,7 +2,15 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -73,6 +81,16 @@ interface CardSlot {
 
 type Stage = "idle" | "holding";
 
+// Stake-style layout: paytable strip and the 5-card hand centered in the
+// shell's right-side display area (see ui/uiHelpers.ts's makeGameShell) -
+// the sidebar now occupies the left third of the screen. The 5-card row
+// (390px wide at its original card size) already fits the ~430px-wide
+// display area, so only the paytable strip (previously a single wide line)
+// picked up a wordWrap to stay inside the narrower width; every offset from
+// the old canvas center (400,300) is otherwise unchanged.
+const DX = GAME_SHELL_DISPLAY_CENTER_X;
+const DY = GAME_SHELL_DISPLAY_CENTER_Y;
+
 export class VideoPokerScene extends Phaser.Scene {
   private hand: Card[] = [];
   private held: boolean[] = [false, false, false, false, false];
@@ -88,6 +106,7 @@ export class VideoPokerScene extends Phaser.Scene {
   private actionBtn?: UIButton;
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("VideoPokerScene");
@@ -103,44 +122,37 @@ export class VideoPokerScene extends Phaser.Scene {
     this.slots = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 560, 480);
-
-    this.add
-      .text(400, 42, "VIDEO POKER", {
-        fontSize: "24px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 74, 420, 28, 14);
-    this.balanceText = this.add
-      .text(400, 74, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 104, () => {});
+    // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
+    // makeGameShell doc comment. This game has no cash-out concept, so
+    // onCashOut is a no-op and cashOutBtn is simply never shown/enabled.
+    // actionBtn reuses the shell's own startBtn slot for BOTH phases -
+    // onStart calls the same onActionButton() dispatcher the scene always
+    // used, which itself decides deal() vs draw() from `stage` and swaps
+    // the button's label via setLabel(), exactly as before.
+    this.shell = makeGameShell(this, "VIDEO POKER", "DEAL", {
+      onStart: () => this.onActionButton(),
+      onCashOut: () => {},
+      onWalkAway: () => this.leaveGame()
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.actionBtn = this.shell.startBtn;
+    this.walkAwayBtn = this.shell.walkAwayBtn;
+    this.betControl = this.shell.betControl;
 
     this.paytableText = this.add
-      .text(400, 132, "", { fontSize: "10px", color: Theme.textGold, align: "center" })
+      .text(DX, DY - 185, "", {
+        fontSize: "9px",
+        color: Theme.textGold,
+        align: "center",
+        wordWrap: { width: 420 }
+      })
       .setOrigin(0.5);
     this.renderPaytable();
 
     this.slots = this.buildCardSlots();
 
-    this.messageText = this.add
-      .text(400, 330, "Deal to start a hand - 9/6 Jacks or Better", {
-        fontSize: "13px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
-
-    this.actionBtn = makeButton(this, 400, 380, 220, 48, "DEAL", Theme.accent, Theme.accentHover, () =>
-      this.onActionButton()
-    );
-
-    this.walkAwayBtn = makeButton(this, 400, 436, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.leaveGame()
-    );
+    this.messageText.setText("Deal to start a hand - 9/6 Jacks or Better");
 
     this.updateBalance();
   }
@@ -156,8 +168,8 @@ export class VideoPokerScene extends Phaser.Scene {
     const h = 96;
     const gap = 10;
     const totalWidth = 5 * w + 4 * gap;
-    const startX = 400 - totalWidth / 2 + w / 2;
-    const y = 220;
+    const startX = DX - totalWidth / 2 + w / 2;
+    const y = DY - 80;
 
     for (let i = 0; i < 5; i++) {
       const x = startX + i * (w + gap);

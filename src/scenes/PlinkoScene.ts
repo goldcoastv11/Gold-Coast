@@ -2,7 +2,15 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  makeInset,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -10,7 +18,10 @@ const ROWS = 8; // rows of pegs -> 9 landing slots
 const ROW_SPACING = 28;
 const PEG_SPACING = 28;
 const BOARD_TOP_Y = 182;
-const BOARD_CENTER_X = 400;
+// Stake-style layout: board centered in the shell's right-side display area
+// (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
+// sidebar now occupies the left third of the screen.
+const BOARD_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
 const SLOTS_Y = 402;
 
 // Symmetric payout table, one entry per slot (index = number of "right" bounces) - mirrors server/src/games/plinko.ts's PLINKO_MULTIPLIERS exactly (display/preview only; the server is what actually resolves a drop, see drop()).
@@ -31,6 +42,7 @@ export class PlinkoScene extends Phaser.Scene {
   private balanceText!: Phaser.GameObjects.Text;
   private dropBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("PlinkoScene");
@@ -46,39 +58,24 @@ export class PlinkoScene extends Phaser.Scene {
       this.tweens.killTweensOf(this.ball);
     });
 
-    makePanel(this, 400, 300, 520, 480);
-
-    this.add
-      .text(400, 82, "PLINKO", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 114, 380, 30, 15);
-    this.balanceText = this.add
-      .text(400, 114, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 146, () => {});
+    // Stake-style shell: left sidebar (title/balance/bet/message/Drop
+    // Ball/Walk Away) + open right-side display area for the pegs board -
+    // see ui/uiHelpers.ts's makeGameShell doc comment.
+    this.shell = makeGameShell(this, "PLINKO", "DROP BALL", {
+      onStart: () => this.drop(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.dropBtn = this.shell.startBtn;
+    this.betControl = this.shell.betControl;
+    this.messageText.setText("Drop a ball and watch it bounce").setColor(Theme.textMuted);
 
     this.drawPegs();
     this.drawSlots();
 
     this.ball = this.add.circle(BOARD_CENTER_X, BOARD_TOP_Y - 16, 6, Theme.gold);
-
-    this.messageText = this.add
-      .text(400, 432, "Drop a ball and watch it bounce", { fontSize: "13px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    this.dropBtn = makeButton(this, 400, 470, 200, 46, "DROP BALL", Theme.accent, Theme.accentHover, () =>
-      this.drop()
-    );
-
-    makeButton(this, 400, 516, 200, 32, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
 
     this.updateBalance();
   }

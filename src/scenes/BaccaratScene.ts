@@ -2,7 +2,16 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BaccaratBetType } from "../api/types";
@@ -59,6 +68,18 @@ interface CardSlot {
   y: number;
 }
 
+// Stake-style layout: bet-type selector, player/banker hands, and totals
+// centered in the shell's right-side display area (see
+// ui/uiHelpers.ts's makeGameShell) - the sidebar now occupies the left
+// third of the screen. Vertical offsets from the old canvas center
+// (400,300) are unchanged (there's ample height to spare); horizontal
+// spacing (bet buttons, player/banker groups) was narrowed to fit the
+// ~430px-wide display area.
+const DX = GAME_SHELL_DISPLAY_CENTER_X;
+const DY = GAME_SHELL_DISPLAY_CENTER_Y;
+const PLAYER_GROUP_X = DX - 115;
+const BANKER_GROUP_X = DX + 115;
+
 export class BaccaratScene extends Phaser.Scene {
   private betType: BetType = "player";
   private dealing = false;
@@ -72,6 +93,7 @@ export class BaccaratScene extends Phaser.Scene {
   private messageText!: Phaser.GameObjects.Text;
   private dealBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("BaccaratScene");
@@ -86,54 +108,43 @@ export class BaccaratScene extends Phaser.Scene {
     this.betButtons = {};
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 560, 500);
-
-    this.add
-      .text(400, 42, "BACCARAT", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 74, 420, 28, 14);
-    this.balanceText = this.add
-      .text(400, 74, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 104, () => {});
+    // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
+    // makeGameShell doc comment. This game has no cash-out concept, so
+    // onCashOut is a no-op and cashOutBtn is simply never shown/enabled.
+    // The bet-type selector, hands, and totals live in the display area
+    // below since they're specific to this game, not part of the shared
+    // shell. dealBtn reuses the shell's own startBtn slot.
+    this.shell = makeGameShell(this, "BACCARAT", "DEAL", {
+      onStart: () => this.deal(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.dealBtn = this.shell.startBtn;
+    this.betControl = this.shell.betControl;
 
     this.renderBetButtons();
 
     // Player hand (left) / Banker hand (right)
     this.add
-      .text(250, 172, "PLAYER", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
+      .text(PLAYER_GROUP_X, DY - 128, "PLAYER", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
       .setOrigin(0.5);
     this.add
-      .text(550, 172, "BANKER", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
+      .text(BANKER_GROUP_X, DY - 128, "BANKER", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
       .setOrigin(0.5);
 
-    this.playerSlots = this.buildCardSlots(250, 218);
-    this.bankerSlots = this.buildCardSlots(550, 218);
+    this.playerSlots = this.buildCardSlots(PLAYER_GROUP_X, DY - 82);
+    this.bankerSlots = this.buildCardSlots(BANKER_GROUP_X, DY - 82);
 
     this.playerTotalText = this.add
-      .text(250, 272, "", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
+      .text(PLAYER_GROUP_X, DY - 28, "", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
       .setOrigin(0.5);
     this.bankerTotalText = this.add
-      .text(550, 272, "", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
+      .text(BANKER_GROUP_X, DY - 28, "", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
       .setOrigin(0.5);
 
-    this.messageText = this.add
-      .text(400, 320, "Pick a bet, then deal", { fontSize: "13px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    this.dealBtn = makeButton(this, 400, 366, 200, 48, "DEAL", Theme.accent, Theme.accentHover, () =>
-      this.deal()
-    );
-
-    makeButton(this, 400, 424, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
+    this.messageText.setText("Pick a bet, then deal");
 
     this.updateBalance();
   }
@@ -147,15 +158,15 @@ export class BaccaratScene extends Phaser.Scene {
       { key: "banker", label: `BANKER ${BANKER_WIN_MULT}x` },
       { key: "tie", label: `TIE ${TIE_WIN_MULT}x` }
     ];
-    const xs = [250, 400, 550];
+    const xs = [DX - 120, DX, DX + 120];
     options.forEach((opt, i) => {
       const selected = opt.key === this.betType;
       this.betButtons[opt.key] = makeButton(
         this,
         xs[i],
-        134,
-        140,
-        30,
+        DY - 166,
+        120,
+        28,
         opt.label,
         selected ? Theme.accent : Theme.neutral,
         selected ? Theme.accentHover : Theme.neutralHover,
@@ -170,8 +181,8 @@ export class BaccaratScene extends Phaser.Scene {
 
   private buildCardSlots(centerX: number, y: number): CardSlot[] {
     const slots: CardSlot[] = [];
-    const w = 46;
-    const h = 64;
+    const w = 40;
+    const h = 56;
     const gap = 6;
     for (let i = 0; i < 3; i++) {
       const x = centerX + (i - 1) * (w + gap);
@@ -183,7 +194,7 @@ export class BaccaratScene extends Phaser.Scene {
     return slots;
   }
 
-  private paintSlot(slot: CardSlot, card: Card | null, w = 46, h = 64) {
+  private paintSlot(slot: CardSlot, card: Card | null, w = 40, h = 56) {
     slot.bg.clear();
     if (!card) {
       slot.bg.fillStyle(Theme.inset, 1);

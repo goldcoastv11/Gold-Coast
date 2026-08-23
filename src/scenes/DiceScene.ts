@@ -1,7 +1,16 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -13,8 +22,11 @@ const DEFAULT_TARGET = 50;
 const HOUSE_EDGE_NUMERATOR = 99; // 99 instead of 100 -> ~1% house edge baked into the multiplier - mirrors server/src/games/dice.ts exactly, used here only for the live win-chance/multiplier preview before rolling
 
 const BAR_WIDTH = 340;
-const BAR_X = 400;
-const BAR_Y = 290;
+// Stake-style layout: bar centered in the shell's right-side display area
+// (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
+// sidebar now occupies the left third of the screen.
+const BAR_X = GAME_SHELL_DISPLAY_CENTER_X;
+const BAR_Y = GAME_SHELL_DISPLAY_CENTER_Y - 10;
 
 /**
  * Client-side preview only, for the live "Win Chance / Multiplier" readout
@@ -44,6 +56,7 @@ export class DiceScene extends Phaser.Scene {
   private minusBtn?: UIButton;
   private plusBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("DiceScene");
@@ -64,25 +77,26 @@ export class DiceScene extends Phaser.Scene {
       }
     });
 
-    makePanel(this, 400, 300, 460, 420);
-
-    this.add
-      .text(400, 130, "DICE", {
-        fontSize: "28px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 163, 340, 32, 16);
-    this.balanceText = this.add
-      .text(400, 163, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 195, () => {});
+    // Stake-style shell: left sidebar (title/balance/bet/message/Roll/
+    // Walk Away) + open right-side display area for the roll number/zone
+    // bar/target - see ui/uiHelpers.ts's makeGameShell doc comment.
+    this.shell = makeGameShell(this, "DICE", "ROLL", {
+      onStart: () => this.roll(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.betControl = this.shell.betControl;
+    this.rollBtn = this.shell.startBtn;
+    this.messageText.setText("Roll under your target to win").setColor(Theme.textMuted);
 
     this.rollText = this.add
-      .text(400, 240, "--", { fontSize: "44px", color: Theme.textPrimary, fontStyle: "bold" })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 60, "--", {
+        fontSize: "44px",
+        color: Theme.textPrimary,
+        fontStyle: "bold"
+      })
       .setOrigin(0.5);
 
     // Win/lose zone bar with a marker for the last roll
@@ -91,31 +105,42 @@ export class DiceScene extends Phaser.Scene {
       .triangle(BAR_X, BAR_Y - 16, -6, 8, 6, 8, 0, -6, Theme.outline)
       .setVisible(false);
 
-    this.minusBtn = makeButton(this, 300, 330, 44, 36, "-5", Theme.neutral, Theme.neutralHover, () =>
-      this.adjustTarget(-TARGET_STEP)
+    this.minusBtn = makeButton(
+      this,
+      GAME_SHELL_DISPLAY_CENTER_X - 100,
+      GAME_SHELL_DISPLAY_CENTER_Y + 30,
+      44,
+      36,
+      "-5",
+      Theme.neutral,
+      Theme.neutralHover,
+      () => this.adjustTarget(-TARGET_STEP)
     );
     this.targetLabel = this.add
-      .text(400, 330, "", { fontSize: "15px", color: Theme.textPrimary, fontStyle: "bold" })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 30, "", {
+        fontSize: "15px",
+        color: Theme.textPrimary,
+        fontStyle: "bold"
+      })
       .setOrigin(0.5);
-    this.plusBtn = makeButton(this, 500, 330, 44, 36, "+5", Theme.neutral, Theme.neutralHover, () =>
-      this.adjustTarget(TARGET_STEP)
+    this.plusBtn = makeButton(
+      this,
+      GAME_SHELL_DISPLAY_CENTER_X + 100,
+      GAME_SHELL_DISPLAY_CENTER_Y + 30,
+      44,
+      36,
+      "+5",
+      Theme.neutral,
+      Theme.neutralHover,
+      () => this.adjustTarget(TARGET_STEP)
     );
 
     this.statsText = this.add
-      .text(400, 362, "", { fontSize: "13px", color: Theme.textMuted })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 62, "", {
+        fontSize: "13px",
+        color: Theme.textMuted
+      })
       .setOrigin(0.5);
-
-    this.rollBtn = makeButton(this, 400, 412, 200, 52, "ROLL", Theme.accent, Theme.accentHover, () =>
-      this.roll()
-    );
-
-    this.messageText = this.add
-      .text(400, 452, "Roll under your target to win", { fontSize: "13px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    makeButton(this, 400, 486, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
 
     this.redrawZoneBar();
     this.updateTargetLabel();

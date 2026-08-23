@@ -2,7 +2,17 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeInset,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BlackjackOutcome } from "../api/types";
@@ -35,6 +45,16 @@ const CARD_W = 40;
 const CARD_H = 56;
 const CARD_GAP = 8;
 
+// Stake-style layout: table/dealer/hands/action buttons centered in the
+// shell's right-side display area (see ui/uiHelpers.ts's makeGameShell) -
+// the sidebar now occupies the left third of the screen. The table image
+// and dealer/player hand rows keep the same vertical offsets they had from
+// the old canvas center (400,300) since the display area has plenty of
+// height; only horizontal spacing (table width, dealer sprite, action
+// buttons) was narrowed to fit the ~430px-wide display area.
+const DX = GAME_SHELL_DISPLAY_CENTER_X;
+const DY = GAME_SHELL_DISPLAY_CENTER_Y;
+
 export class BlackjackScene extends Phaser.Scene {
   private playerHand: Card[] = [];
   /** Index 0 is always the up-card, cached from the initial deal response so it never visually changes suit when the rest of the hand is revealed later. */
@@ -57,6 +77,7 @@ export class BlackjackScene extends Phaser.Scene {
   private newHandBtn?: UIButton;
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("BlackjackScene");
@@ -72,74 +93,54 @@ export class BlackjackScene extends Phaser.Scene {
     this.roundId = null;
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 560, 520);
+    // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
+    // makeGameShell doc comment. This game has no cash-out concept, so
+    // onCashOut is a no-op and cashOutBtn is simply never shown/enabled.
+    // The dealer/player hands and Hit/Stand buttons live in the display
+    // area below since they're specific to this game, not part of the
+    // shared shell. newHandBtn reuses the shell's own startBtn slot,
+    // exactly like HiLoScene's startRun button.
+    this.shell = makeGameShell(this, "BLACKJACK", "DEAL", {
+      onStart: () => this.startNewHand(),
+      onCashOut: () => {},
+      onWalkAway: () => this.leaveGame()
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.newHandBtn = this.shell.startBtn;
+    this.walkAwayBtn = this.shell.walkAwayBtn;
+    this.betControl = this.shell.betControl;
 
-    this.add
-      .text(400, 55, "BLACKJACK", {
-        fontSize: "28px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    // Real table art as backdrop, inset within the panel
-    this.add.image(400, 300, "blackjack_table").setDisplaySize(560, 320).setAlpha(0.85);
+    // Real table art as backdrop
+    this.add.image(DX, DY, "blackjack_table").setDisplaySize(410, 320).setAlpha(0.85);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
-    const dealer = this.add.sprite(95, 150, "dealer_sheet", 1).setScale(4.8);
+    const dealer = this.add.sprite(DX - 165, DY - 190, "dealer_sheet", 1).setScale(3.4);
     dealer.play("dealer_walk_down");
 
-    makeInset(this, 245, 115, 210, 50, 12);
+    makeInset(this, DX + 45, DY - 200, 170, 40, 12);
     this.add
-      .text(245, 115, "Get closer to 21 than\nme without busting!", {
-        fontSize: "11px",
+      .text(DX + 45, DY - 200, "Get closer to 21 than\nme without busting!", {
+        fontSize: "10px",
         color: Theme.textPrimary,
         align: "center"
       })
       .setOrigin(0.5);
 
     this.dealerTotalText = this.add
-      .text(400, 145, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
+      .text(DX, DY - 155, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
       .setOrigin(0.5);
 
     this.playerTotalText = this.add
-      .text(400, 450, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
+      .text(DX, DY + 150, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
       .setOrigin(0.5);
 
-    this.messageText = this.add
-      .text(400, 300, "", { fontSize: "20px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5)
-      .setDepth(50);
-
-    // Balance pill
-    makeInset(this, 400, 490, 380, 30, 15);
-    this.balanceText = this.add
-      .text(400, 490, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.hitBtn = makeButton(this, 260, 540, 130, 44, "HIT", Theme.accent, Theme.accentHover, () =>
+    this.hitBtn = makeButton(this, DX - 80, DY + 240, 130, 44, "HIT", Theme.accent, Theme.accentHover, () =>
       this.hit()
     );
-    this.standBtn = makeButton(this, 400, 540, 130, 44, "STAND", Theme.neutral, Theme.neutralHover, () =>
+    this.standBtn = makeButton(this, DX + 80, DY + 240, 130, 44, "STAND", Theme.neutral, Theme.neutralHover, () =>
       this.stand()
     );
-    this.newHandBtn = makeButton(
-      this,
-      540,
-      540,
-      150,
-      44,
-      "DEAL",
-      Theme.accent,
-      Theme.accentHover,
-      () => this.startNewHand()
-    );
-
-    this.walkAwayBtn = makeButton(this, 130, 540, 150, 38, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.leaveGame()
-    );
-
-    this.betControl = makeBetControl(this, 400, 580, () => {});
 
     this.messageText.setText("Press DEAL to start a hand");
     this.setActionButtonsVisible(false);
@@ -343,8 +344,8 @@ export class BlackjackScene extends Phaser.Scene {
   }
 
   private renderHands() {
-    this.drawHand(this.dealerCardObjects, this.dealerHand, 400, 190, this.dealerHoleHidden);
-    this.drawHand(this.playerCardObjects, this.playerHand, 400, 400, false);
+    this.drawHand(this.dealerCardObjects, this.dealerHand, DX, DY - 110, this.dealerHoleHidden);
+    this.drawHand(this.playerCardObjects, this.playerHand, DX, DY + 100, false);
 
     this.dealerTotalText.setText(this.dealerHoleHidden ? "Dealer" : `Dealer: ${this.dealerTotal()}`);
     this.playerTotalText.setText(this.playerHand.length > 0 ? `You: ${this.playerTotal()}` : "");

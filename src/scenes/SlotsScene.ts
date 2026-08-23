@@ -2,7 +2,15 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  makeInset,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -34,6 +42,7 @@ export class SlotsScene extends Phaser.Scene {
   private spinTimer?: Phaser.Time.TimerEvent;
   private spinButton?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("SlotsScene");
@@ -53,27 +62,26 @@ export class SlotsScene extends Phaser.Scene {
       }
     });
 
-    makePanel(this, 400, 300, 520, 480);
+    // Stake-style shell: left sidebar (title/balance/bet/message/Spin/Walk
+    // Away) + open right-side display area for the reels - see
+    // ui/uiHelpers.ts's makeGameShell doc comment.
+    this.shell = makeGameShell(this, "GOLD SLOTS", "SPIN", {
+      onStart: () => this.spin(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.spinButton = this.shell.startBtn;
+    this.betControl = this.shell.betControl;
+    this.messageText.setText("Press SPIN to play").setColor(Theme.textMuted);
 
-    this.add
-      .text(400, 90, "GOLD SLOTS", {
-        fontSize: "30px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    // Balance pill
-    makeInset(this, 400, 130, 380, 34, 17);
-    this.balanceText = this.add
-      .text(400, 130, "", { fontSize: "14px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    // Reel cells
+    // Reel cells - centered in the shell's right-side display area, same
+    // relative layout the old center-panel version used.
     const reelY = 230;
     const cellSize = 110;
     const gap = 20;
-    const startX = 400 - cellSize - gap;
+    const startX = GAME_SHELL_DISPLAY_CENTER_X - cellSize - gap;
     for (let i = 0; i < 3; i++) {
       const x = startX + i * (cellSize + gap);
       makeInset(this, x, reelY, cellSize, cellSize, 14);
@@ -81,30 +89,8 @@ export class SlotsScene extends Phaser.Scene {
       this.reelTexts.push(t);
     }
 
-    this.messageText = this.add
-      .text(400, 320, "Press SPIN to play", { fontSize: "16px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    this.spinButton = makeButton(
-      this,
-      400,
-      400,
-      220,
-      56,
-      "SPIN",
-      Theme.accent,
-      Theme.accentHover,
-      () => this.spin()
-    );
-
-    makeButton(this, 400, 465, 220, 40, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
-
-    this.betControl = makeBetControl(this, 400, 505, () => {});
-
     this.add
-      .text(400, 560, "3-of-a-kind pays big • 2-of-a-kind pays too", {
+      .text(GAME_SHELL_DISPLAY_CENTER_X, 560, "3-of-a-kind pays big • 2-of-a-kind pays too", {
         fontSize: "11px",
         color: Theme.textMuted
       })

@@ -2,7 +2,16 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  makeInset,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { RouletteColor } from "../api/types";
@@ -45,6 +54,7 @@ export class RouletteScene extends Phaser.Scene {
   private spinning = false;
   private spinTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("RouletteScene");
@@ -64,58 +74,71 @@ export class RouletteScene extends Phaser.Scene {
       }
     });
 
-    makePanel(this, 400, 300, 540, 480);
+    // Stake-style shell: left sidebar (title/balance/bet/message/Walk Away)
+    // + open right-side display area for the wheel table + bet buttons -
+    // see ui/uiHelpers.ts's makeGameShell doc comment. Roulette has no
+    // single "primary bet" button (red/black/green are the actions), so the
+    // shell's own start button stays hidden and unused - the real actions
+    // are the three color buttons below, same as before.
+    this.shell = makeGameShell(this, "ROULETTE", "SPIN", {
+      onStart: () => {},
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.betControl = this.shell.betControl;
+    this.shell.startBtn.container.setVisible(false);
+    this.shell.startBtn.setEnabled(false);
+    this.messageText.setText("Place your bet").setColor(Theme.textMuted);
 
+    // Table image backdrop - scaled down (500x280 -> 400x224) so it fits
+    // inside the narrower display area instead of the old 540px-wide panel.
     this.add
-      .text(400, 90, "ROULETTE", {
-        fontSize: "28px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    this.add.image(400, 300, "roulette_table").setDisplaySize(500, 280).setAlpha(0.5);
+      .image(GAME_SHELL_DISPLAY_CENTER_X, 300, "roulette_table")
+      .setDisplaySize(400, 224)
+      .setAlpha(0.5);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
-    // Scale 4.4 (not the old 2.2) - see BlackjackScene.ts's dealer comment:
-    // the #24 character reskin dropped the sheet's frame size from 21x32 to
-    // 16x16, so 2.2 now renders too small. 4.4 = old display height
-    // (32*2.2=70.4px) / new frame height (16px), preserving the dealer's
-    // previous on-screen size.
-    const dealer = this.add.sprite(105, 130, "dealer_sheet", 1).setScale(4.4);
+    // Scaled down from 4.4 to 3.2 and tucked into the top-left corner of the
+    // display area (it used to bleed left of the old panel entirely, which
+    // isn't available anymore now that the sidebar occupies that space).
+    const dealer = this.add.sprite(400, 65, "dealer_sheet", 1).setScale(3.2);
     dealer.play("dealer_walk_down");
 
-    makeInset(this, 250, 110, 210, 42, 12);
+    makeInset(this, GAME_SHELL_DISPLAY_CENTER_X, 120, 320, 42, 12);
     this.add
-      .text(250, 110, "Place your bet:\nRed, Black, or Green!", {
+      .text(GAME_SHELL_DISPLAY_CENTER_X, 120, "Place your bet:\nRed, Black, or Green!", {
         fontSize: "11px",
         color: Theme.textPrimary,
         align: "center"
       })
       .setOrigin(0.5);
 
-    makeInset(this, 400, 165, 380, 30, 15);
-    this.balanceText = this.add
-      .text(400, 165, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 245, 140, 66, 14);
+    makeInset(this, GAME_SHELL_DISPLAY_CENTER_X, 245, 140, 66, 14);
     this.resultText = this.add
-      .text(400, 245, "?", { fontSize: "38px", color: Theme.textPrimary, fontStyle: "bold" })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, 245, "?", { fontSize: "38px", color: Theme.textPrimary, fontStyle: "bold" })
       .setOrigin(0.5);
 
-    this.messageText = this.add
-      .text(400, 295, "Place your bet", { fontSize: "15px", color: Theme.textMuted })
-      .setOrigin(0.5);
-
-    const redBtn = makeButton(this, 240, 400, 140, 50, "RED (2x)", COLOR_NUM.red, COLOR_NUM_HOVER.red, () =>
-      this.spin("red")
+    // Bet buttons - scaled down from 140px to 130px wide (and their spacing
+    // tightened from 160px to 135px between centers) so all three fit
+    // within the narrower display area without overflowing its edges.
+    const redBtn = makeButton(
+      this,
+      GAME_SHELL_DISPLAY_CENTER_X - 135,
+      405,
+      130,
+      50,
+      "RED (2x)",
+      COLOR_NUM.red,
+      COLOR_NUM_HOVER.red,
+      () => this.spin("red")
     );
     const blackBtn = makeButton(
       this,
-      400,
-      400,
-      140,
+      GAME_SHELL_DISPLAY_CENTER_X,
+      405,
+      130,
       50,
       "BLACK (2x)",
       COLOR_NUM.black,
@@ -123,16 +146,18 @@ export class RouletteScene extends Phaser.Scene {
       () => this.spin("black"),
       Theme.textOnDark // dark warm-brown fill needs a light label
     );
-    const greenBtn = makeButton(this, 560, 400, 140, 50, "GREEN (20x)", COLOR_NUM.green, COLOR_NUM_HOVER.green, () =>
-      this.spin("green")
+    const greenBtn = makeButton(
+      this,
+      GAME_SHELL_DISPLAY_CENTER_X + 135,
+      405,
+      130,
+      50,
+      "GREEN (20x)",
+      COLOR_NUM.green,
+      COLOR_NUM_HOVER.green,
+      () => this.spin("green")
     );
     this.betButtons = [redBtn, blackBtn, greenBtn];
-
-    makeButton(this, 400, 460, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
-    );
-
-    this.betControl = makeBetControl(this, 400, 505, () => {});
 
     this.updateBalance();
   }

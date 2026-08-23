@@ -2,7 +2,15 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -16,7 +24,11 @@ const GRID_COLS = 10;
 const GRID_ROWS = 4;
 const CELL_SIZE = 34;
 const CELL_GAP = 5;
-const GRID_CENTER_X = 400;
+// Stake-style layout: grid centered in the shell's right-side display area
+// (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
+// sidebar now occupies the left third of the screen. Y unchanged since it
+// was already offset from the old center the same way it is from the new one.
+const GRID_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
 const GRID_CENTER_Y = 262;
 
 // #36: the actual draw/hits/payout are now resolved server-side (POST
@@ -151,6 +163,7 @@ export class KenoScene extends Phaser.Scene {
   private quickPickBtn?: UIButton;
   private clearBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("KenoScene");
@@ -172,43 +185,38 @@ export class KenoScene extends Phaser.Scene {
       }
     });
 
-    makePanel(this, 400, 300, 560, 560);
-
-    this.add
-      .text(400, 40, "KENO", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 72, 420, 28, 14);
-    this.balanceText = this.add
-      .text(400, 72, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 103, () => {});
+    // Stake-style shell: left sidebar (title/balance/bet/message/Draw/Walk
+    // Away) + open right-side display area for the picks grid - see
+    // ui/uiHelpers.ts's makeGameShell doc comment.
+    this.shell = makeGameShell(this, "KENO", "DRAW", {
+      onStart: () => this.play(),
+      onCashOut: () => {},
+      onWalkAway: () => fadeToScene(this, "OverworldScene")
+    });
+    this.balanceText = this.shell.balanceText;
+    this.messageText = this.shell.messageText;
+    this.drawBtn = this.shell.startBtn;
+    this.betControl = this.shell.betControl;
+    this.messageText.setText(`Pick up to ${MAX_PICKS} numbers, then draw`).setColor(Theme.textMuted);
 
     this.infoText = this.add
-      .text(400, 130, "", { fontSize: "13px", color: Theme.textMuted })
+      .text(GAME_SHELL_DISPLAY_CENTER_X, 130, "", { fontSize: "13px", color: Theme.textMuted })
       .setOrigin(0.5);
 
     this.buildGrid();
 
     this.paytableText = this.add
-      .text(400, 356, "", { fontSize: "11px", color: Theme.textGold })
-      .setOrigin(0.5);
-
-    this.messageText = this.add
-      .text(400, 378, `Pick up to ${MAX_PICKS} numbers, then draw`, {
-        fontSize: "13px",
-        color: Theme.textMuted
+      .text(GAME_SHELL_DISPLAY_CENTER_X, 356, "", {
+        fontSize: "10px",
+        color: Theme.textGold,
+        align: "center",
+        wordWrap: { width: 400 }
       })
       .setOrigin(0.5);
 
     this.quickPickBtn = makeButton(
       this,
-      290,
+      GAME_SHELL_DISPLAY_CENTER_X - 110,
       412,
       140,
       34,
@@ -217,16 +225,16 @@ export class KenoScene extends Phaser.Scene {
       Theme.neutralHover,
       () => this.quickPick()
     );
-    this.clearBtn = makeButton(this, 510, 412, 140, 34, "CLEAR", Theme.neutral, Theme.neutralHover, () =>
-      this.clearPicks()
-    );
-
-    this.drawBtn = makeButton(this, 400, 460, 200, 48, "DRAW", Theme.accent, Theme.accentHover, () =>
-      this.play()
-    );
-
-    makeButton(this, 400, 520, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      fadeToScene(this, "OverworldScene")
+    this.clearBtn = makeButton(
+      this,
+      GAME_SHELL_DISPLAY_CENTER_X + 110,
+      412,
+      140,
+      34,
+      "CLEAR",
+      Theme.neutral,
+      Theme.neutralHover,
+      () => this.clearPicks()
     );
 
     this.updateBalance();
