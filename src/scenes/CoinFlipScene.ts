@@ -3,7 +3,6 @@ import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
-import { showHighlightRing, HighlightHandle } from "../ui/TutorialGuide";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { CoinSide } from "../api/types";
@@ -18,7 +17,6 @@ export class CoinFlipScene extends Phaser.Scene {
   private flipTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
   /** Onboarding tutorial's "Play a Game" hands-on step - see gameState.tutorialAwaitingGamePlay's doc comment and OverworldScene.runHandsOnGameStep. */
-  private tutorialHighlight?: HighlightHandle;
   private tutorialHint?: Phaser.GameObjects.Text;
 
   constructor() {
@@ -101,11 +99,14 @@ export class CoinFlipScene extends Phaser.Scene {
     // gameState.tutorialAwaitingGamePlay's doc comment) - the player
     // walked up and pressed E for real (this is a completely ordinary
     // entry into CoinFlipScene, no tutorial-specific transition logic
-    // involved), so highlight the real HEADS/TAILS buttons and wait for
-    // one real round to resolve (see resolveFlip()) before returning to
-    // the Overworld to resume the tutorial.
+    // involved). Per user direction, the ring itself only belongs out in
+    // the Overworld pointing at the station (see
+    // OverworldScene.runHandsOnGameStep) - once the real game screen is
+    // actually open, no ring overlays the real HEADS/TAILS buttons, just
+    // this small hint banner. Still waits for one real round to resolve
+    // (see resolveFlip()) before returning to the Overworld to resume the
+    // tutorial.
     if (gameState.tutorialAwaitingGamePlay) {
-      this.tutorialHighlight = showHighlightRing(this, 400, 400, 150, true);
       this.tutorialHint = this.add
         .text(400, 30, "Tutorial: pick Heads or Tails to flip!", {
           fontSize: "13px",
@@ -130,20 +131,15 @@ export class CoinFlipScene extends Phaser.Scene {
       return;
     }
 
-    // Onboarding tutorial's "Play a Game" hands-on step - the ring/hint's
-    // whole job is showing the player WHERE to click. The instant they
-    // actually click Heads/Tails for real, that job is done - clear it
-    // here, not in resolveFlip() (previously the ring stayed up through the
-    // entire "Flipping..." animation while awaiting the server response,
-    // which read as "the ring is still visible when you play coin flip").
-    // tutorialAwaitingGamePlay itself (which gates the tutorial STEP
-    // actually advancing - flag clear, resume-at-Skin-Attendant flag, the
-    // delayed scene transition) deliberately still waits for resolveFlip(),
-    // since that's about the real round genuinely completing, not just a
-    // click being made.
-    this.tutorialHighlight?.destroy();
+    // Onboarding tutorial's "Play a Game" hands-on step - the hint banner's
+    // whole job is showing the player what to do. The instant they actually
+    // click Heads/Tails for real, that job is done - clear it here, not in
+    // resolveFlip(). tutorialAwaitingGamePlay itself (which gates the
+    // tutorial STEP actually advancing - flag clear, resume-at-Skin-
+    // Attendant flag, the delayed scene transition) deliberately still
+    // waits for resolveFlip(), since that's about the real round genuinely
+    // completing, not just a click being made.
     this.tutorialHint?.destroy();
-    this.tutorialHighlight = undefined;
     this.tutorialHint = undefined;
 
     const bet = gameState.betAmount;
