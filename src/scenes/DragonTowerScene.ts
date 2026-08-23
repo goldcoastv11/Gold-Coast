@@ -2,7 +2,15 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -11,10 +19,14 @@ const TILES_PER_ROW = 4;
 // Cumulative payout multiplier after successfully clearing row i (0-indexed) - must match server/src/games/dragontower.ts's DRAGON_TOWER_MULTIPLIERS (cosmetic copy only; the server is authoritative and always returns the real number).
 const MULTIPLIERS = [1.3, 1.8, 2.7, 4, 7, 12];
 
-const TILE_SIZE = 38;
-const TILE_GAP = 8;
-const ROW_SPACING = 46;
-const BOTTOM_ROW_Y = 444;
+const TILE_SIZE = 46;
+const TILE_GAP = 10;
+const ROW_SPACING = 56;
+// Stake-style layout: tower centered in the shell's right-side display
+// area (see ui/uiHelpers.ts's makeGameShell) - the sidebar now occupies
+// the left third of the screen, so this is no longer the canvas center.
+const TOWER_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
+const BOTTOM_ROW_Y = GAME_SHELL_DISPLAY_CENTER_Y + (ROWS - 1) * (ROW_SPACING / 2);
 
 interface TileVisual {
   container: Phaser.GameObjects.Container;
@@ -39,6 +51,7 @@ export class DragonTowerScene extends Phaser.Scene {
   private cashOutBtn?: UIButton;
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("DragonTowerScene");
@@ -54,63 +67,21 @@ export class DragonTowerScene extends Phaser.Scene {
     this.tiles = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 480, 540);
-
-    this.add
-      .text(400, 55, "DRAGON TOWER", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 88, 380, 30, 15);
-    this.balanceText = this.add
-      .text(400, 88, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 120, () => {});
-
-    this.multiplierText = this.add
-      .text(400, 150, "", { fontSize: "16px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
-
-    this.messageText = this.add
-      .text(400, 172, "Start a run to climb the tower", {
-        fontSize: "13px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
-
-    this.startBtn = makeButton(
-      this,
-      300,
-      495,
-      170,
-      46,
-      "START RUN",
-      Theme.accent,
-      Theme.accentHover,
-      () => this.startRun()
-    );
-    this.cashOutBtn = makeButton(
-      this,
-      500,
-      495,
-      170,
-      46,
-      "CASH OUT",
-      Theme.gold,
-      Theme.goldHover,
-      () => this.cashOut(),
-      Theme.cardTextBlack
-    );
-    this.cashOutBtn.setEnabled(false);
-    this.cashOutBtn.container.setVisible(false);
-
-    this.walkAwayBtn = makeButton(this, 400, 550, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.leaveGame()
-    );
+    // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
+    // makeGameShell doc comment.
+    this.shell = makeGameShell(this, "DRAGON TOWER", "START RUN", {
+      onStart: () => this.startRun(),
+      onCashOut: () => this.cashOut(),
+      onWalkAway: () => this.leaveGame()
+    });
+    this.balanceText = this.shell.balanceText;
+    this.multiplierText = this.shell.multiplierText;
+    this.messageText = this.shell.messageText;
+    this.startBtn = this.shell.startBtn;
+    this.cashOutBtn = this.shell.cashOutBtn;
+    this.walkAwayBtn = this.shell.walkAwayBtn;
+    this.betControl = this.shell.betControl;
+    this.messageText.setText("Start a run to climb the tower");
 
     this.buildEmptyTowerVisuals();
     this.updateBalance();
@@ -125,7 +96,7 @@ export class DragonTowerScene extends Phaser.Scene {
       const rowTiles: TileVisual[] = [];
       const y = BOTTOM_ROW_Y - row * ROW_SPACING;
       const totalWidth = TILES_PER_ROW * TILE_SIZE + (TILES_PER_ROW - 1) * TILE_GAP;
-      const startX = 400 - totalWidth / 2 + TILE_SIZE / 2;
+      const startX = TOWER_CENTER_X - totalWidth / 2 + TILE_SIZE / 2;
 
       for (let col = 0; col < TILES_PER_ROW; col++) {
         const x = startX + col * (TILE_SIZE + TILE_GAP);

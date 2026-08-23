@@ -2,10 +2,25 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeButton,
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { HiLoGuess } from "../api/types";
+
+// Stake-style layout: card/history/buttons centered in the shell's
+// right-side display area (see ui/uiHelpers.ts's makeGameShell) - the
+// sidebar now occupies the left third of the screen.
+const DX = GAME_SHELL_DISPLAY_CENTER_X;
+const DY = GAME_SHELL_DISPLAY_CENTER_Y;
 
 // #36: the deck, the current card, and the win/multiplier math are all
 // resolved server-side (POST /games/hilo/start|guess|cashout) - the server
@@ -63,6 +78,7 @@ export class HiLoScene extends Phaser.Scene {
   private cashOutBtn?: UIButton;
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("HiLoScene");
@@ -81,49 +97,40 @@ export class HiLoScene extends Phaser.Scene {
     this.roundId = null;
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 480, 540);
-
-    this.add
-      .text(400, 50, "HI-LO", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 82, 380, 28, 14);
-    this.balanceText = this.add
-      .text(400, 82, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 112, () => {});
-
-    this.multiplierText = this.add
-      .text(400, 140, "Multiplier: 1.00x", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
-
-    this.messageText = this.add
-      .text(400, 160, "Start a run to deal the first card", {
-        fontSize: "13px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
+    // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
+    // makeGameShell doc comment. Higher/Lower/card/history live in the
+    // display area below since they're specific to this game, not part
+    // of the shared shell.
+    this.shell = makeGameShell(this, "HI-LO", "START RUN", {
+      onStart: () => this.startRun(),
+      onCashOut: () => this.cashOut(),
+      onWalkAway: () => this.leaveGame()
+    });
+    this.balanceText = this.shell.balanceText;
+    this.multiplierText = this.shell.multiplierText;
+    this.messageText = this.shell.messageText;
+    this.startBtn = this.shell.startBtn;
+    this.cashOutBtn = this.shell.cashOutBtn;
+    this.walkAwayBtn = this.shell.walkAwayBtn;
+    this.betControl = this.shell.betControl;
+    this.multiplierText.setText("Multiplier: 1.00x");
+    this.messageText.setText("Start a run to deal the first card");
 
     // Current card display
     this.cardBg = this.add.graphics();
-    this.cardLabel = this.add.text(400, 225, "", { fontSize: "32px", fontStyle: "bold" }).setOrigin(0.5);
+    this.cardLabel = this.add.text(DX, DY - 75, "", { fontSize: "32px", fontStyle: "bold" }).setOrigin(0.5);
     this.paintCard(null);
 
     this.historyContainer = this.add.container(0, 0);
 
     this.readoutText = this.add
-      .text(400, 330, "", { fontSize: "12px", color: Theme.textMuted })
+      .text(DX, DY + 30, "", { fontSize: "12px", color: Theme.textMuted })
       .setOrigin(0.5);
 
     this.higherBtn = makeButton(
       this,
-      290,
-      368,
+      DX - 110,
+      DY + 68,
       150,
       42,
       "▲ HIGHER",
@@ -131,41 +138,11 @@ export class HiLoScene extends Phaser.Scene {
       Theme.accentHover,
       () => this.guess("higher")
     );
-    this.lowerBtn = makeButton(this, 510, 368, 150, 42, "▼ LOWER", Theme.accent, Theme.accentHover, () =>
+    this.lowerBtn = makeButton(this, DX + 110, DY + 68, 150, 42, "▼ LOWER", Theme.accent, Theme.accentHover, () =>
       this.guess("lower")
     );
 
-    this.startBtn = makeButton(
-      this,
-      300,
-      430,
-      170,
-      46,
-      "START RUN",
-      Theme.accent,
-      Theme.accentHover,
-      () => this.startRun()
-    );
-    this.cashOutBtn = makeButton(
-      this,
-      500,
-      430,
-      170,
-      46,
-      "CASH OUT",
-      Theme.gold,
-      Theme.goldHover,
-      () => this.cashOut(),
-      Theme.cardTextBlack
-    );
-
-    this.walkAwayBtn = makeButton(this, 400, 488, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.leaveGame()
-    );
-
     this.setGuessButtonsVisible(false);
-    this.cashOutBtn.setEnabled(false);
-    this.cashOutBtn.container.setVisible(false);
 
     this.updateBalance();
   }
@@ -181,16 +158,16 @@ export class HiLoScene extends Phaser.Scene {
     this.cardBg.clear();
     if (!card) {
       this.cardBg.fillStyle(Theme.inset, 1);
-      this.cardBg.fillRoundedRect(400 - w / 2, 225 - h / 2, w, h, 10);
+      this.cardBg.fillRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
       this.cardBg.lineStyle(2, Theme.panelBorder, 1);
-      this.cardBg.strokeRoundedRect(400 - w / 2, 225 - h / 2, w, h, 10);
+      this.cardBg.strokeRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
       this.cardLabel.setText("?").setColor(Theme.textMuted);
       return;
     }
     this.cardBg.fillStyle(Theme.cardFace, 1);
-    this.cardBg.fillRoundedRect(400 - w / 2, 225 - h / 2, w, h, 10);
+    this.cardBg.fillRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
     this.cardBg.lineStyle(2, Theme.cardBorder, 1);
-    this.cardBg.strokeRoundedRect(400 - w / 2, 225 - h / 2, w, h, 10);
+    this.cardBg.strokeRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
     this.cardLabel.setText(`${card.label}${card.suit}`).setColor(card.isRed ? Theme.cardTextRed : Theme.cardTextBlack);
   }
 
@@ -201,10 +178,10 @@ export class HiLoScene extends Phaser.Scene {
     const ch = 42;
     const gap = 6;
     const totalWidth = recent.length * cw + (recent.length - 1) * gap;
-    const startX = 400 - totalWidth / 2 + cw / 2;
+    const startX = DX - totalWidth / 2 + cw / 2;
     recent.forEach((card, i) => {
       const x = startX + i * (cw + gap);
-      const y = 298;
+      const y = DY - 2;
       const bg = this.add.graphics();
       bg.fillStyle(Theme.cardFace, 1);
       bg.fillRoundedRect(x - cw / 2, y - ch / 2, cw, ch, 5);

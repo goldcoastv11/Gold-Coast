@@ -2,7 +2,15 @@ import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeBetControl, popIn, BetControl, UIButton } from "../ui/uiHelpers";
+import {
+  makeGameShell,
+  GameShellHandle,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  popIn,
+  BetControl,
+  UIButton
+} from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -11,10 +19,13 @@ const TOTAL_TILES = GRID_SIZE * GRID_SIZE;
 const MINE_COUNT = 3;
 const SAFE_TILES = TOTAL_TILES - MINE_COUNT;
 
-const TILE_SIZE = 44;
-const TILE_GAP = 6;
-const GRID_CENTER_Y = 312;
-const GRID_CENTER_X = 400;
+const TILE_SIZE = 62;
+const TILE_GAP = 8;
+// Stake-style layout: grid centered in the shell's right-side display area
+// (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
+// sidebar now occupies the left third of the screen.
+const GRID_CENTER_Y = GAME_SHELL_DISPLAY_CENTER_Y;
+const GRID_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
 
 interface TileVisual {
   container: Phaser.GameObjects.Container;
@@ -38,6 +49,7 @@ export class MinesScene extends Phaser.Scene {
   private cashOutBtn?: UIButton;
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
+  private shell!: GameShellHandle;
 
   constructor() {
     super("MinesScene");
@@ -53,63 +65,22 @@ export class MinesScene extends Phaser.Scene {
     this.tiles = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 480, 540);
-
-    this.add
-      .text(400, 55, "MINES", {
-        fontSize: "26px",
-        color: Theme.textAccent,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
-
-    makeInset(this, 400, 88, 380, 30, 15);
-    this.balanceText = this.add
-      .text(400, 88, "", { fontSize: "13px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-
-    this.betControl = makeBetControl(this, 400, 120, () => {});
-
-    this.multiplierText = this.add
-      .text(400, 150, "", { fontSize: "16px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
-
-    this.messageText = this.add
-      .text(400, 172, `${MINE_COUNT} mines hidden among ${TOTAL_TILES} tiles - start a game`, {
-        fontSize: "13px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
-
-    this.startBtn = makeButton(
-      this,
-      300,
-      495,
-      170,
-      46,
-      "START GAME",
-      Theme.accent,
-      Theme.accentHover,
-      () => this.startGame()
-    );
-    this.cashOutBtn = makeButton(
-      this,
-      500,
-      495,
-      170,
-      46,
-      "CASH OUT",
-      Theme.gold,
-      Theme.goldHover,
-      () => this.cashOut(),
-      Theme.cardTextBlack
-    );
-    this.cashOutBtn.setEnabled(false);
-    this.cashOutBtn.container.setVisible(false);
-
-    this.walkAwayBtn = makeButton(this, 400, 550, 200, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
-      this.leaveGame()
-    );
+    // Stake-style shell: left sidebar (title/balance/bet/multiplier/
+    // message/Bet-Cashout/Walk Away) + open right-side display area for
+    // the grid - see ui/uiHelpers.ts's makeGameShell doc comment.
+    this.shell = makeGameShell(this, "MINES", "START GAME", {
+      onStart: () => this.startGame(),
+      onCashOut: () => this.cashOut(),
+      onWalkAway: () => this.leaveGame()
+    });
+    this.balanceText = this.shell.balanceText;
+    this.multiplierText = this.shell.multiplierText;
+    this.messageText = this.shell.messageText;
+    this.startBtn = this.shell.startBtn;
+    this.cashOutBtn = this.shell.cashOutBtn;
+    this.walkAwayBtn = this.shell.walkAwayBtn;
+    this.betControl = this.shell.betControl;
+    this.messageText.setText(`${MINE_COUNT} mines hidden among ${TOTAL_TILES} tiles - start a game`);
 
     this.buildEmptyGridVisuals();
     this.updateBalance();

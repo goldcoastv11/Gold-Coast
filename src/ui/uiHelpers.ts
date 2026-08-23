@@ -389,6 +389,101 @@ export function makeBetControl(
   };
 }
 
+/**
+ * Center of the game shell's right-side display area (see makeGameShell) -
+ * scenes using the shell should center their grid/tower/card visuals here
+ * instead of the canvas center (400,300), since the left sidebar now
+ * occupies the left third of the screen.
+ */
+export const GAME_SHELL_DISPLAY_CENTER_X = 570;
+export const GAME_SHELL_DISPLAY_CENTER_Y = 300;
+
+export interface GameShellHandle {
+  balanceText: Phaser.GameObjects.Text;
+  multiplierText: Phaser.GameObjects.Text;
+  messageText: Phaser.GameObjects.Text;
+  betControl: BetControl;
+  startBtn: UIButton;
+  cashOutBtn: UIButton;
+  walkAwayBtn: UIButton;
+}
+
+/**
+ * Shared "Stake-style" game shell: a left-docked control panel (title,
+ * balance, bet amount, multiplier/profit readout, message, Bet/Cash Out,
+ * Walk Away) beside an open right-side display area for the game's own
+ * grid/tower/cards - matching the real Stake Originals convention of a
+ * fixed sidebar next to the game view, instead of everything stacked in
+ * one center panel. Center game-specific visuals on
+ * (GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y), not the
+ * canvas center - the sidebar occupies the left third of the screen.
+ *
+ * `startBtn`/`cashOutBtn` occupy the exact same slot and swap visibility
+ * (same pattern every game already used before this shell existed) -
+ * callers still call `.setLabel()`/`.setEnabled()`/`.container.setVisible()`
+ * on them directly for round-state transitions (start -> new run, etc.),
+ * this just centralizes where they're built and positioned.
+ */
+export function makeGameShell(
+  scene: Phaser.Scene,
+  title: string,
+  startLabel: string,
+  handlers: {
+    onStart: () => void;
+    onCashOut: () => void;
+    onWalkAway: () => void;
+    onBetChange?: () => void;
+  }
+): GameShellHandle {
+  const CX = 180; // sidebar center x - sidebar spans x:10-350
+
+  makePanel(scene, CX, 300, 340, 580);
+
+  scene.add
+    .text(CX, 45, title, { fontSize: "22px", color: Theme.textAccent, fontStyle: "bold" })
+    .setOrigin(0.5);
+
+  makeInset(scene, CX, 82, 300, 30, 15);
+  const balanceText = scene.add
+    .text(CX, 82, "", { fontSize: "13px", color: Theme.textPrimary })
+    .setOrigin(0.5);
+
+  const betControl = makeBetControl(scene, CX, 132, handlers.onBetChange ?? (() => {}));
+
+  const multiplierText = scene.add
+    .text(CX, 178, "", { fontSize: "17px", color: Theme.textGold, fontStyle: "bold" })
+    .setOrigin(0.5);
+
+  const messageText = scene.add
+    .text(CX, 212, "", {
+      fontSize: "13px",
+      color: Theme.textMuted,
+      align: "center",
+      wordWrap: { width: 300 }
+    })
+    .setOrigin(0.5);
+
+  const startBtn = makeButton(scene, CX, 505, 300, 50, startLabel, Theme.accent, Theme.accentHover, handlers.onStart);
+  const cashOutBtn = makeButton(
+    scene,
+    CX,
+    505,
+    300,
+    50,
+    "CASH OUT",
+    Theme.gold,
+    Theme.goldHover,
+    handlers.onCashOut,
+    Theme.cardTextBlack
+  );
+  cashOutBtn.setEnabled(false);
+  cashOutBtn.container.setVisible(false);
+
+  const walkAwayBtn = makeButton(scene, CX, 560, 220, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, handlers.onWalkAway);
+
+  return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
+}
+
 /** Punchy scale-pop animation for win text / results. */
 export function popIn(scene: Phaser.Scene, target: Phaser.GameObjects.GameObject) {
   const obj = target as unknown as { setScale: (s: number) => void };
