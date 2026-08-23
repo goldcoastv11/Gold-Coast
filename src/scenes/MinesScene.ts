@@ -101,7 +101,8 @@ export class MinesScene extends Phaser.Scene {
       "CASH OUT",
       Theme.gold,
       Theme.goldHover,
-      () => this.cashOut()
+      () => this.cashOut(),
+      Theme.cardTextBlack
     );
     this.cashOutBtn.setEnabled(false);
     this.cashOutBtn.container.setVisible(false);

@@ -22,18 +22,18 @@ import Phaser from "phaser";
  */
 
 const FADE_MS = 220;
-// Warm cream, matching Theme.bgDark (#FFF6E9, the world/panel backdrop
-// color used everywhere in this game) - NOT a dark color. A first attempt
-// used a dark warm-brown (Theme.outline) reasoning that STYLE_GUIDE.md's
-// "never pure black" rule meant any dark fade just needed to avoid true
-// black - but a fast ~220ms dip into ANY dark tone against this game's
-// all-bright palette reads as a jarring flash regardless of exact hue
-// (reported as "a flash of red" - it wasn't literally red, but a quick
-// glimpse of a dark warm color against bright surroundings reads that
-// way). A light-to-light fade avoids the whole class of problem.
-const FADE_R = 0xff;
-const FADE_G = 0xf6;
-const FADE_B = 0xe9;
+// Near-black, matching Theme.bgDark (#0E0F14, the world/panel backdrop
+// color under the "Arcade Nights" dark palette). This used to be a warm
+// cream (#FFF6E9) matching the OLD "Bright Social-Hub" light theme - a
+// leftover missed when Theme.ts was remapped to the dark palette, so every
+// scene transition was fading through a bright cream flash against an
+// otherwise all-dark game (reported as "the screen goes white and you
+// can't click anything" - the fade itself was fine, it was just fading to
+// completely the wrong color, which read as the game breaking). Keep this
+// in sync with Theme.bgDark if that ever changes again.
+const FADE_R = 0x0e;
+const FADE_G = 0x0f;
+const FADE_B = 0x14;
 
 /**
  * Fades `scene`'s camera out, then starts `key` (with optional `data`) once

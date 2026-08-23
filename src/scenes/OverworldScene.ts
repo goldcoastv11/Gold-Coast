@@ -425,6 +425,25 @@ export class OverworldScene extends Phaser.Scene {
     const shouldStartTutorial = data?.startTutorial === true;
     this.sys.settings.data = {};
 
+    // Same "Phaser reuses this scene instance across every re-entry" issue
+    // as settings.data above, for a different field: ambientNpcs is a class
+    // field (`= []` in its declaration), which only runs ONCE, in the
+    // constructor - NOT on every create() call. Without resetting it here,
+    // every return trip from a game re-ran buildDecorations()'s 3
+    // addAmbientNpc() calls and PUSHED 3 more entries onto the same array,
+    // leaving the previous 3 in there wrapping sprites this scene had
+    // already destroyed on the way out. updateAmbientNpcs() (called every
+    // frame, unconditionally, from the very top of update()) then called
+    // .setVelocity() on those stale entries - a destroyed Arcade sprite's
+    // body is null, so that throws, every single frame, forever, which
+    // halts Phaser's whole game loop (same class of bug as the earlier
+    // invalid-camera-ease-string hang) - the exact "screen goes white and
+    // you can't click anything" symptom reported after finishing a game
+    // and returning to the Overworld. Clearing the array here, before
+    // buildDecorations() re-populates it, is the fix - mirrors clearing
+    // settings.data above for exactly the same underlying reason.
+    this.ambientNpcs = [];
+
     this.buildFloor();
     this.buildDecorations();
 

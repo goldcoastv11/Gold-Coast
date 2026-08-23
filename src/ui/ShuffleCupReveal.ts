@@ -80,7 +80,14 @@ function slotX(slot: number): number {
 
 function colorForMultiplier(m: number): { fill: number; text: string } {
   if (m < 1) return { fill: Theme.loseZone, text: Theme.textDanger };
-  if (m > 1) return { fill: Theme.gold, text: Theme.textGold };
+  // Theme.gold and Theme.textGold are literally the same hex value (both
+  // are "amber-gold" - one's the fill token, one's the text token, but
+  // under the dark "Arcade Nights" palette they resolve identically) - a
+  // real bug, not a stylistic choice: text drawn in Theme.textGold on a
+  // Theme.gold-filled cup is 100% invisible. Theme.cardTextBlack (dark
+  // near-black, already used elsewhere for text-on-a-light-fill) gives
+  // real contrast here instead.
+  if (m > 1) return { fill: Theme.gold, text: Theme.cardTextBlack };
   return { fill: Theme.winZone, text: Theme.textAccent };
 }
 

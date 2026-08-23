@@ -27,11 +27,15 @@ import { fadeToScene } from "../ui/sceneTransition";
 const PALETTE = {
   /** Near-black outline used on every drawn shape. */
   outline: 0x05070c,
-  /** Dark navy-blue - "cabinet" furniture body (was terracotta). */
-  cabinet: 0x1a2138,
-  /** Darker navy - trim/base/plinth accents. */
-  cabinetDark: 0x101725,
-  /** Dark slate "screen" panel background, reads as a lit arcade-cabinet screen against the navy body (was cream). */
+  /** White - "cabinet" furniture body (was terracotta, then dark navy) - per
+   * user direction, the game cabinets themselves need to read as white so
+   * they pop against the dark floor instead of blending into it. Paired
+   * with a still-dark `screen` fill below, this reads as a real arcade
+   * cabinet: light plastic shell, dark lit screen. */
+  cabinet: 0xf2f3f7,
+  /** Light gray - trim/base/plinth accents, a shade darker than `cabinet` for shape definition (was dark navy). */
+  cabinetDark: 0xc7cbd6,
+  /** Dark slate "screen" panel background, reads as a lit arcade-cabinet screen against the now-white cabinet body (was cream). */
   screen: 0x131a2c,
   /** Even darker alt panel (was pale sky blue). */
   screenAlt: 0x0d1220,

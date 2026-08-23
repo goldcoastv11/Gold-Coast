@@ -155,7 +155,8 @@ export class HiLoScene extends Phaser.Scene {
       "CASH OUT",
       Theme.gold,
       Theme.goldHover,
-      () => this.cashOut()
+      () => this.cashOut(),
+      Theme.cardTextBlack
     );
 
     this.walkAwayBtn = makeButton(this, 400, 488, 200, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, () =>
