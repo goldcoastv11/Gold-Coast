@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -205,6 +206,7 @@ export class DiceScene extends Phaser.Scene {
     this.plusBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Rolling...").setColor(Theme.textMuted);
+    playSfx(this, "diceThrow");
 
     this.rollTimer = this.time.addEvent({
       delay: 70,

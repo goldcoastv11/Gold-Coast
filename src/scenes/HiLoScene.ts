@@ -16,6 +16,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { HiLoGuess } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 // Stake-style layout: card/history/buttons centered in the shell's
 // right-side display area (see ui/uiHelpers.ts's makeGameShell) - the
@@ -247,6 +248,7 @@ export class HiLoScene extends Phaser.Scene {
     this.startBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Starting...").setColor(Theme.textMuted);
+    playSfx(this, "cardSlide");
 
     this.attemptStart(bet, true);
   }

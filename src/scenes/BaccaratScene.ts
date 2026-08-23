@@ -16,6 +16,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BaccaratBetType } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 /**
  * Real published baccarat odds - no invented numbers. Standard 8-deck-shoe
@@ -238,6 +239,7 @@ export class BaccaratScene extends Phaser.Scene {
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(false));
     this.clearSlots();
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    playSfx(this, "cardSlide");
 
     api
       .playBaccarat(bet, "GC", this.betType)

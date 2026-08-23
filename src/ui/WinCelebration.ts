@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
+import { playSfx } from "./SoundManager";
 
 /**
  * Big, hard-to-miss win reaction for the 14 games (per user direction:
@@ -19,6 +20,8 @@ import { Theme } from "./Theme";
  */
 export function showWinCelebration(scene: Phaser.Scene, ticketsPayout: number): void {
   if (!(ticketsPayout > 0)) return;
+
+  playSfx(scene, "confirm");
 
   const { width, height } = scene.scale;
   const DEPTH = 900; // above every game's own UI (panels/modals top out well under this)

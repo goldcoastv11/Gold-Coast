@@ -18,6 +18,7 @@ import {
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { playSfx } from "../ui/SoundManager";
 
 const TILE = 16; // real tileset is 16x16 pixels per tile
 const MAP_COLS = 80;
@@ -1074,7 +1075,12 @@ export class OverworldScene extends Phaser.Scene {
 
   private handleInteraction() {
     if (!Phaser.Input.Keyboard.JustDown(this.interactKey)) return;
-    this.activeInteractable?.onInteract();
+    if (!this.activeInteractable) return;
+    // Every walkable-up-to station (Coin Kiosk, Item Shop, all 14 game
+    // cabinets, the exit door) funnels through here, so this one hook
+    // covers "the arcade floor" getting a sound on every E-press.
+    playSfx(this, "select");
+    this.activeInteractable.onInteract();
   }
 
   /**
@@ -1235,6 +1241,7 @@ export class OverworldScene extends Phaser.Scene {
       return;
     }
     this.panelOpen = true;
+    playSfx(this, "open");
     offerCoinKiosk(
       this,
       400,
@@ -1386,6 +1393,7 @@ export class OverworldScene extends Phaser.Scene {
   /** Shows the result panel for a successful (server-confirmed) Coin Kiosk claim - `tripleChance` (#46) reflects whether/how the GC leg changed after the bonus round, if the player played it. GC-only now (see economy/attendantClaim.ts's doc comment) - no SC sub-message any more. */
   private showClaimResultFromServer(gcGained: number, tripleChance?: TripleChanceOutcome) {
     this.updateHud();
+    playSfx(this, "chipLay");
     let gcMessage = `+${gcGained} Gold Coins!`;
     if (tripleChance?.played) {
       gcMessage =
@@ -1541,6 +1549,7 @@ export class OverworldScene extends Phaser.Scene {
    */
   private openSkinPanel(mode: "shop" | "wardrobe") {
     this.panelOpen = true;
+    playSfx(this, "open");
     let page = 0;
     const itemsPerPage = 4;
     let elements: Phaser.GameObjects.GameObject[] = [];
@@ -1674,6 +1683,7 @@ export class OverworldScene extends Phaser.Scene {
                   this.applyPlayerScale();
                   this.updateHud();
                   this.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
+                  playSfx(this, "confirm");
                   render();
                   // Onboarding tutorial's Skin Attendant hands-on step
                   // (see startOnboardingTutorial) listens for this -
@@ -1682,6 +1692,7 @@ export class OverworldScene extends Phaser.Scene {
                 })
                 .catch((err) => {
                   this.showToast(this.describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
+                  playSfx(this, "error");
                   render();
                 });
             }

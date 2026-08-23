@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
 import { gameState, BET_STEP } from "../GameState";
+import { playSfx } from "./SoundManager";
 
 /** A pill-shaped, interactive button with hover feedback. */
 export interface UIButton {
@@ -81,6 +82,11 @@ export function makeButton(
     // visual - onClick still fires on pointerdown exactly as before, so no
     // interaction timing changes for any caller.
     container.setScale(0.96);
+    // Every button in the game (floor panels, Item Shop, Coin Kiosk, every
+    // game's Bet/Cash Out/Walk Away/+/-/½/2x) goes through makeButton, so
+    // this one hook covers a click sound everywhere at once - see
+    // ui/SoundManager.ts.
+    playSfx(scene, "click");
     onClick();
   });
   container.on("pointerup", () => {

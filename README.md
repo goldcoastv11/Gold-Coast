@@ -118,6 +118,15 @@ consistent with the project's other art credit. (Task #21/#24; see
 `STYLE_GUIDE.md` for the full pack details, including its environment
 tiles, which are a separate integration.)
 
+## Audio credits
+
+Sound effects are from Kenney's **"Casino Audio"**
+(https://kenney.nl/assets/casino-audio) and **"Interface Sounds"**
+(https://kenney.nl/assets/interface-sounds) packs, both CC0 1.0
+Universal — no attribution required, credited here anyway to stay
+consistent. See `AUDIO_GUIDE.md` for the full pack details and which
+sound plays where.
+
 ## What's real vs. placeholder
 
 This POC is intentionally minimal, to test one thing: does walking around a

@@ -17,6 +17,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BlackjackOutcome } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 // #36: the deck, dealer AI, and win/payout math are all resolved
 // server-side (POST /games/blackjack/start|hit|stand) - the server only
@@ -162,6 +163,7 @@ export class BlackjackScene extends Phaser.Scene {
     this.newHandBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    playSfx(this, "cardSlide");
 
     this.attemptStart(bet, true);
   }

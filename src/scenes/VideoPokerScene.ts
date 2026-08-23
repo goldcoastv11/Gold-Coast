@@ -14,6 +14,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 /**
  * Standard "9/6 Jacks or Better" paytable - the classic full-pay video
@@ -240,6 +241,7 @@ export class VideoPokerScene extends Phaser.Scene {
     this.actionBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    playSfx(this, "cardSlide");
 
     this.attemptDeal(bet, true);
   }

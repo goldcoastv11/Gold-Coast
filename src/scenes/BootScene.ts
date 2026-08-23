@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { SKIN_CATALOG } from "../GameState";
 import { fadeToScene } from "../ui/sceneTransition";
+import { preloadSounds } from "../ui/SoundManager";
 
 /**
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
@@ -146,6 +147,11 @@ export class BootScene extends Phaser.Scene {
         frameHeight: 32
       });
     }
+
+    // Sound effects (see ui/SoundManager.ts) - loaded once here, played from
+    // any scene via playSfx(scene, key), same "load once in BootScene" shape
+    // as every image/spritesheet above.
+    preloadSounds(this);
   }
 
   create() {
