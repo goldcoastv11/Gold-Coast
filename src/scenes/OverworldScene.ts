@@ -458,15 +458,18 @@ export class OverworldScene extends Phaser.Scene {
     this.applyPlayerBody();
     this.applyPlayerScale();
 
-    // NPC - the "chip person", now in the center of the floor. Always the
-    // new Kenney rig (npc_sheet never changes texture), so a fixed scale is
-    // safe here - see applyPlayerScale's comment for why the player can't
-    // use a fixed value.
-    const npc = this.physics.add.staticSprite(40 * TILE, 28 * TILE, "npc_sheet", 1).setScale(2);
+    // Coin Kiosk furniture, in the center of the floor - per user
+    // direction, a TV/screen-on-a-stand (BootScene.ts's createCoinKiosk
+    // Texture, already drawn at the right cabinet scale) rather than the
+    // "chip person" Kenney character sprite this used to be. No setScale
+    // needed (unlike the old character sprite) since the texture is
+    // already native cabinet size, same as every other game's furniture.
+    const npc = this.physics.add.staticSprite(40 * TILE, 28 * TILE, "coin_kiosk");
     // Static bodies don't auto-resync to a post-creation setScale (see the
     // refreshBody() calls in addFurnitureStation/registerReservedStation
-    // below) - without this the collider still uses the pre-scale 16x16
-    // box while the sprite renders at 32x32.
+    // below) - refreshBody() itself is still correct to call even with no
+    // setScale this time, since it's what makes the collider match the
+    // new texture's actual (different) footprint in the first place.
     npc.refreshBody();
     this.physics.add.collider(this.player, npc);
     // Coin Kiosk (was "Chip Attendant" + the separate standalone "Ad

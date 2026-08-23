@@ -173,6 +173,7 @@ export class BootScene extends Phaser.Scene {
     this.createHiLoTexture();
     this.createBaccaratTexture();
     this.createVideoPokerTexture();
+    this.createCoinKioskTexture();
     this.createComingSoonTexture();
     this.createPlantTexture();
     this.createRouletteTableTexture();
@@ -206,16 +207,18 @@ export class BootScene extends Phaser.Scene {
   /**
    * Gaming-floor "rug" tile, 16x16 - a dark maroon-black patterned carpet,
    * the classic arcade/bowling-alley carpet look. `carpet_blue` (below) is
-   * the existing 1-in-5-tile accent inside this same rug area.
+   * the existing 1-in-5-tile accent inside this same rug area. Bordered in
+   * orange (was a near-black internal pattern line, per user direction -
+   * a near-black line on an already near-black tile just read as "black
+   * carpet grid," not an intentional accent).
    */
   private createCarpetRedTexture() {
     const s = 16;
     const g = this.add.graphics();
     g.fillStyle(0x2a0f10, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x3d1416, 1);
-    g.fillRect(0, 0, s, 1);
-    g.fillRect(0, 8, s, 1);
+    g.lineStyle(1, PALETTE.coral, 0.9);
+    g.strokeRect(0.5, 0.5, s - 1, s - 1);
     g.fillStyle(PALETTE.coral, 0.25);
     g.fillCircle(4, 4, 1.1);
     g.fillCircle(12, 12, 1.1);
@@ -223,15 +226,14 @@ export class BootScene extends Phaser.Scene {
     g.destroy();
   }
 
-  /** Rug accent tile (1-in-5, see buildFloor()) - a dark navy-black variant of carpet_red. */
+  /** Rug accent tile (1-in-5, see buildFloor()) - a dark navy-black variant of carpet_red, same orange border treatment. */
   private createCarpetBlueTexture() {
     const s = 16;
     const g = this.add.graphics();
     g.fillStyle(0x0f1526, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x18213a, 1);
-    g.fillRect(0, 0, s, 1);
-    g.fillRect(0, 8, s, 1);
+    g.lineStyle(1, PALETTE.coral, 0.9);
+    g.strokeRect(0.5, 0.5, s - 1, s - 1);
     g.fillStyle(PALETTE.sky, 0.25);
     g.fillCircle(4, 4, 1.1);
     g.fillCircle(12, 12, 1.1);
@@ -611,6 +613,46 @@ export class BootScene extends Phaser.Scene {
 
     this.drawCabinetBase(g, w, h);
     g.generateTexture("video_poker_machine", w, h);
+    g.destroy();
+  }
+
+  /**
+   * The overworld Coin Kiosk - per user direction, a TV/screen-on-a-stand
+   * rather than a person character (it used to be the "npc_sheet" Kenney
+   * character sprite - see OverworldScene.ts's registerStation call for
+   * this station). Same 48x64 cabinet scale as the other game furniture,
+   * with an antenna on top (the same "reads as a screen/TV, not a game
+   * machine" trick the old, since-retired standalone Ad Kiosk cabinet
+   * used) and a coral play-triangle on the screen, since watching a
+   * simulated ad is still literally step one of what this station does.
+   */
+  private createCoinKioskTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    this.drawCabinetBody(g, w, h);
+
+    // antenna, reads as "screen/TV" not "slot machine"
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.beginPath();
+    g.moveTo(w / 2, 10);
+    g.lineTo(w / 2 - 6, 2);
+    g.moveTo(w / 2, 10);
+    g.lineTo(w / 2 + 6, 2);
+    g.strokePath();
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillCircle(w / 2 - 6, 2, 1.8);
+    g.fillCircle(w / 2 + 6, 2, 1.8);
+
+    g.fillStyle(PALETTE.screen, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+
+    // coral play triangle, centered on the screen
+    g.fillStyle(PALETTE.coral, 1);
+    g.fillTriangle(w / 2 - 6, 22, w / 2 - 6, 40, w / 2 + 8, 31);
+
+    this.drawCabinetBase(g, w, h);
+    g.generateTexture("coin_kiosk", w, h);
     g.destroy();
   }
 
