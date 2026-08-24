@@ -10,7 +10,26 @@
       padding: 0;
       background: #0e0f14;
       width: 100%;
-      height: 100%;
+      /* 100vh on mobile browsers is measured against the LARGEST possible
+         viewport (as if the address bar/toolbar were hidden), not what's
+         actually visible right now - so a 100vh-tall box can genuinely
+         extend behind that chrome, physically hiding whatever sits at its
+         bottom edge (reported live: the touch joystick's bottom got cut
+         off, even though Scale.FIT itself was mathematically showing 100%
+         of the canvas with zero cropping - a different bug than the
+         ENVELOP crop this project hit earlier). 100svh ("small viewport
+         height") is sized against the SMALLEST possible visible area -
+         i.e. worst case, chrome fully shown - so content sized to it can
+         never end up hidden behind chrome, in exchange for a few px of
+         unused space at the bottom on browsers where the chrome auto-
+         hides. Deliberately svh, not the newer dvh ("dynamic", tracks
+         chrome showing/hiding live) - dvh would make the canvas keep
+         resizing as the user scrolls/interacts, which is worse for a game
+         than a few static px of margin. `100vh` stays first as a fallback
+         for browsers that don't support either unit - the srh/dvh lines
+         are simply ignored there, not applied on top. */
+      height: 100vh;
+      height: 100svh;
       overflow: hidden;
       /* Mobile: prevent the page itself from scrolling/bouncing or the
          browser chrome swallowing touch gestures meant for the canvas
@@ -38,7 +57,8 @@
          canvas/DOM-container children a sane containing block. */
       position: relative;
       width: 100vw;
-      height: 100vh;
+      height: 100vh; /* fallback - see html,body's height rule above for why 100svh */
+      height: 100svh;
       /* Belt-and-suspenders against page scrollbars - Scale.FIT (main.ts)
          shouldn't ever overflow this container, but doesn't hurt to clip
          defensively. */
