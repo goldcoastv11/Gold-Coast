@@ -122,8 +122,15 @@
     #fullscreen-btn {
       display: none;
       position: fixed;
-      top: 10px;
-      right: 10px;
+      /* env(safe-area-inset-*) - a landscape iPhone's camera cutout/rounded
+         corner sits exactly in this button's original fixed top-right
+         corner; the fallback 10px keeps the old position on every browser
+         that doesn't define the env() (everything except notched iOS
+         Safari, which is the one case this actually matters for). Requires
+         viewport-fit=cover in the viewport meta tag above to have any
+         value at all - without it these env() vars are always 0. */
+      top: calc(env(safe-area-inset-top, 0px) + 10px);
+      right: calc(env(safe-area-inset-right, 0px) + 10px);
       z-index: 500;
       width: 36px;
       height: 36px;

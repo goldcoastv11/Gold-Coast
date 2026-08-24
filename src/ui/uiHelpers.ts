@@ -260,7 +260,15 @@ export function makeBetControl(
 ): BetControl {
   const container = scene.add.container(x, y);
 
-  const inset = makeInset(scene, 0, 0, 260, 40, 12);
+  // Height 44, not the original 40 - part of a mobile touch-target pass
+  // (Apple HIG/Android guidelines land around 44pt/48dp; this game's fixed
+  // 800x600 canvas typically renders at ~0.6-0.7x scale on a phone, so
+  // these buttons were landing meaningfully under that at their original
+  // size). Only height grows here, not width - the half/minus/plus/double
+  // buttons are already tightly packed horizontally (as little as 6px
+  // between neighbors), so widening them risks real overlap; growing
+  // height is safe since there's vertical headroom in the sidebar.
+  const inset = makeInset(scene, 0, 0, 260, 44, 12);
 
   let controlEnabled = true;
 
@@ -271,7 +279,7 @@ export function makeBetControl(
   el.autocomplete = "off";
   Object.assign(el.style, {
     width: "130px",
-    height: "28px",
+    height: "32px",
     padding: "0",
     textAlign: "center",
     fontSize: "14px",
@@ -337,24 +345,24 @@ export function makeBetControl(
   };
   refresh();
 
-  const minusBtn = makeButton(scene, -102, 0, 36, 32, "-", Theme.neutral, Theme.neutralHover, () => {
+  const minusBtn = makeButton(scene, -102, 0, 36, 38, "-", Theme.neutral, Theme.neutralHover, () => {
     gameState.adjustBet(-BET_STEP);
     refresh();
     onChange();
   });
-  const plusBtn = makeButton(scene, 102, 0, 36, 32, "+", Theme.neutral, Theme.neutralHover, () => {
+  const plusBtn = makeButton(scene, 102, 0, 36, 38, "+", Theme.neutral, Theme.neutralHover, () => {
     gameState.adjustBet(BET_STEP);
     refresh();
     onChange();
   });
   // Stake-style quick half/double buttons, outside the -/+ pair - same Y,
   // just wider overall (see this function's doc comment).
-  const halfBtn = makeButton(scene, -142, 0, 32, 32, "½", Theme.neutral, Theme.neutralHover, () => {
+  const halfBtn = makeButton(scene, -142, 0, 32, 38, "½", Theme.neutral, Theme.neutralHover, () => {
     gameState.setBet(gameState.betAmount / 2);
     refresh();
     onChange();
   });
-  const doubleBtn = makeButton(scene, 142, 0, 32, 32, "2×", Theme.neutral, Theme.neutralHover, () => {
+  const doubleBtn = makeButton(scene, 142, 0, 32, 38, "2×", Theme.neutral, Theme.neutralHover, () => {
     gameState.setBet(gameState.betAmount * 2);
     refresh();
     onChange();
@@ -459,13 +467,19 @@ export function makeGameShell(
     })
     .setOrigin(0.5);
 
-  const startBtn = makeButton(scene, CX, 505, 300, 50, startLabel, Theme.accent, Theme.accentHover, handlers.onStart);
+  // Heights 58/42 (not the original 50/34) - mobile touch-target pass, see
+  // makeBetControl's doc comment above for the same reasoning (this
+  // canvas typically renders at ~0.6-0.7x scale on a phone). These two
+  // are the most-tapped buttons in every game (the primary action, and
+  // the way out), so they get the largest bump of anything touched in
+  // this pass.
+  const startBtn = makeButton(scene, CX, 505, 300, 58, startLabel, Theme.accent, Theme.accentHover, handlers.onStart);
   const cashOutBtn = makeButton(
     scene,
     CX,
     505,
     300,
-    50,
+    58,
     "CASH OUT",
     Theme.gold,
     Theme.goldHover,
@@ -475,7 +489,7 @@ export function makeGameShell(
   cashOutBtn.setEnabled(false);
   cashOutBtn.container.setVisible(false);
 
-  const walkAwayBtn = makeButton(scene, CX, 560, 220, 34, "WALK AWAY", Theme.danger, Theme.dangerHover, handlers.onWalkAway);
+  const walkAwayBtn = makeButton(scene, CX, 560, 230, 42, "WALK AWAY", Theme.danger, Theme.dangerHover, handlers.onWalkAway);
 
   return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }
