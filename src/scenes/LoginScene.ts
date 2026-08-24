@@ -154,6 +154,21 @@ export class LoginScene extends Phaser.Scene {
     el.addEventListener("blur", () => {
       el.style.borderColor = cssHex(Theme.panelBorder);
     });
+    // stopPropagation on every keystroke, not just Enter - reported live
+    // (on a real phone; not reproducible from this environment, which has
+    // no real mobile virtual keyboard to test against) that the letters
+    // W/A/S/D/E specifically failed to appear while typing a username -
+    // exactly OverworldScene's movement-key set, too specific a match to
+    // be a coincidence even though direct tests here couldn't pin down
+    // the exact mechanism. Whatever the cause, no global/window-level
+    // listener (Phaser's keyboard manager or otherwise) should ever see a
+    // keystroke meant for a focused text field in the first place -
+    // stopping it at the source is correct regardless of which listener
+    // would otherwise have reacted to it.
+    const stopKeyPropagation = (event: KeyboardEvent) => event.stopPropagation();
+    el.addEventListener("keydown", stopKeyPropagation);
+    el.addEventListener("keyup", stopKeyPropagation);
+    el.addEventListener("keypress", stopKeyPropagation);
     el.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       if (type === "text") {

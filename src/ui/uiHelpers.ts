@@ -308,6 +308,16 @@ export function makeBetControl(
     // non-digit characters, so sanitize on every change regardless.
     el.value = el.value.replace(/[^0-9]/g, "").slice(0, 5);
   });
+  // stopPropagation on every keystroke - see LoginScene.ts's createTextInput
+  // for why (reported live: letters matching OverworldScene's movement
+  // keys failed to type in a real HTML input; no global/window-level
+  // listener should ever see a keystroke meant for a focused text field
+  // regardless of the exact mechanism). Less directly applicable here
+  // (this field is numeric-only) but the same defensive principle holds.
+  const stopKeyPropagation = (event: KeyboardEvent) => event.stopPropagation();
+  el.addEventListener("keydown", stopKeyPropagation);
+  el.addEventListener("keyup", stopKeyPropagation);
+  el.addEventListener("keypress", stopKeyPropagation);
   el.addEventListener("keydown", (event) => {
     if (event.key === "Enter") {
       el.blur(); // triggers the blur listener below, which commits
