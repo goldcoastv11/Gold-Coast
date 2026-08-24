@@ -260,13 +260,20 @@ export class LoginScene extends Phaser.Scene {
     // successful signup, even though those are drawn at a high Phaser
     // depth - depth only sorts objects *within* the canvas, it can't put
     // canvas content above a DOM overlay that's already stacked over the
-    // whole canvas by default. NOT `.setVisible()` - verified live that a
-    // Phaser DOMElement's visible flag doesn't actually touch the
-    // underlying node's CSS display at all; setting the node's own style
-    // directly is what actually hides it.
-    const display = enabled ? "" : "none";
-    (this.usernameInput.node as HTMLInputElement).style.display = display;
-    (this.passwordInput.node as HTMLInputElement).style.display = display;
+    // whole canvas by default.
+    //
+    // Neither `.setVisible()` NOR a plain `el.style.display = "none"`
+    // actually works here - both verified live and confirmed broken.
+    // `.setVisible()` flips Phaser's internal flag but never touches the
+    // node's real CSS at all; a direct inline `style.display` write gets
+    // silently overwritten back to "block" by Phaser's own per-frame DOM
+    // Element sync within a single frame (confirmed by pumping frames and
+    // watching the inline style itself flip back). The `.gc-dom-hidden`
+    // class (index.html) uses `!important`, the one thing that
+    // consistently beats a non-important inline style Phaser keeps
+    // re-asserting every frame.
+    this.usernameInput.node.classList.toggle("gc-dom-hidden", !enabled);
+    this.passwordInput.node.classList.toggle("gc-dom-hidden", !enabled);
     this.enterBtn.setEnabled(enabled);
     this.signupTabBtn.setEnabled(enabled);
     this.signinTabBtn.setEnabled(enabled);

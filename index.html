@@ -25,6 +25,23 @@
   <link rel="icon" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <style>
+    /* Used by any scene that needs to hide a Phaser DOM Element input
+       (LoginScene's username/password fields, uiHelpers.ts's bet-amount
+       field) - e.g. while a full-screen overlay (the shuffle-cup reveal)
+       should be the only thing visible. `!important` is load-bearing, not
+       decoration: verified live that Phaser re-applies `style.display =
+       "block"` to a DOM Element's node on literally every single rendered
+       frame (part of its own per-frame DOM-container sync), so a plain
+       inline `el.style.display = "none"` gets silently overwritten back
+       within one frame - confirmed by pumping frames and watching the
+       inline style itself flip back, not just the computed value. A
+       stylesheet rule with `!important` is the one thing that consistently
+       wins against a non-important inline style Phaser keeps re-asserting,
+       every frame, indefinitely - toggle this class instead of touching
+       `style.display` directly. */
+    .gc-dom-hidden {
+      display: none !important;
+    }
     html, body {
       margin: 0;
       padding: 0;

@@ -367,14 +367,7 @@ export class OverworldScene extends Phaser.Scene {
   private promptText!: TextChip;
   private hudText!: TextChip;
   private _panelOpen = false;
-  /**
-   * Override that lets handleMovement() run even while panelOpen is true -
-   * used ONLY by the onboarding tutorial's "try WASD now" step (see
-   * startOnboardingTutorial). panelOpen itself stays true for the tutorial's
-   * entire duration so handleProximity()/handleInteraction() never run -
-   * see update()'s doc comment for why that matters.
-   */
-  private tutorialAllowMovement = false;
+  private _tutorialAllowMovement = false;
   private interactables: Interactable[] = [];
   private activeInteractable: Interactable | null = null;
   /** Purely decorative background characters on simple back-and-forth patrols - see addAmbientNpc/updateAmbientNpcs. */
@@ -406,9 +399,41 @@ export class OverworldScene extends Phaser.Scene {
       this.clearTutorialHighlight();
     }
     this._panelOpen = value;
-    // Hide the touch joystick/interact button while a real panel is open -
-    // see TouchControls.ts's setVisible doc comment.
-    this.touchControls?.setVisible(!value);
+    this.updateTouchControlsVisibility();
+  }
+
+  private get tutorialAllowMovement(): boolean {
+    return this._tutorialAllowMovement;
+  }
+
+  /**
+   * Override that lets handleMovement() run even while panelOpen is true -
+   * used ONLY by the onboarding tutorial's "try WASD now" step (see
+   * startOnboardingTutorial). panelOpen itself stays true for the tutorial's
+   * entire duration so handleProximity()/handleInteraction() never run -
+   * see update()'s doc comment for why that matters.
+   */
+  private set tutorialAllowMovement(value: boolean) {
+    this._tutorialAllowMovement = value;
+    this.updateTouchControlsVisibility();
+  }
+
+  /**
+   * The touch joystick/interact button (mobile only, see
+   * ui/TouchControls.ts) should be visible exactly when real movement is
+   * possible - normally that's "no panel is open", but the tutorial's
+   * movement step is a real, deliberate exception (tutorialAllowMovement)
+   * where panelOpen stays true (blocking station interaction) while
+   * movement itself is unlocked. The previous version only ever checked
+   * `!panelOpen`, so the joystick/interact button stayed hidden through
+   * that entire step even though keyboard WASD worked fine - reported
+   * live as the tutorial's own "try moving now" step giving mobile players
+   * no way to actually do it, only becoming reachable once the whole
+   * tutorial ended. Centralized here (called from both setters below)
+   * rather than duplicated at every place either flag changes.
+   */
+  private updateTouchControlsVisibility() {
+    this.touchControls?.setVisible(!this.panelOpen || this.tutorialAllowMovement);
   }
 
   /** Destroys the tutorial's current highlight ring + instruction bubble, if any - safe to call even when neither exists. */
