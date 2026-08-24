@@ -19,11 +19,31 @@
       overscroll-behavior: none;
     }
     #game-container {
-      display: flex;
-      align-items: center;
-      justify-content: center;
+      /* NOT display:flex/align-items/justify-content - this used to
+         center its content that way, which seemed harmless (redundant
+         with Phaser's own `autoCenter: CENTER_BOTH`) but actually broke
+         the DOM Element overlay's positioning (LoginScene's real
+         username/password <input>s): per the CSS Flexbox spec, an
+         absolutely-positioned flex child's STATIC position is itself
+         computed as centered, not top-left-origin - Phaser's internal
+         margin/transform math for its DOM container div assumes a plain
+         top-left-origin parent and doesn't account for that, so the two
+         disagreed on where "centered" actually was. The canvas rendered
+         fine regardless (Phaser sets its own explicit absolute position),
+         which is why this only ever showed up as the inputs drifting away
+         from the rest of the UI, confirmed live on a real phone. Leave
+         centering entirely to Phaser's own Scale Manager - this container
+         just needs to fill the viewport as a plain block.
+         `position: relative` gives Phaser's own absolutely-positioned
+         canvas/DOM-container children a sane containing block. */
+      position: relative;
       width: 100vw;
       height: 100vh;
+      /* Scale.ENVELOP (main.ts) intentionally renders the canvas larger
+         than the viewport and crops it to fill edge-to-edge with no
+         letterbox bars - this clips that overflow instead of introducing
+         page scrollbars. */
+      overflow: hidden;
     }
     #game-container canvas {
       image-rendering: pixelated;
@@ -72,14 +92,60 @@
       0%, 100% { transform: rotate(0deg); }
       50% { transform: rotate(-90deg); }
     }
+    /* Fullscreen toggle - hides browser chrome (address bar, tab strip)
+       where the browser's Fullscreen API supports it. Wired up from
+       main.ts (checks `game.scale.fullscreen.available` and hides this
+       button entirely where it isn't supported - notably iOS Safari,
+       which doesn't allow arbitrary elements to go fullscreen at all).
+       Sits above the game (z-index) but below #rotate-prompt, so it's
+       naturally covered while that's showing rather than needing its own
+       orientation media query. */
+    #fullscreen-btn {
+      display: none;
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      z-index: 500;
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 2px solid #2e3a5c;
+      background: rgba(26, 33, 56, 0.85);
+      color: #f5f6fa;
+      font-size: 16px;
+      line-height: 1;
+      cursor: pointer;
+      touch-action: manipulation;
+    }
+    #fullscreen-btn:active {
+      background: rgba(46, 58, 92, 0.9);
+    }
     @media (orientation: portrait) and (max-width: 900px) {
       #rotate-prompt { display: flex; }
-      #game-container { display: none; }
+      /* visibility:hidden, NOT display:none - the actual bug this was
+         fixing: `display:none` collapses #game-container to a 0x0 box, and
+         most phones load the page in portrait FIRST (before ever
+         rotating), so Phaser boots and computes its DOM Element overlay's
+         position/scale (the login username/password <input>s) against
+         that zero-size box. Rotating to landscape resized the canvas
+         correctly (Scale.FIT catches the resize) but the DOM container's
+         position math had already latched onto the bad initial geometry
+         and didn't fully recompute - reported live as "the inputs aren't
+         under the sign in/up button" after rotating on a real phone.
+         visibility:hidden keeps the container at its real 100vw/100vh
+         layout size the whole time (just not painted), so Phaser always
+         measures real geometry, in either orientation, from the very
+         first frame. pointer-events:none is redundant with
+         visibility:hidden (which already blocks hit-testing) but kept
+         explicit as a second guard against stray input reaching a
+         not-actually-visible canvas. */
+      #game-container { visibility: hidden; pointer-events: none; }
     }
   </style>
 </head>
 <body>
   <div id="game-container"></div>
+  <button id="fullscreen-btn" type="button" aria-label="Toggle fullscreen">⛶</button>
   <div id="rotate-prompt">
     <div class="icon">📱</div>
     <div class="title">Rotate your device</div>

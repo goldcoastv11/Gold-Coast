@@ -55,7 +55,17 @@ const config: Phaser.Types.Core.GameConfig = {
     activePointers: 2
   },
   scale: {
-    mode: Phaser.Scale.FIT,
+    // ENVELOP (not FIT): FIT preserves the 800x600 (4:3) aspect ratio by
+    // letterboxing - black bars on whichever side doesn't match the real
+    // screen's aspect ratio, which is most screens (phones and desktop
+    // monitors are typically 16:9-ish or wider). ENVELOP instead scales up
+    // to fully COVER the viewport and crops whatever overflows, so the
+    // game fills the screen edge to edge on both platforms with no bars -
+    // the tradeoff is the far edges of an unusually wide/narrow viewport
+    // can crop slightly, but every scene's actual content (game shell
+    // sidebar, buttons, dialogs) sits centered with real margin inside the
+    // 800x600 frame, so this reads fine in practice.
+    mode: Phaser.Scale.ENVELOP,
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: 800,
     height: 600
@@ -93,6 +103,54 @@ const game = new Phaser.Game(config);
 // Debug handle only - lets the browser console inspect the running game
 // (e.g. `__game.scene.getScene("LoginScene")`). Harmless to leave in.
 (window as unknown as { __game: Phaser.Game }).__game = game;
+
+// Mobile landscape-lock defensive backstop (see index.html's #game-container
+// visibility:hidden comment for the actual root-cause fix - this is extra
+// insurance on top of that, not a replacement for it). A real phone's
+// browser chrome (address bar collapsing/expanding on scroll, the on-screen
+// keyboard appearing) can shift the visual viewport independently of any
+// CSS change, which can leave the DOM Element overlay (LoginScene's real
+// <input>s) positioned against stale geometry even after the canvas itself
+// re-renders at the right size. `scale.refresh()` forces Phaser to fully
+// recompute both the canvas AND the DOM container's position/scale against
+// current, real layout - cheap to call, so just do it after every
+// orientation/resize event rather than trying to guess which ones actually
+// need it. The short delay lets the browser's own layout/CSS settle first
+// (immediately-after-rotation dimensions are sometimes still mid-transition).
+window.addEventListener("orientationchange", () => {
+  setTimeout(() => game.scale.refresh(), 100);
+});
+window.addEventListener("resize", () => {
+  setTimeout(() => game.scale.refresh(), 100);
+});
+
+/**
+ * Fullscreen toggle button (markup/styling in index.html) - hides browser
+ * chrome (address bar, tab strip) on both desktop and mobile where the
+ * Fullscreen API supports it. Notably NOT supported by iOS Safari for
+ * arbitrary elements - the button stays hidden there rather than being a
+ * dead control, per `fullscreen.available`. Scale.ENVELOP (this file,
+ * above) already fills the viewport edge-to-edge with no letterbox bars
+ * regardless of fullscreen state - this button is the separate "also hide
+ * the browser's own UI chrome" layer on top of that.
+ */
+const fullscreenBtn = document.getElementById("fullscreen-btn");
+if (fullscreenBtn) {
+  if (game.scale.fullscreen.available) {
+    fullscreenBtn.style.display = "block";
+    fullscreenBtn.addEventListener("click", () => {
+      game.scale.toggleFullscreen();
+    });
+    game.scale.on(Phaser.Scale.Events.ENTER_FULLSCREEN, () => {
+      fullscreenBtn.textContent = "⤢";
+    });
+    game.scale.on(Phaser.Scale.Events.LEAVE_FULLSCREEN, () => {
+      fullscreenBtn.textContent = "⛶";
+    });
+  } else {
+    fullscreenBtn.style.display = "none";
+  }
+}
 
 /**
  * Task #37 follow-up: a 401 from any authenticated API call (expired/
