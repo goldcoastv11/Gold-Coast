@@ -55,17 +55,21 @@ const config: Phaser.Types.Core.GameConfig = {
     activePointers: 2
   },
   scale: {
-    // ENVELOP (not FIT): FIT preserves the 800x600 (4:3) aspect ratio by
-    // letterboxing - black bars on whichever side doesn't match the real
-    // screen's aspect ratio, which is most screens (phones and desktop
-    // monitors are typically 16:9-ish or wider). ENVELOP instead scales up
-    // to fully COVER the viewport and crops whatever overflows, so the
-    // game fills the screen edge to edge on both platforms with no bars -
-    // the tradeoff is the far edges of an unusually wide/narrow viewport
-    // can crop slightly, but every scene's actual content (game shell
-    // sidebar, buttons, dialogs) sits centered with real margin inside the
-    // 800x600 frame, so this reads fine in practice.
-    mode: Phaser.Scale.ENVELOP,
+    // FIT, not ENVELOP - reverted after a real-device test. ENVELOP scales
+    // up to fully cover the viewport with no letterbox bars, but crops
+    // whatever overflows to get there - on a typical phone's wide
+    // landscape aspect ratio (~19.5:9-21:9) vs this game's fixed 4:3
+    // layout, that meant cropping roughly 20% off the TOP AND BOTTOM to
+    // cover the extra width. Every bottom-anchored control (the touch
+    // joystick/interact button, Walk Away, every game's Cash Out button)
+    // sits close enough to y=500-600 to land inside that cropped zone -
+    // confirmed live: the joystick became unreachable. FIT always shows
+    // 100% of the canvas (letterboxed, never cropped), which is the
+    // correct tradeoff here - every control staying reachable matters more
+    // than eliminating the bars. The fullscreen toggle button (below) is
+    // a separate, compatible way to reclaim screen space (hides the
+    // browser's own chrome) without this cropping problem.
+    mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: 800,
     height: 600

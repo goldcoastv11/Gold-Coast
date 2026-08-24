@@ -39,10 +39,9 @@
       position: relative;
       width: 100vw;
       height: 100vh;
-      /* Scale.ENVELOP (main.ts) intentionally renders the canvas larger
-         than the viewport and crops it to fill edge-to-edge with no
-         letterbox bars - this clips that overflow instead of introducing
-         page scrollbars. */
+      /* Belt-and-suspenders against page scrollbars - Scale.FIT (main.ts)
+         shouldn't ever overflow this container, but doesn't hurt to clip
+         defensively. */
       overflow: hidden;
     }
     #game-container canvas {
