@@ -252,6 +252,21 @@ export class LoginScene extends Phaser.Scene {
   private setFormInteractionEnabled(enabled: boolean) {
     (this.usernameInput.node as HTMLInputElement).disabled = !enabled;
     (this.passwordInput.node as HTMLInputElement).disabled = !enabled;
+    // Hide, not just disable - reported live: the real <input> elements
+    // sit in Phaser's DOM container, a plain sibling overlay on top of the
+    // canvas (not part of Phaser's own depth-sorted display list), so
+    // "disabled but still visible" inputs kept showing on top of the
+    // shuffle-cup reveal/Triple Chance panels that play right after a
+    // successful signup, even though those are drawn at a high Phaser
+    // depth - depth only sorts objects *within* the canvas, it can't put
+    // canvas content above a DOM overlay that's already stacked over the
+    // whole canvas by default. NOT `.setVisible()` - verified live that a
+    // Phaser DOMElement's visible flag doesn't actually touch the
+    // underlying node's CSS display at all; setting the node's own style
+    // directly is what actually hides it.
+    const display = enabled ? "" : "none";
+    (this.usernameInput.node as HTMLInputElement).style.display = display;
+    (this.passwordInput.node as HTMLInputElement).style.display = display;
     this.enterBtn.setEnabled(enabled);
     this.signupTabBtn.setEnabled(enabled);
     this.signinTabBtn.setEnabled(enabled);
