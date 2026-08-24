@@ -40,6 +40,20 @@ const config: Phaser.Types.Core.GameConfig = {
   loader: {
     maxParallelDownloads: 64
   },
+  // Mobile support: real HTML <input> elements (LoginScene's username/
+  // password fields) need Phaser's DOM Element support turned on - it
+  // creates an overlay div that Phaser keeps positioned/scaled in lockstep
+  // with the canvas (including under Scale.FIT), so a DOM element placed at
+  // game coordinates (x, y) tracks the canvas correctly on any screen size.
+  dom: {
+    createContainer: true
+  },
+  // Mobile touch controls (ui/TouchControls.ts) need 2 simultaneous active
+  // pointers - the movement joystick held with one thumb while the other
+  // taps the interact button - Phaser only tracks 1 by default.
+  input: {
+    activePointers: 2
+  },
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,

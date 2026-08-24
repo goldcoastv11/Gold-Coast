@@ -15,7 +15,10 @@ const FIELD_H = 36;
 const USERNAME_MAX = 16;
 const PASSWORD_MAX = 24;
 
-type FieldName = "username" | "password" | null;
+/** Numeric Theme color (e.g. Theme.inset) -> CSS hex string, for styling real DOM elements. */
+function cssHex(n: number): string {
+  return `#${n.toString(16).padStart(6, "0")}`;
+}
 
 /**
  * First scene after boot. Task #37: username/password screen backed by the
@@ -34,23 +37,24 @@ type FieldName = "username" | "password" | null;
  * retrying as a login - a wrong password on what the player believes is a
  * brand-new account would otherwise produce a confusing "wrong password"
  * message instead of "that username's taken."
+ *
+ * Mobile support: the username/password fields are real HTML <input>
+ * elements (via Phaser's DOM Element support, enabled in main.ts's `dom:
+ * { createContainer: true }`), not a hand-rolled canvas keydown editor -
+ * that used to be the single hard blocker for mobile, since there's no
+ * physical keyboard to send keydown events, and a virtual keyboard only
+ * ever appears when a real focusable HTML input receives focus. Phaser
+ * keeps a DOM Element's screen position in lockstep with the canvas
+ * (including under Scale.FIT's scaling), so these track correctly on any
+ * screen size without any manual position math here.
  */
 export class LoginScene extends Phaser.Scene {
-  private usernameValue = "";
-  private passwordValue = "";
-  private activeField: FieldName = null;
-  private cursorOn = true;
-  private cursorTimer?: Phaser.Time.TimerEvent;
   private mode: "signup" | "signin" = "signup";
 
-  private usernameText!: Phaser.GameObjects.Text;
-  private passwordText!: Phaser.GameObjects.Text;
-  private usernameBox!: Phaser.GameObjects.Graphics;
-  private passwordBox!: Phaser.GameObjects.Graphics;
+  private usernameInput!: Phaser.GameObjects.DOMElement;
+  private passwordInput!: Phaser.GameObjects.DOMElement;
   private errorText!: Phaser.GameObjects.Text;
   private hintText!: Phaser.GameObjects.Text;
-  private usernameZone!: Phaser.GameObjects.Zone;
-  private passwordZone!: Phaser.GameObjects.Zone;
   private enterBtn!: UIButton;
   private signupTabBtn!: UIButton;
   private signinTabBtn!: UIButton;
@@ -61,10 +65,6 @@ export class LoginScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
-    this.usernameValue = "";
-    this.passwordValue = "";
-    this.activeField = null;
-    this.cursorOn = true;
     this.mode = "signup";
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
@@ -88,28 +88,12 @@ export class LoginScene extends Phaser.Scene {
     this.add
       .text(400, 228, "Username", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
-    this.usernameBox = this.add.graphics();
-    this.drawFieldBox(this.usernameBox, 256, false);
-    this.usernameText = this.add
-      .text(400, 256, "", { fontSize: "15px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-    this.usernameZone = this.add
-      .zone(400, 256, FIELD_W, FIELD_H)
-      .setInteractive({ useHandCursor: true });
-    this.usernameZone.on("pointerdown", () => this.setActiveField("username"));
+    this.usernameInput = this.createTextInput(256, "text", USERNAME_MAX, "username");
 
     this.add
       .text(400, 291, "Password", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
-    this.passwordBox = this.add.graphics();
-    this.drawFieldBox(this.passwordBox, 319, false);
-    this.passwordText = this.add
-      .text(400, 319, "", { fontSize: "15px", color: Theme.textPrimary })
-      .setOrigin(0.5);
-    this.passwordZone = this.add
-      .zone(400, 319, FIELD_W, FIELD_H)
-      .setInteractive({ useHandCursor: true });
-    this.passwordZone.on("pointerdown", () => this.setActiveField("password"));
+    this.passwordInput = this.createTextInput(319, "password", PASSWORD_MAX, "current-password");
 
     this.errorText = this.add
       .text(400, 358, "", { fontSize: "12px", color: Theme.textDanger, align: "center", wordWrap: { width: 400 } })
@@ -124,28 +108,79 @@ export class LoginScene extends Phaser.Scene {
       .setOrigin(0.5);
     this.updateModeCopy();
 
-    this.input.keyboard?.on("keydown", this.onKeyDown);
-    this.cursorTimer = this.time.addEvent({
-      delay: 450,
-      loop: true,
-      callback: () => {
-        this.cursorOn = !this.cursorOn;
-        this.renderFields();
-      }
-    });
-
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-      this.input.keyboard?.off("keydown", this.onKeyDown);
-      this.cursorTimer?.remove(false);
-    });
-
     // Silent session restore: if a JWT survived a reload, try GET /me
     // before asking for credentials again (see src/api/client.ts).
     if (api.getToken()) {
       this.attemptSessionRestore();
     } else {
-      this.setActiveField("username");
+      // Desktop nicety only - mobile browsers generally require a real tap
+      // before they'll pop the on-screen keyboard for a programmatic
+      // focus() call, so this is a no-op there rather than a problem.
+      (this.usernameInput.node as HTMLInputElement).focus();
     }
+  }
+
+  /**
+   * Builds one real HTML <input>, wrapped as a Phaser DOM Element centered
+   * at (400, y) so it tracks the canvas's position/scale automatically.
+   * Styled inline to match the dark inset-box look every other field/panel
+   * in this game uses (see uiHelpers.ts's makeInset) - focus/blur listeners
+   * swap the border color the same way the old hand-drawn box did for
+   * "focused" vs not, since inline styles can't use a real :focus rule.
+   */
+  private createTextInput(
+    y: number,
+    type: "text" | "password",
+    maxLength: number,
+    autocomplete: "username" | "current-password"
+  ): Phaser.GameObjects.DOMElement {
+    const el = document.createElement("input");
+    el.type = type;
+    el.maxLength = maxLength;
+    el.autocomplete = autocomplete;
+    el.autocapitalize = "off";
+    el.spellcheck = false;
+    Object.assign(el.style, {
+      width: `${FIELD_W - 24}px`,
+      height: `${FIELD_H - 4}px`,
+      padding: "0 10px",
+      fontSize: "15px",
+      fontFamily: "inherit",
+      color: cssHex(0xf5f6fa),
+      background: cssHex(Theme.inset),
+      border: `2px solid ${cssHex(Theme.panelBorder)}`,
+      borderRadius: "8px",
+      outline: "none",
+      boxSizing: "border-box"
+    });
+    el.addEventListener("focus", () => {
+      el.style.borderColor = cssHex(Theme.accent);
+    });
+    el.addEventListener("blur", () => {
+      el.style.borderColor = cssHex(Theme.panelBorder);
+    });
+    el.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      if (type === "text") {
+        (this.passwordInput.node as HTMLInputElement).focus();
+      } else {
+        this.submit();
+      }
+    });
+
+    return this.add.dom(400, y, el);
+  }
+
+  private get usernameValue(): string {
+    return (this.usernameInput.node as HTMLInputElement).value;
+  }
+
+  private get passwordValue(): string {
+    return (this.passwordInput.node as HTMLInputElement).value;
+  }
+
+  private setStatus(message: string, isError: boolean) {
+    this.errorText.setColor(isError ? Theme.textDanger : Theme.textMuted).setText(message);
   }
 
   private async attemptSessionRestore() {
@@ -164,69 +199,7 @@ export class LoginScene extends Phaser.Scene {
       }
       this.setStatus("", false);
       this.setFormInteractionEnabled(true);
-      this.setActiveField("username");
     }
-  }
-
-  private drawFieldBox(g: Phaser.GameObjects.Graphics, y: number, focused: boolean) {
-    g.setPosition(400, y);
-    g.clear();
-    g.fillStyle(Theme.inset, 1);
-    g.fillRoundedRect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H, 8);
-    g.lineStyle(2, focused ? Theme.accent : Theme.panelBorder, 1);
-    g.strokeRoundedRect(-FIELD_W / 2, -FIELD_H / 2, FIELD_W, FIELD_H, 8);
-  }
-
-  private setActiveField(field: FieldName) {
-    this.activeField = field;
-    this.cursorOn = true;
-    this.renderFields();
-  }
-
-  private onKeyDown = (event: KeyboardEvent) => {
-    if (!this.activeField) return;
-
-    if (event.key === "Tab") {
-      event.preventDefault();
-      this.setActiveField(this.activeField === "username" ? "password" : "username");
-      return;
-    }
-    if (event.key === "Enter") {
-      if (this.activeField === "username") this.setActiveField("password");
-      else this.submit();
-      return;
-    }
-    if (event.key === "Escape") {
-      this.setActiveField(null);
-      return;
-    }
-    if (event.key === "Backspace") {
-      if (this.activeField === "username") this.usernameValue = this.usernameValue.slice(0, -1);
-      else this.passwordValue = this.passwordValue.slice(0, -1);
-      this.renderFields();
-      return;
-    }
-    if (event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey) {
-      if (this.activeField === "username" && this.usernameValue.length < USERNAME_MAX) {
-        this.usernameValue += event.key;
-      } else if (this.activeField === "password" && this.passwordValue.length < PASSWORD_MAX) {
-        this.passwordValue += event.key;
-      }
-      this.renderFields();
-    }
-  };
-
-  private renderFields() {
-    const userCursor = this.activeField === "username" && this.cursorOn ? "_" : "";
-    const passCursor = this.activeField === "password" && this.cursorOn ? "_" : "";
-    this.usernameText.setText(this.usernameValue + userCursor);
-    this.passwordText.setText("•".repeat(this.passwordValue.length) + passCursor);
-    this.drawFieldBox(this.usernameBox, 256, this.activeField === "username");
-    this.drawFieldBox(this.passwordBox, 319, this.activeField === "password");
-  }
-
-  private setStatus(message: string, isError: boolean) {
-    this.errorText.setColor(isError ? Theme.textDanger : Theme.textMuted).setText(message);
   }
 
   /** (Re)draws the Sign Up / Sign In tabs, highlighting whichever matches `this.mode`. Destroys and recreates rather than restyling in place - cheap for two small buttons, and keeps the active/inactive color logic in one place (uiHelpers' UIButton has no "recolor" API, only enable/disable). */
@@ -282,19 +255,11 @@ export class LoginScene extends Phaser.Scene {
   }
 
   private setFormInteractionEnabled(enabled: boolean) {
-    if (enabled) {
-      this.usernameZone.setInteractive({ useHandCursor: true });
-      this.passwordZone.setInteractive({ useHandCursor: true });
-      this.enterBtn.setEnabled(true);
-      this.signupTabBtn.setEnabled(true);
-      this.signinTabBtn.setEnabled(true);
-    } else {
-      this.usernameZone.disableInteractive();
-      this.passwordZone.disableInteractive();
-      this.enterBtn.setEnabled(false);
-      this.signupTabBtn.setEnabled(false);
-      this.signinTabBtn.setEnabled(false);
-    }
+    (this.usernameInput.node as HTMLInputElement).disabled = !enabled;
+    (this.passwordInput.node as HTMLInputElement).disabled = !enabled;
+    this.enterBtn.setEnabled(enabled);
+    this.signupTabBtn.setEnabled(enabled);
+    this.signinTabBtn.setEnabled(enabled);
   }
 
   /**
@@ -317,7 +282,7 @@ export class LoginScene extends Phaser.Scene {
       return;
     }
 
-    this.setActiveField(null);
+    (document.activeElement as HTMLElement | null)?.blur?.();
     this.setFormInteractionEnabled(false);
 
     if (this.mode === "signup") {

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Gold Coast Arcade</title>
   <style>
     html, body {
@@ -12,6 +12,11 @@
       width: 100%;
       height: 100%;
       overflow: hidden;
+      /* Mobile: prevent the page itself from scrolling/bouncing or the
+         browser chrome swallowing touch gestures meant for the canvas
+         (movement joystick, game buttons, etc.). */
+      touch-action: none;
+      overscroll-behavior: none;
     }
     #game-container {
       display: flex;
@@ -23,10 +28,63 @@
     #game-container canvas {
       image-rendering: pixelated;
     }
+
+    /* Landscape-locked mobile support: the whole game is laid out for a
+       wide landscape canvas (see main.ts's 800x600 Scale.FIT config), so a
+       phone held upright would show it squeezed tiny in the middle of the
+       screen rather than a real "not supported" state. This overlay covers
+       the game and asks for a rotate instead, matching the user-confirmed
+       "lock to landscape" approach over a full portrait redesign.
+       Deliberately gated on BOTH orientation AND a phone-sized viewport
+       (max-width) - a desktop window resized narrow+tall shouldn't trigger
+       this, only an actual small/mobile screen held upright. */
+    #rotate-prompt {
+      display: none;
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      background: #0e0f14;
+      color: #f5f6fa;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 24px;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    #rotate-prompt .icon {
+      font-size: 56px;
+      margin-bottom: 16px;
+      animation: rotate-hint 1.6s ease-in-out infinite;
+    }
+    #rotate-prompt .title {
+      font-size: 18px;
+      font-weight: bold;
+      color: #ff8a3d;
+      margin-bottom: 8px;
+    }
+    #rotate-prompt .subtitle {
+      font-size: 13px;
+      color: #9aa3bd;
+      max-width: 280px;
+    }
+    @keyframes rotate-hint {
+      0%, 100% { transform: rotate(0deg); }
+      50% { transform: rotate(-90deg); }
+    }
+    @media (orientation: portrait) and (max-width: 900px) {
+      #rotate-prompt { display: flex; }
+      #game-container { display: none; }
+    }
   </style>
 </head>
 <body>
   <div id="game-container"></div>
+  <div id="rotate-prompt">
+    <div class="icon">📱</div>
+    <div class="title">Rotate your device</div>
+    <div class="subtitle">Gold Coast Arcade plays in landscape - turn your phone sideways to continue.</div>
+  </div>
   <script type="module" src="/src/main.ts"></script>
 </body>
 </html>

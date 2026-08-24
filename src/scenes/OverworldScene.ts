@@ -19,6 +19,7 @@ import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { playSfx } from "../ui/SoundManager";
+import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
 
 const TILE = 16; // real tileset is 16x16 pixels per tile
 const MAP_COLS = 80;
@@ -362,6 +363,7 @@ export class OverworldScene extends Phaser.Scene {
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private interactKey!: Phaser.Input.Keyboard.Key;
+  private touchControls?: TouchControlsHandle;
   private promptText!: TextChip;
   private hudText!: TextChip;
   private _panelOpen = false;
@@ -404,6 +406,9 @@ export class OverworldScene extends Phaser.Scene {
       this.clearTutorialHighlight();
     }
     this._panelOpen = value;
+    // Hide the touch joystick/interact button while a real panel is open -
+    // see TouchControls.ts's setVisible doc comment.
+    this.touchControls?.setVisible(!value);
   }
 
   /** Destroys the tutorial's current highlight ring + instruction bubble, if any - safe to call even when neither exists. */
@@ -582,6 +587,26 @@ export class OverworldScene extends Phaser.Scene {
       Phaser.Input.Keyboard.Key
     >;
     this.interactKey = this.input.keyboard!.addKey("E");
+
+    // Mobile: virtual joystick + interact button (see ui/TouchControls.ts).
+    // Only on an actual touch device - desktop keeps keyboard-only, no
+    // controls cluttering the screen. handleMovement()/handleInteraction()
+    // below OR this in alongside the keyboard state.
+    if (isTouchDevice()) {
+      this.touchControls = createTouchControls(this, () => {
+        // Same gate handleInteraction() applies to the keyboard path -
+        // "no exception" per its doc comment above (update()'s panelOpen
+        // block). Without this, the interact button - a screen-fixed
+        // circle in the bottom-right that most panels don't visually
+        // cover - could re-trigger a station's onInteract() while another
+        // modal is already open, exactly the "two async UI flows
+        // colliding" bug class that guard exists to prevent.
+        if (this.panelOpen) return;
+        if (!this.activeInteractable) return;
+        playSfx(this, "select");
+        this.activeInteractable.onInteract();
+      });
+    }
 
     // UI (fixed to camera) - rounded warm-cream chips (makeTextChip), matching
     // the rest of the chrome system's panel/inset outline treatment instead
@@ -854,10 +879,11 @@ export class OverworldScene extends Phaser.Scene {
   private lastDir: "down" | "left" | "right" | "up" = "down";
 
   private handleMovement() {
-    const left = this.cursors.left?.isDown || this.wasd.A.isDown;
-    const right = this.cursors.right?.isDown || this.wasd.D.isDown;
-    const up = this.cursors.up?.isDown || this.wasd.W.isDown;
-    const down = this.cursors.down?.isDown || this.wasd.S.isDown;
+    const t = this.touchControls?.state;
+    const left = this.cursors.left?.isDown || this.wasd.A.isDown || t?.left;
+    const right = this.cursors.right?.isDown || this.wasd.D.isDown || t?.right;
+    const up = this.cursors.up?.isDown || this.wasd.W.isDown || t?.up;
+    const down = this.cursors.down?.isDown || this.wasd.S.isDown || t?.down;
 
     const vel = new Phaser.Math.Vector2(0, 0);
     if (left) vel.x -= 1;
