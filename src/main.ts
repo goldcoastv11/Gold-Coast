@@ -140,20 +140,30 @@ window.addEventListener("resize", () => {
  */
 const fullscreenBtn = document.getElementById("fullscreen-btn");
 if (fullscreenBtn) {
-  if (game.scale.fullscreen.available) {
-    fullscreenBtn.style.display = "block";
-    fullscreenBtn.addEventListener("click", () => {
-      game.scale.toggleFullscreen();
-    });
-    game.scale.on(Phaser.Scale.Events.ENTER_FULLSCREEN, () => {
-      fullscreenBtn.textContent = "⤢";
-    });
-    game.scale.on(Phaser.Scale.Events.LEAVE_FULLSCREEN, () => {
-      fullscreenBtn.textContent = "⛶";
-    });
-  } else {
-    fullscreenBtn.style.display = "none";
-  }
+  // Wait for Phaser's own READY event rather than checking
+  // `game.scale.fullscreen.available` immediately after `new Phaser.Game()`
+  // returns - the Game constructor kicks off its boot sequence
+  // asynchronously, and checking synchronously risked reading the Scale
+  // Manager's fullscreen feature-detection before it had actually run,
+  // which would report unavailable (hiding the button) even on a browser
+  // that genuinely supports it. READY fires only once boot has fully
+  // finished, so this is the real, reliable value.
+  game.events.once(Phaser.Core.Events.READY, () => {
+    if (game.scale.fullscreen.available) {
+      fullscreenBtn.style.display = "block";
+      fullscreenBtn.addEventListener("click", () => {
+        game.scale.toggleFullscreen();
+      });
+      game.scale.on(Phaser.Scale.Events.ENTER_FULLSCREEN, () => {
+        fullscreenBtn.textContent = "⤢";
+      });
+      game.scale.on(Phaser.Scale.Events.LEAVE_FULLSCREEN, () => {
+        fullscreenBtn.textContent = "⛶";
+      });
+    } else {
+      fullscreenBtn.style.display = "none";
+    }
+  });
 }
 
 /**
