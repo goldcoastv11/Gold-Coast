@@ -4,6 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Gold Coast Arcade</title>
+
+  <!-- PWA / "Add to Home Screen" support - the real, complete fix for the
+       mobile browser's address bar eating screen space (not the letterbox
+       bars, which are a separate aspect-ratio issue - see main.ts's
+       Scale.FIT comment). Chrome/Android honor manifest.json's
+       `"display": "standalone"` directly; iOS Safari ignores that field
+       entirely and needs its own legacy apple-mobile-web-app-* meta tags
+       instead - both are included since neither covers the other
+       platform. Once added to the home screen, launching from that icon
+       opens with ZERO browser chrome (no address bar, no tab strip) on
+       either platform - nothing left to "auto-hide", so this sidesteps
+       the vh/svh/dvh tradeoff entirely rather than trying to out-clever it. -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#0e0f14" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Gold Coast" />
+  <link rel="icon" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
   <style>
     html, body {
       margin: 0;
