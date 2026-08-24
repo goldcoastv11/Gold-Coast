@@ -81,13 +81,19 @@ export class PlinkoScene extends Phaser.Scene {
     this.updateBalance();
   }
 
-  /** Static triangular peg grid - row r has r+1 pegs. */
+  /**
+   * Static triangular peg grid - row r has r+1 pegs. Pegs are drawn in
+   * Theme.cardFace (near-white) with a dark outline stroke, not
+   * Theme.outline fill - the board sits directly on Theme.bgDark (near-
+   * black), and a near-black peg on a near-black background was
+   * effectively invisible (both hover around #05070c/#0e0f14).
+   */
   private drawPegs() {
     for (let r = 0; r < ROWS; r++) {
       const y = BOARD_TOP_Y + r * ROW_SPACING;
       for (let p = 0; p <= r; p++) {
         const x = BOARD_CENTER_X + (2 * p - r) * (PEG_SPACING / 2);
-        this.add.circle(x, y, 2.5, Theme.outline);
+        this.add.circle(x, y, 3, Theme.cardFace).setStrokeStyle(1, Theme.outline, 1);
       }
     }
   }
