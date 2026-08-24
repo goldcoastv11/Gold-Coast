@@ -175,6 +175,34 @@
     #fullscreen-btn:active {
       background: rgba(255, 122, 41, 0.3);
     }
+    /* iOS Safari has no Fullscreen API at all - #fullscreen-btn becomes an
+       "Add to Home Screen" hint there instead of a toggle (wired in
+       main.ts), since that's the only real way to get a chrome-free
+       launch on iPhone. This is the instruction tooltip that hint opens -
+       iOS also has no JS-triggerable "install" prompt (unlike Android
+       Chrome's beforeinstallprompt), so the best available UX is telling
+       the player the two manual taps rather than pretending to automate
+       something Apple doesn't expose to the web at all. */
+    #install-hint {
+      display: none;
+      position: fixed;
+      top: calc(env(safe-area-inset-top, 0px) + 58px);
+      left: calc(env(safe-area-inset-left, 0px) + 10px);
+      z-index: 500;
+      max-width: 240px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 2px solid #ff7a29;
+      background: rgba(14, 15, 20, 0.97);
+      color: #f5f6fa;
+      font-size: 12px;
+      line-height: 1.4;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    }
+    #install-hint strong {
+      color: #ffb347;
+    }
     @media (orientation: portrait) and (max-width: 900px) {
       #rotate-prompt { display: flex; }
       /* visibility:hidden, NOT display:none - the actual bug this was
@@ -201,6 +229,9 @@
 <body>
   <div id="game-container"></div>
   <button id="fullscreen-btn" type="button" aria-label="Toggle fullscreen">⛶</button>
+  <div id="install-hint" role="status">
+    Tap <strong>Share</strong>, then <strong>"Add to Home Screen"</strong> - launching from that icon plays fullscreen with no browser bar.
+  </div>
   <div id="rotate-prompt">
     <div class="icon">📱</div>
     <div class="title">Rotate your device</div>

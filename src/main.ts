@@ -129,28 +129,53 @@ window.addEventListener("resize", () => {
 });
 
 /**
- * Fullscreen toggle button (markup/styling in index.html) - hides browser
- * chrome (address bar, tab strip) on both desktop and mobile where the
- * Fullscreen API supports it. Notably NOT supported by iOS Safari for
- * arbitrary elements - the button stays hidden there rather than being a
- * dead control, per `fullscreen.available`. Scale.ENVELOP (this file,
- * above) already fills the viewport edge-to-edge with no letterbox bars
- * regardless of fullscreen state - this button is the separate "also hide
- * the browser's own UI chrome" layer on top of that.
+ * Top-left corner button (markup/styling in index.html) - hides browser
+ * chrome (address bar, tab strip) so the game gets more real screen space,
+ * via whichever mechanism the current browser actually supports:
+ *
+ * - Fullscreen API available (desktop browsers, Android Chrome, etc.):
+ *   a real fullscreen toggle, via Phaser's Scale Manager.
+ * - iOS Safari: the Fullscreen API doesn't exist for arbitrary web content
+ *   at all, on any site - no toggle is possible. The only real chrome-free
+ *   path there is launching from a home-screen icon (see public/
+ *   manifest.json + index.html's apple-mobile-web-app-* meta tags), and
+ *   iOS also exposes no JS API to trigger "Add to Home Screen" itself
+ *   (unlike Android's beforeinstallprompt) - so this becomes an
+ *   instruction hint instead of a toggle, since that's the most this
+ *   platform allows a web page to do.
+ * - Already launched standalone (already added to the home screen, on
+ *   either platform): there's nothing left to offer - hidden entirely.
+ *
+ * Checked on Phaser's READY event, not synchronously right after `new
+ * Phaser.Game()` returns - the Game constructor kicks off its own boot
+ * sequence asynchronously, and checking synchronously risked reading the
+ * Scale Manager's fullscreen feature-detection before it had actually run,
+ * which would report unavailable even on a browser that genuinely
+ * supports it. READY fires only once boot has fully finished.
  */
+function isIOS(): boolean {
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) && !("MSStream" in window);
+}
+
+function isStandaloneLaunch(): boolean {
+  return (
+    (navigator as unknown as { standalone?: boolean }).standalone === true ||
+    window.matchMedia("(display-mode: standalone)").matches
+  );
+}
+
 const fullscreenBtn = document.getElementById("fullscreen-btn");
+const installHint = document.getElementById("install-hint");
 if (fullscreenBtn) {
-  // Wait for Phaser's own READY event rather than checking
-  // `game.scale.fullscreen.available` immediately after `new Phaser.Game()`
-  // returns - the Game constructor kicks off its boot sequence
-  // asynchronously, and checking synchronously risked reading the Scale
-  // Manager's fullscreen feature-detection before it had actually run,
-  // which would report unavailable (hiding the button) even on a browser
-  // that genuinely supports it. READY fires only once boot has fully
-  // finished, so this is the real, reliable value.
   game.events.once(Phaser.Core.Events.READY, () => {
+    if (isStandaloneLaunch()) {
+      fullscreenBtn.style.display = "none";
+      return;
+    }
+
     if (game.scale.fullscreen.available) {
       fullscreenBtn.style.display = "block";
+      fullscreenBtn.setAttribute("aria-label", "Toggle fullscreen");
       fullscreenBtn.addEventListener("click", () => {
         game.scale.toggleFullscreen();
       });
@@ -160,7 +185,23 @@ if (fullscreenBtn) {
       game.scale.on(Phaser.Scale.Events.LEAVE_FULLSCREEN, () => {
         fullscreenBtn.textContent = "⛶";
       });
+    } else if (isIOS() && installHint) {
+      fullscreenBtn.style.display = "block";
+      fullscreenBtn.textContent = "📲";
+      fullscreenBtn.setAttribute("aria-label", "Add to Home Screen for fullscreen");
+      fullscreenBtn.addEventListener("click", () => {
+        installHint.style.display = installHint.style.display === "block" ? "none" : "block";
+      });
+      // Tapping anywhere else dismisses the hint, same as any tooltip.
+      document.addEventListener("pointerdown", (event) => {
+        if (event.target !== fullscreenBtn && event.target !== installHint) {
+          installHint.style.display = "none";
+        }
+      });
     } else {
+      // Some other browser with neither the Fullscreen API nor a known
+      // manual-install path (e.g. an obscure in-app browser) - nothing
+      // actionable to offer, so stay hidden rather than show a dead button.
       fullscreenBtn.style.display = "none";
     }
   });
