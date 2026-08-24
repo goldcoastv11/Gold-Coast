@@ -1,7 +1,7 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, UIButton } from "../ui/uiHelpers";
+import { makeButton, makePanel, UIButton, cssHex } from "../ui/uiHelpers";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance } from "../ui/TripleChanceOffer";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
@@ -14,11 +14,6 @@ const FIELD_W = 320;
 const FIELD_H = 36;
 const USERNAME_MAX = 16;
 const PASSWORD_MAX = 24;
-
-/** Numeric Theme color (e.g. Theme.inset) -> CSS hex string, for styling real DOM elements. */
-function cssHex(n: number): string {
-  return `#${n.toString(16).padStart(6, "0")}`;
-}
 
 /**
  * First scene after boot. Task #37: username/password screen backed by the

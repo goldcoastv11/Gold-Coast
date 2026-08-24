@@ -3,6 +3,11 @@ import { Theme } from "./Theme";
 import { gameState, BET_STEP } from "../GameState";
 import { playSfx } from "./SoundManager";
 
+/** Numeric Theme color (e.g. Theme.inset) -> CSS hex string, for styling real DOM elements (LoginScene's inputs, makeBetControl's bet-amount input). */
+export function cssHex(n: number): string {
+  return `#${n.toString(16).padStart(6, "0")}`;
+}
+
 /** A pill-shaped, interactive button with hover feedback. */
 export interface UIButton {
   container: Phaser.GameObjects.Container;
@@ -226,11 +231,10 @@ export interface BetControl {
 
 /**
  * Shared "Bet Amount" stepper, backed by gameState.betAmount so the chosen
- * size carries over between games. Click the amount itself to type a
- * custom value on the keyboard (digits, Backspace, Enter to confirm, Escape
- * to cancel). Call refresh() if something else changes betAmount while this
- * control is on screen. Call onChange after every adjustment so the caller
- * can update any payout previews.
+ * size carries over between games. Click/tap the amount itself to type a
+ * custom value. Call refresh() if something else changes betAmount while
+ * this control is on screen. Call onChange after every adjustment so the
+ * caller can update any payout previews.
  *
  * Layout: [½] [-] [amount] [+] [2x] - the quick half/double buttons are a
  * deliberate Stake-style convention (every Stake Originals bet input has
@@ -238,6 +242,15 @@ export interface BetControl {
  * Stake's UI" pass. Kept to the exact same height/vertical footprint as
  * before (only wider, not taller) so it drops into every existing scene's
  * already-tuned vertical layout with no other per-scene changes needed.
+ *
+ * The amount field is a real HTML <input> (Phaser DOM Element, same
+ * approach as LoginScene's username/password fields), not a hand-rolled
+ * canvas keydown editor - that used to be the last remaining spot in the
+ * game where typing was completely impossible on mobile (no physical
+ * keyboard means no on-screen keyboard, since there was nothing real for
+ * it to focus). `inputMode: "numeric"` gets a numeric-only virtual
+ * keyboard on mobile without losing normal text-input behavior/styling on
+ * desktop.
  */
 export function makeBetControl(
   scene: Phaser.Scene,
@@ -249,93 +262,87 @@ export function makeBetControl(
 
   const inset = makeInset(scene, 0, 0, 260, 40, 12);
 
-  const label = scene.add
-    .text(0, 0, "", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
-    .setOrigin(0.5);
-
-  let editing = false;
-  let editValue = "";
   let controlEnabled = true;
-  let cursorOn = true;
-  let cursorTimer: Phaser.Time.TimerEvent | undefined;
 
-  const refresh = () => {
-    if (editing) return;
-    label.setText(`Bet: ${gameState.betAmount} 🪙  ✎`);
-  };
+  const el = document.createElement("input");
+  el.type = "text";
+  el.inputMode = "numeric";
+  el.maxLength = 5;
+  el.autocomplete = "off";
+  Object.assign(el.style, {
+    width: "130px",
+    height: "28px",
+    padding: "0",
+    textAlign: "center",
+    fontSize: "14px",
+    fontFamily: "inherit",
+    fontWeight: "bold",
+    color: cssHex(0xf5f6fa),
+    background: "transparent",
+    border: "2px solid transparent",
+    borderRadius: "6px",
+    outline: "none",
+    boxSizing: "border-box"
+  });
 
-  const renderEditLabel = () => {
-    label.setText(`Bet: ${editValue}${cursorOn ? "_" : " "}`);
-  };
-
-  const onKeyDown = (event: KeyboardEvent) => {
-    if (event.key >= "0" && event.key <= "9") {
-      if (editValue.length < 5) editValue += event.key;
-      renderEditLabel();
-    } else if (event.key === "Backspace") {
-      editValue = editValue.slice(0, -1);
-      renderEditLabel();
-    } else if (event.key === "Enter") {
-      stopEdit(true);
-    } else if (event.key === "Escape") {
-      stopEdit(false);
-    }
-  };
-
-  const startEdit = () => {
-    if (!controlEnabled || editing) return;
-    editing = true;
-    editValue = "";
-    cursorOn = true;
-    label.setColor(Theme.textAccent);
-    renderEditLabel();
-    minusBtn.setEnabled(false);
-    plusBtn.setEnabled(false);
-    scene.input.keyboard?.on("keydown", onKeyDown);
-    cursorTimer = scene.time.addEvent({
-      delay: 450,
-      loop: true,
-      callback: () => {
-        cursorOn = !cursorOn;
-        renderEditLabel();
-      }
-    });
-  };
-
-  const stopEdit = (commit: boolean) => {
-    if (!editing) return;
-    editing = false;
-    scene.input.keyboard?.off("keydown", onKeyDown);
-    cursorTimer?.remove(false);
-    cursorTimer = undefined;
-    if (commit && editValue.length > 0) {
-      gameState.setBet(parseInt(editValue, 10));
+  const commit = () => {
+    const parsed = parseInt(el.value, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      gameState.setBet(parsed);
       onChange();
-    }
-    label.setColor(Theme.textPrimary);
-    if (controlEnabled) {
-      minusBtn.setEnabled(true);
-      plusBtn.setEnabled(true);
     }
     refresh();
   };
 
-  // Invisible click target over the amount label - separate from the +/-
-  // buttons so it can't be triggered by clicking them.
-  const hitZone = scene.add.zone(0, 0, 150, 40).setInteractive({ useHandCursor: true });
-  hitZone.on("pointerdown", () => {
-    if (editing) stopEdit(true);
-    else startEdit();
+  el.addEventListener("input", () => {
+    // inputMode="numeric" is only a virtual-keyboard hint, not real
+    // enforcement - a physical keyboard or paste can still type/insert
+    // non-digit characters, so sanitize on every change regardless.
+    el.value = el.value.replace(/[^0-9]/g, "").slice(0, 5);
+  });
+  el.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      el.blur(); // triggers the blur listener below, which commits
+    } else if (event.key === "Escape") {
+      el.value = String(gameState.betAmount);
+      el.blur();
+    }
+  });
+  el.addEventListener("focus", () => {
+    el.style.borderColor = cssHex(Theme.accent);
+    el.style.background = cssHex(Theme.inset);
+    minusBtn.setEnabled(false);
+    plusBtn.setEnabled(false);
+  });
+  el.addEventListener("blur", () => {
+    el.style.borderColor = "transparent";
+    el.style.background = "transparent";
+    if (controlEnabled) {
+      minusBtn.setEnabled(true);
+      plusBtn.setEnabled(true);
+    }
+    commit();
   });
 
+  // Standalone DOM Element at this control's absolute scene position
+  // (not nested inside `container`) - matches LoginScene's approach
+  // exactly, and sidesteps any question of whether a Container's own
+  // transform correctly composes into a child DOM Element's position.
+  const input = scene.add.dom(x, y, el);
+
+  const refresh = () => {
+    if (document.activeElement !== el) {
+      el.value = String(gameState.betAmount);
+    }
+  };
+  refresh();
+
   const minusBtn = makeButton(scene, -102, 0, 36, 32, "-", Theme.neutral, Theme.neutralHover, () => {
-    if (editing) stopEdit(false);
     gameState.adjustBet(-BET_STEP);
     refresh();
     onChange();
   });
   const plusBtn = makeButton(scene, 102, 0, 36, 32, "+", Theme.neutral, Theme.neutralHover, () => {
-    if (editing) stopEdit(false);
     gameState.adjustBet(BET_STEP);
     refresh();
     onChange();
@@ -343,49 +350,32 @@ export function makeBetControl(
   // Stake-style quick half/double buttons, outside the -/+ pair - same Y,
   // just wider overall (see this function's doc comment).
   const halfBtn = makeButton(scene, -142, 0, 32, 32, "½", Theme.neutral, Theme.neutralHover, () => {
-    if (editing) stopEdit(false);
     gameState.setBet(gameState.betAmount / 2);
     refresh();
     onChange();
   });
   const doubleBtn = makeButton(scene, 142, 0, 32, 32, "2×", Theme.neutral, Theme.neutralHover, () => {
-    if (editing) stopEdit(false);
     gameState.setBet(gameState.betAmount * 2);
     refresh();
     onChange();
   });
 
-  container.add([
-    inset,
-    label,
-    hitZone,
-    halfBtn.container,
-    minusBtn.container,
-    plusBtn.container,
-    doubleBtn.container
-  ]);
-  refresh();
-
-  scene.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
-    scene.input.keyboard?.off("keydown", onKeyDown);
-    cursorTimer?.remove(false);
-  });
+  container.add([inset, halfBtn.container, minusBtn.container, plusBtn.container, doubleBtn.container]);
 
   return {
     container,
     refresh,
     setEnabled: (enabled: boolean) => {
       controlEnabled = enabled;
-      if (editing && !enabled) stopEdit(false);
+      el.disabled = !enabled;
+      if (!enabled && document.activeElement === el) el.blur();
       minusBtn.setEnabled(enabled);
       plusBtn.setEnabled(enabled);
       halfBtn.setEnabled(enabled);
       doubleBtn.setEnabled(enabled);
     },
     destroy: () => {
-      scene.input.keyboard?.off("keydown", onKeyDown);
-      cursorTimer?.remove(false);
-      hitZone.destroy();
+      input.destroy();
       minusBtn.destroy();
       plusBtn.destroy();
       halfBtn.destroy();
