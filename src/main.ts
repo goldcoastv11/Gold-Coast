@@ -150,6 +150,47 @@ const game = new Phaser.Game(config);
  * API - Phaser expects scaleMode to be set once via config - but it's
  * what the source shows actually drives the sizing decision).
  */
+/**
+ * Sign Up/Sign In tab pair (LoginScene.ts) - the WIDEST real element on
+ * the login screen, spanning logical x=[192,608] around center 400 (half-
+ * width 208). Used below to compute how far portrait+login can safely
+ * zoom in without cropping anything a player actually needs to see/tap.
+ */
+const LOGIN_CONTENT_HALF_WIDTH = 208;
+
+/**
+ * Portrait+login additionally gets a CSS zoom on top of FIT - per user
+ * direction ("zoom the image in more", explicitly not a layout redesign).
+ * FIT alone shows the WHOLE canvas letterboxed, which in portrait means a
+ * fairly small login form (FIT is width-constrained there, since a phone
+ * held upright is much taller than it is wide relative to this 4:3
+ * canvas). Rather than fight the Scale Manager for a third custom scale
+ * mode, this applies a plain CSS `transform: scale()` to #game-container
+ * itself - both the canvas AND the DOM Element overlay (the real
+ * username/password <input>s) are children of it, so they scale together
+ * and stay aligned - with body's own `overflow:hidden` (index.html)
+ * cropping whatever overflows past the viewport.
+ *
+ * The zoom factor is computed, not hardcoded, targeting
+ * LOGIN_CONTENT_HALF_WIDTH (+20px margin) so the crop this introduces
+ * never eats into anything real - recomputed every call since it depends
+ * on the current FIT scale, which itself depends on the current viewport.
+ */
+function applyPortraitLoginZoom(active: boolean): void {
+  const container = document.getElementById("game-container");
+  if (!container) return;
+  if (!active) {
+    container.style.transform = "none";
+    return;
+  }
+  const currentFitScale = game.scale.displaySize.width / 800;
+  if (currentFitScale <= 0) return;
+  const desiredScale = window.innerWidth / ((LOGIN_CONTENT_HALF_WIDTH + 20) * 2);
+  const zoomFactor = Math.max(1, desiredScale / currentFitScale);
+  container.style.transformOrigin = "center center";
+  container.style.transform = `scale(${zoomFactor})`;
+}
+
 function updateMobileLayoutMode(): void {
   if (!isTouchDevice()) return;
 
@@ -163,6 +204,7 @@ function updateMobileLayoutMode(): void {
     game.scale.displaySize.setAspectMode(desiredMode);
   }
   game.scale.refresh();
+  applyPortraitLoginZoom(isPortrait && loginOk);
 }
 
 updateMobileLayoutMode();
