@@ -27,6 +27,18 @@ const MAP_ROWS = 56;
 const PLAYER_SPEED = 160;
 const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
 
+// Mobile-only size boost (user: "everything needs to be bigger on mobile") -
+// scoped to individual sprites (player, ambient NPCs, game cabinets/
+// furniture), deliberately NOT a camera zoom - see the camera setup
+// below for why: an earlier pass already found that zooming the camera
+// also scales/shifts every screen-fixed UI element (HUD, joystick,
+// buttons) off their correct positions, since Phaser zoom isn't blocked
+// by scrollFactor(0) the way scroll/pan is. Kept modest (not larger) to
+// limit the risk of neighboring stations visually crowding each other -
+// the floor layout was originally spaced assuming native-size sprites.
+const MOBILE_CHAR_SCALE_BOOST = 1.25;
+const MOBILE_FURNITURE_SCALE_BOOST = 1.25;
+
 // Ambient bystander patrol tuning (see addAmbientNpc/updateAmbientNpcs) - a
 // lazy background stroll, deliberately much slower than the player
 // (~1/6th PLAYER_SPEED) so it reads as flavor rather than a race.
@@ -503,6 +515,7 @@ export class OverworldScene extends Phaser.Scene {
     // needed (unlike the old character sprite) since the texture is
     // already native cabinet size, same as every other game's furniture.
     const npc = this.physics.add.staticSprite(40 * TILE, 28 * TILE, "coin_kiosk");
+    if (isTouchDevice()) npc.setScale(MOBILE_FURNITURE_SCALE_BOOST);
     // Static bodies don't auto-resync to a post-creation setScale (see the
     // refreshBody() calls in addFurnitureStation/registerReservedStation
     // below) - refreshBody() itself is still correct to call even with no
@@ -538,6 +551,7 @@ export class OverworldScene extends Phaser.Scene {
     // old character sprite) since the texture is already native cabinet
     // size, same as the Coin Kiosk above.
     const skinAttendant = this.physics.add.staticSprite(40 * TILE, 18 * TILE, "item_shop_booth");
+    if (isTouchDevice()) skinAttendant.setScale(MOBILE_FURNITURE_SCALE_BOOST);
     skinAttendant.refreshBody();
     this.physics.add.collider(this.player, skinAttendant);
     this.registerStation(
@@ -995,7 +1009,8 @@ export class OverworldScene extends Phaser.Scene {
    * (spawn + the "Wear" handler).
    */
   private applyPlayerScale() {
-    this.player.setScale(this.player.height <= 16 ? 2 : 1);
+    const base = this.player.height <= 16 ? 2 : 1;
+    this.player.setScale(isTouchDevice() ? base * MOBILE_CHAR_SCALE_BOOST : base);
   }
 
   /**
@@ -1033,6 +1048,7 @@ export class OverworldScene extends Phaser.Scene {
     waypointB: [number, number]
   ) {
     const npc = this.physics.add.sprite(col * TILE, row * TILE, skinTextureKey, idleFrame);
+    if (isTouchDevice()) npc.setScale(MOBILE_CHAR_SCALE_BOOST);
     npc.refreshBody();
     this.physics.add.collider(this.player, npc);
 
@@ -1179,6 +1195,13 @@ export class OverworldScene extends Phaser.Scene {
     sceneKey: string
   ) {
     const sprite = this.physics.add.staticSprite(col * TILE, row * TILE, textureKey);
+    // setScale() BEFORE setSize()/setOffset() - sprite.width/height are the
+    // texture's native (unscaled) dimensions in Phaser, so the size/offset
+    // fractions below stay correct regardless of scale; refreshBody() at
+    // the end is what picks up the current scale to size the collider to
+    // match the now-bigger visual footprint (same mechanism already
+    // documented on the Coin Kiosk's own staticSprite above).
+    if (isTouchDevice()) sprite.setScale(MOBILE_FURNITURE_SCALE_BOOST);
     sprite.setSize(sprite.width * sizeFracW, sprite.height * sizeFracH);
     sprite.setOffset(sprite.width * offsetFracX, sprite.height * offsetFracY);
     sprite.refreshBody();
