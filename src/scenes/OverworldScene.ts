@@ -36,11 +36,11 @@ const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
 // by scrollFactor(0) the way scroll/pan is. Furniture kept at the original
 // modest boost (limits the risk of neighboring stations visually crowding
 // each other - the floor layout was originally spaced assuming native-size
-// sprites); characters bumped further per explicit follow-up direction
-// ("make the characters double the size" - doubled from the first pass's
-// 1.25x, i.e. relative to what was just confirmed on screen, not from
-// native size).
-const MOBILE_CHAR_SCALE_BOOST = 2.5;
+// sprites). Characters went 1.25 -> 2.5 ("double the size") -> "too big,
+// bring it to 1.5x" - this 1.5 is an absolute multiplier on native size
+// (not relative to the 2.5 it's replacing), per the explicit "bring it
+// to" phrasing and that 1.5 is a reduction from 2.5, matching "too big."
+const MOBILE_CHAR_SCALE_BOOST = 1.5;
 const MOBILE_FURNITURE_SCALE_BOOST = 1.25;
 
 // Ambient bystander patrol tuning (see addAmbientNpc/updateAmbientNpcs) - a
