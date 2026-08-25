@@ -114,26 +114,63 @@ const game = new Phaser.Game(config);
 // (e.g. `__game.scene.getScene("LoginScene")`). Harmless to leave in.
 (window as unknown as { __game: Phaser.Game }).__game = game;
 
-// ENVELOP on touch devices only - see the `scale` config's own comment
-// above for the full story.
-//
-// Setting `game.scale.scaleMode` alone is NOT enough, despite reading
-// back correctly afterward - verified live (checked Phaser's own source,
-// then confirmed with actual canvas measurements): the real FIT/ENVELOP/
-// etc. sizing math reads `displaySize.aspectMode` (a separate internal
-// value on the Size helper object), which Phaser only ever copies
-// `scaleMode` into once, during initial config parsing at boot. Setting
-// `game.scale.scaleMode` after that point updates a value nothing else
-// actually reads. `displaySize.setAspectMode()` is what updates the
-// value the layout math uses; `refresh()` then forces an immediate
-// recompute against it (this pairing is undocumented as a public runtime
-// API - Phaser expects scaleMode to be set once via config - but it's
-// what the source shows actually drives the sizing decision).
-if (isTouchDevice()) {
-  game.scale.scaleMode = Phaser.Scale.ENVELOP;
-  game.scale.displaySize.setAspectMode(Phaser.Scale.ENVELOP);
+/**
+ * Mobile scale mode is not a fixed choice - it depends on BOTH orientation
+ * AND which scene is showing:
+ *
+ * - Landscape, any scene: ENVELOP (fills the screen edge-to-edge - every
+ *   scene's UI was laid out to survive this crop, see uiHelpers.ts's
+ *   SAFE_ZONE_TOP/BOTTOM).
+ * - Portrait, LoginScene/BootScene: FIT (letterboxed, zero crop) - per
+ *   user direction, typing a username/password is easier holding the
+ *   phone upright, so login is deliberately exempted from the landscape
+ *   lock (see index.html's "portrait-ok" class, toggled below). ENVELOP
+ *   would be actively wrong here, not just unnecessary: in portrait,
+ *   ENVELOP fills based on the TALLER dimension, which for this 4:3
+ *   canvas means cropping away roughly two-thirds of the WIDTH to cover
+ *   the extra height - the login form would render badly cut off, not
+ *   just small. FIT avoids that entirely (shows the whole canvas,
+ *   letterboxed instead of cropped) at the cost of the form appearing
+ *   smaller than a landscape/ENVELOP fill would.
+ * - Portrait, any other scene: doesn't matter which mode - the canvas is
+ *   hidden behind #rotate-prompt regardless (index.html), so nothing
+ *   renders either way; FIT is used here too just to avoid computing a
+ *   heavily-cropped layout behind the scenes for no reason.
+ *
+ * Setting `game.scale.scaleMode` alone is NOT enough, despite reading
+ * back correctly afterward - verified live (checked Phaser's own source,
+ * then confirmed with actual canvas measurements): the real FIT/ENVELOP/
+ * etc. sizing math reads `displaySize.aspectMode` (a separate internal
+ * value on the Size helper object), which Phaser only ever copies
+ * `scaleMode` into once, during initial config parsing at boot. Setting
+ * `game.scale.scaleMode` after that point updates a value nothing else
+ * actually reads. `displaySize.setAspectMode()` is what updates the
+ * value the layout math uses; `refresh()` then forces an immediate
+ * recompute against it (this pairing is undocumented as a public runtime
+ * API - Phaser expects scaleMode to be set once via config - but it's
+ * what the source shows actually drives the sizing decision).
+ */
+function updateMobileLayoutMode(): void {
+  if (!isTouchDevice()) return;
+
+  const isPortrait = window.innerHeight > window.innerWidth;
+  const loginOk = game.scene.isActive("BootScene") || game.scene.isActive("LoginScene");
+  document.body.classList.toggle("portrait-ok", loginOk);
+
+  const desiredMode = isPortrait && loginOk ? Phaser.Scale.FIT : Phaser.Scale.ENVELOP;
+  if (game.scale.displaySize.aspectMode !== desiredMode) {
+    game.scale.scaleMode = desiredMode;
+    game.scale.displaySize.setAspectMode(desiredMode);
+  }
   game.scale.refresh();
 }
+
+updateMobileLayoutMode();
+// Polled, not event-driven, for the scene-transition half of this (Login
+// -> StartMenu doesn't fire any resize/orientation event to hang a
+// listener off of) - 400ms is frequent enough that the rotate-prompt/
+// scale-mode swap feels immediate, infrequent enough to be free.
+setInterval(updateMobileLayoutMode, 400);
 
 // Mobile landscape-lock defensive backstop (see index.html's #game-container
 // visibility:hidden comment for the actual root-cause fix - this is extra
@@ -142,17 +179,14 @@ if (isTouchDevice()) {
 // keyboard appearing) can shift the visual viewport independently of any
 // CSS change, which can leave the DOM Element overlay (LoginScene's real
 // <input>s) positioned against stale geometry even after the canvas itself
-// re-renders at the right size. `scale.refresh()` forces Phaser to fully
-// recompute both the canvas AND the DOM container's position/scale against
-// current, real layout - cheap to call, so just do it after every
-// orientation/resize event rather than trying to guess which ones actually
-// need it. The short delay lets the browser's own layout/CSS settle first
-// (immediately-after-rotation dimensions are sometimes still mid-transition).
+// re-renders at the right size. The short delay lets the browser's own
+// layout/CSS settle first (immediately-after-rotation dimensions are
+// sometimes still mid-transition).
 window.addEventListener("orientationchange", () => {
-  setTimeout(() => game.scale.refresh(), 100);
+  setTimeout(updateMobileLayoutMode, 100);
 });
 window.addEventListener("resize", () => {
-  setTimeout(() => game.scale.refresh(), 100);
+  setTimeout(updateMobileLayoutMode, 100);
 });
 
 /**

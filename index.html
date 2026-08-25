@@ -237,8 +237,17 @@
     #install-hint strong {
       color: #ffb347;
     }
+    /* body.portrait-ok (toggled by main.ts's updateMobileLayoutMode(),
+       true while BootScene/LoginScene is active) exempts login from the
+       landscape lock below - per user direction, typing a username/
+       password is easier holding the phone upright, so portrait is
+       allowed there and only there. main.ts also drops the scale mode
+       back to FIT for that combination (portrait + login), not the usual
+       mobile ENVELOP - see that function's own doc comment for why
+       ENVELOP would actively crop the login form rather than just leaving
+       it small. */
     @media (orientation: portrait) and (max-width: 900px) {
-      #rotate-prompt { display: flex; }
+      body:not(.portrait-ok) #rotate-prompt { display: flex; }
       /* visibility:hidden, NOT display:none - the actual bug this was
          fixing: `display:none` collapses #game-container to a 0x0 box, and
          most phones load the page in portrait FIRST (before ever
@@ -256,7 +265,7 @@
          visibility:hidden (which already blocks hit-testing) but kept
          explicit as a second guard against stray input reaching a
          not-actually-visible canvas. */
-      #game-container { visibility: hidden; pointer-events: none; }
+      body:not(.portrait-ok) #game-container { visibility: hidden; pointer-events: none; }
     }
   </style>
 </head>
