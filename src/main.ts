@@ -171,12 +171,19 @@ const LOGIN_CONTENT_HALF_WIDTH = 208;
  * and stay aligned - with body's own `overflow:hidden` (index.html)
  * cropping whatever overflows past the viewport.
  *
- * The zoom factor is computed, not hardcoded, targeting
- * LOGIN_CONTENT_HALF_WIDTH (+20px margin) so the crop this introduces
- * never eats into anything real. Deliberately only called from
- * updateMobileLayoutMode() when isPortraitLogin actually CHANGES - see
- * that function's own comment for why recomputing on every poll tick
- * caused the whole screen to visibly drift while typing.
+ * The FULL zoom factor is computed, not hardcoded - targeting
+ * LOGIN_CONTENT_HALF_WIDTH (+20px margin) so the crop it introduces would
+ * never eat into anything real - but the APPLIED zoom is only halfway
+ * between that full factor and 1 (i.e. no zoom, plain FIT - "the last
+ * distance") per explicit follow-up direction, a gentler zoom-in than the
+ * computed maximum-safe one. Halving the excess only makes the existing
+ * safety margin larger, never smaller, so this can't reintroduce any
+ * cropping risk.
+ *
+ * Deliberately only called from updateMobileLayoutMode() when
+ * isPortraitLogin actually CHANGES - see that function's own comment for
+ * why recomputing on every poll tick caused the whole screen to visibly
+ * drift while typing.
  */
 function applyPortraitLoginZoom(active: boolean): void {
   const container = document.getElementById("game-container");
@@ -188,7 +195,8 @@ function applyPortraitLoginZoom(active: boolean): void {
   const currentFitScale = game.scale.displaySize.width / 800;
   if (currentFitScale <= 0) return;
   const desiredScale = window.innerWidth / ((LOGIN_CONTENT_HALF_WIDTH + 20) * 2);
-  const zoomFactor = Math.max(1, desiredScale / currentFitScale);
+  const fullZoomFactor = Math.max(1, desiredScale / currentFitScale);
+  const zoomFactor = 1 + (fullZoomFactor - 1) / 2;
   container.style.transformOrigin = "center center";
   container.style.transform = `scale(${zoomFactor})`;
 }
