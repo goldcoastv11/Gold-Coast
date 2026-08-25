@@ -36,12 +36,10 @@ const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
 // by scrollFactor(0) the way scroll/pan is.
 //
 // Went 1.25/1.25 -> character-only 2.5 ("double the size") -> 1.5 ("too
-// big") -> reset back to 1 (no boost) for both, per explicit follow-up
-// direction ("reset both to how they were before [any mobile size
-// boost]"). Left as real, wired-up constants rather than deleting the
-// feature outright - every call site below already reads from these, so
-// picking a new value is a one-line change if this gets revisited later.
-const MOBILE_CHAR_SCALE_BOOST = 1;
+// big") -> reset to 1 (no boost) for both -> character-only 1.5 ("50%
+// bigger"). Furniture stays at 1 (native) - only characters were asked
+// for this time.
+const MOBILE_CHAR_SCALE_BOOST = 1.5;
 const MOBILE_FURNITURE_SCALE_BOOST = 1;
 
 // Ambient bystander patrol tuning (see addAmbientNpc/updateAmbientNpcs) - a
