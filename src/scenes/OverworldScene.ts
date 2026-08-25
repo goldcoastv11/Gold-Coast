@@ -33,15 +33,16 @@ const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
 // below for why: an earlier pass already found that zooming the camera
 // also scales/shifts every screen-fixed UI element (HUD, joystick,
 // buttons) off their correct positions, since Phaser zoom isn't blocked
-// by scrollFactor(0) the way scroll/pan is. Furniture kept at the original
-// modest boost (limits the risk of neighboring stations visually crowding
-// each other - the floor layout was originally spaced assuming native-size
-// sprites). Characters went 1.25 -> 2.5 ("double the size") -> "too big,
-// bring it to 1.5x" - this 1.5 is an absolute multiplier on native size
-// (not relative to the 2.5 it's replacing), per the explicit "bring it
-// to" phrasing and that 1.5 is a reduction from 2.5, matching "too big."
-const MOBILE_CHAR_SCALE_BOOST = 1.5;
-const MOBILE_FURNITURE_SCALE_BOOST = 1.25;
+// by scrollFactor(0) the way scroll/pan is.
+//
+// Went 1.25/1.25 -> character-only 2.5 ("double the size") -> 1.5 ("too
+// big") -> reset back to 1 (no boost) for both, per explicit follow-up
+// direction ("reset both to how they were before [any mobile size
+// boost]"). Left as real, wired-up constants rather than deleting the
+// feature outright - every call site below already reads from these, so
+// picking a new value is a one-line change if this gets revisited later.
+const MOBILE_CHAR_SCALE_BOOST = 1;
+const MOBILE_FURNITURE_SCALE_BOOST = 1;
 
 // Ambient bystander patrol tuning (see addAmbientNpc/updateAmbientNpcs) - a
 // lazy background stroll, deliberately much slower than the player
