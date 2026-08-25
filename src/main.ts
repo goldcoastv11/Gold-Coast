@@ -173,8 +173,10 @@ const LOGIN_CONTENT_HALF_WIDTH = 208;
  *
  * The zoom factor is computed, not hardcoded, targeting
  * LOGIN_CONTENT_HALF_WIDTH (+20px margin) so the crop this introduces
- * never eats into anything real - recomputed every call since it depends
- * on the current FIT scale, which itself depends on the current viewport.
+ * never eats into anything real. Deliberately only called from
+ * updateMobileLayoutMode() when isPortraitLogin actually CHANGES - see
+ * that function's own comment for why recomputing on every poll tick
+ * caused the whole screen to visibly drift while typing.
  */
 function applyPortraitLoginZoom(active: boolean): void {
   const container = document.getElementById("game-container");
@@ -191,27 +193,61 @@ function applyPortraitLoginZoom(active: boolean): void {
   container.style.transform = `scale(${zoomFactor})`;
 }
 
+let lastAppliedMode: number | null = null;
+let lastAppliedPortraitLogin: boolean | null = null;
+
+/**
+ * Only touches the Scale Manager / zoom transform when the DESIRED state
+ * actually changed since the last call - not unconditionally on every
+ * poll tick. Reported live: with an earlier version that called
+ * `game.scale.refresh()` and `applyPortraitLoginZoom()` unconditionally
+ * every 400ms, the portrait login screen visibly drifted/wobbled while
+ * typing on a real iPhone. Root cause: iOS Safari shrinks the visible
+ * viewport while the on-screen keyboard is up (and its address bar
+ * animates independently too), which changes #game-container's live
+ * height - `refresh()` picks that up and recomputes Phaser's FIT sizing
+ * from it, and the zoom factor is derived from that same computation, so
+ * every 400ms tick was recalculating a slightly different answer purely
+ * from keyboard/chrome noise, not from anything that should actually
+ * matter (the scene hasn't changed, the phone hasn't rotated). Gating
+ * both calls behind "did scaleMode or isPortraitLogin actually flip"
+ * means neither runs again until a REAL change happens - a scene
+ * transition or a genuine portrait/landscape flip - so the screen stays
+ * completely still through keyboard/chrome noise instead.
+ */
 function updateMobileLayoutMode(): void {
   if (!isTouchDevice()) return;
 
   const isPortrait = window.innerHeight > window.innerWidth;
   const loginOk = game.scene.isActive("BootScene") || game.scene.isActive("LoginScene");
+  const isPortraitLogin = isPortrait && loginOk;
   document.body.classList.toggle("portrait-ok", loginOk);
 
-  const desiredMode = isPortrait && loginOk ? Phaser.Scale.FIT : Phaser.Scale.ENVELOP;
-  if (game.scale.displaySize.aspectMode !== desiredMode) {
+  const desiredMode = isPortraitLogin ? Phaser.Scale.FIT : Phaser.Scale.ENVELOP;
+  const modeChanged = desiredMode !== lastAppliedMode;
+  const portraitLoginChanged = isPortraitLogin !== lastAppliedPortraitLogin;
+
+  if (modeChanged) {
     game.scale.scaleMode = desiredMode;
     game.scale.displaySize.setAspectMode(desiredMode);
+    lastAppliedMode = desiredMode;
   }
-  game.scale.refresh();
-  applyPortraitLoginZoom(isPortrait && loginOk);
+  if (modeChanged || portraitLoginChanged) {
+    game.scale.refresh();
+  }
+  if (portraitLoginChanged) {
+    applyPortraitLoginZoom(isPortraitLogin);
+    lastAppliedPortraitLogin = isPortraitLogin;
+  }
 }
 
 updateMobileLayoutMode();
 // Polled, not event-driven, for the scene-transition half of this (Login
 // -> StartMenu doesn't fire any resize/orientation event to hang a
 // listener off of) - 400ms is frequent enough that the rotate-prompt/
-// scale-mode swap feels immediate, infrequent enough to be free.
+// scale-mode swap feels immediate. Safe to poll this often now that the
+// function itself is a no-op unless something real actually changed (see
+// its own doc comment).
 setInterval(updateMobileLayoutMode, 400);
 
 // Mobile landscape-lock defensive backstop (see index.html's #game-container
