@@ -20,6 +20,7 @@ export const SOUND_ASSETS = {
   open: "assets/kenney_interface_sounds/Audio/open_002.ogg", // a panel/modal opening (Item Shop, Coin Kiosk)
   confirm: "assets/kenney_interface_sounds/Audio/confirmation_002.ogg", // a real win (see WinCelebration.ts), or a confirmed purchase
   error: "assets/kenney_interface_sounds/Audio/error_003.ogg", // insufficient balance / a failed request
+  lose: "assets/kenney_interface_sounds/Audio/error_005.ogg", // a game round resolving as a loss - a different file from `error` so it doesn't sound identical to a real error toast
 
   // --- Casino Audio pack: game-specific flavor, layered on top of the above ---
   chipLay: "assets/kenney_casino_audio/Audio/chip-lay-2.ogg", // Coin Kiosk shuffle-cup claim result

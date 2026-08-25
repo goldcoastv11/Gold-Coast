@@ -14,6 +14,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 /**
  * Symbol display metadata + the emoji reel. The paytable itself (weights,
@@ -150,6 +151,7 @@ export class SlotsScene extends Phaser.Scene {
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText("No match, try again").setColor(Theme.textMuted);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();

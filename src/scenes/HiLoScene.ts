@@ -352,6 +352,7 @@ export class HiLoScene extends Phaser.Scene {
           this.messageText
             .setText(`${nextCard.label}${nextCard.suit} - wrong guess. You lose your bet.`)
             .setColor(Theme.textDanger);
+          playSfx(this, "lose");
           this.updateBalance();
           this.endRun();
           return;

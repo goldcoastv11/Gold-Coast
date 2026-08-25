@@ -14,6 +14,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 const GRID_SIZE = 5; // 5x5 = 25 tiles
 const TOTAL_TILES = GRID_SIZE * GRID_SIZE;
@@ -304,6 +305,7 @@ export class MinesScene extends Phaser.Scene {
           this.active = false;
           this.revealMines(res.minePositions ?? []);
           this.messageText.setText("💥 Boom! You lose your bet.").setColor(Theme.textDanger);
+          playSfx(this, "lose");
           this.updateBalance();
           this.endRound();
           return;

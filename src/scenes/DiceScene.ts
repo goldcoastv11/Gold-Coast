@@ -243,6 +243,7 @@ export class DiceScene extends Phaser.Scene {
     } else {
       this.rollText.setColor(Theme.textDanger);
       this.messageText.setText(`${roll} - not under ${target}, you lose`).setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();

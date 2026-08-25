@@ -296,6 +296,7 @@ export class BaccaratScene extends Phaser.Scene {
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - you lose`).setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();

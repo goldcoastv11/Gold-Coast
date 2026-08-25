@@ -267,6 +267,7 @@ export class BlackjackScene extends Phaser.Scene {
           this.dealerHand = this.revealDealerHand(res.state.dealerHand ?? []);
           this.dealerHoleHidden = false;
           this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          playSfx(this, "lose");
           this.updateBalance();
           this.endHand();
         } else {
@@ -322,6 +323,7 @@ export class BlackjackScene extends Phaser.Scene {
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText("Dealer wins").setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
   }
 

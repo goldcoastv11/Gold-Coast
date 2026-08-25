@@ -42,6 +42,23 @@
     .gc-dom-hidden {
       display: none !important;
     }
+    /* WebKit/Safari fades a disabled <input>'s text to low contrast by
+       default, in a way a plain inline `color` CSS property can't
+       override there (a long-documented Safari quirk, not reproducible in
+       Chromium - every other browser already respects the inline color).
+       The bet-amount field (uiHelpers.ts's makeBetControl) goes disabled
+       while a round is in progress - correct, you can't change your bet
+       mid-round - but the number itself should stay legible even then;
+       only the surrounding +/-/half/double buttons need to visually dim
+       to signal "locked right now" (they already do, via makeButton's own
+       disabled-alpha). Applies globally to every real <input> in the
+       game (this one plus LoginScene's, disabled mid-submit) since the
+       fade is a platform default, not specific to one field. */
+    input:disabled {
+      opacity: 1 !important;
+      -webkit-text-fill-color: #f5f6fa !important;
+      color: #f5f6fa !important;
+    }
     html, body {
       margin: 0;
       padding: 0;

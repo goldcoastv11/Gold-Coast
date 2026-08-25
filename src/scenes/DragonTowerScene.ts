@@ -14,6 +14,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 const ROWS = 6;
 const TILES_PER_ROW = 4;
@@ -304,6 +305,7 @@ export class DragonTowerScene extends Phaser.Scene {
           this.active = false;
           this.revealTower(res.badIndexPerRow ?? [], this.currentRow);
           this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          playSfx(this, "lose");
           this.updateBalance();
           this.endRun();
           return;

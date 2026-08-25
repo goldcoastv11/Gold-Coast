@@ -15,6 +15,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
@@ -328,6 +329,7 @@ export class WheelScene extends Phaser.Scene {
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText("Landed on 0x - you lose").setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();

@@ -14,6 +14,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 const TOTAL_NUMBERS = 40; // board is numbers 1-40
 const DRAWN_COUNT = 10; // 10 numbers get drawn each round
@@ -468,6 +469,7 @@ export class KenoScene extends Phaser.Scene {
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText(`${hits}/${picksCount} matched - not enough to win`).setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();

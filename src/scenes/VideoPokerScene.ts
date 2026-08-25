@@ -335,6 +335,7 @@ export class VideoPokerScene extends Phaser.Scene {
           showWinCelebration(this, res.payout);
         } else {
           this.messageText.setText("No winning hand - you lose").setColor(Theme.textDanger);
+          playSfx(this, "lose");
         }
 
         this.updateBalance();

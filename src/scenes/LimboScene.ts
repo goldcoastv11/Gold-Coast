@@ -15,6 +15,7 @@ import {
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 const PRESET_TARGETS = [1.5, 2, 3, 5, 10, 25, 50, 100];
 const DEFAULT_TARGET = 2;
@@ -182,6 +183,7 @@ export class LimboScene extends Phaser.Scene {
       this.messageText
         .setText(`Stopped at ${crashPoint.toFixed(2)}x - under ${target.toFixed(2)}x, you lose`)
         .setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();

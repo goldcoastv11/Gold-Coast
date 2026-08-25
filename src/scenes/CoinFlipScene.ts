@@ -16,6 +16,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { CoinSide } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
+import { playSfx } from "../ui/SoundManager";
 
 export class CoinFlipScene extends Phaser.Scene {
   private coinText!: Phaser.GameObjects.Text;
@@ -225,6 +226,7 @@ export class CoinFlipScene extends Phaser.Scene {
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText(`${result.toUpperCase()} - you lose`).setColor(Theme.textDanger);
+      playSfx(this, "lose");
     }
 
     this.updateBalance();
