@@ -438,6 +438,24 @@ export interface GameShellHandle {
  * on them directly for round-state transitions (start -> new run, etc.),
  * this just centralizes where they're built and positioned.
  */
+/**
+ * Every interactive/informational sidebar element sits within this band
+ * (130-470, symmetric around the canvas's own vertical center 300) - see
+ * main.ts's Scale.ENVELOP-on-mobile comment for why: filling a wide phone
+ * screen edge-to-edge crops roughly the top/bottom of the 800x600 canvas
+ * to cover the extra width, so nothing anyone actually needs to see or
+ * tap can live outside this range. 130, not an initial-pass 100 - measured
+ * live against a real ~19.5:9 phone viewport (844x390, iPhone 14 Pro
+ * landscape proportions) and the actual crop came out to ~115-122px, more
+ * than the first pass budgeted for; 130 keeps real margin beyond that
+ * measured worst case rather than sitting right on the edge of it.
+ * GAME_SHELL_DISPLAY_CENTER_Y (below) deliberately stays at the same 300
+ * center for the same reason - each game's own display-area content
+ * should stay within roughly ±170 of it too.
+ */
+const SAFE_ZONE_TOP = 130;
+const SAFE_ZONE_BOTTOM = 470;
+
 export function makeGameShell(
   scene: Phaser.Scene,
   title: string,
@@ -451,45 +469,48 @@ export function makeGameShell(
 ): GameShellHandle {
   const CX = 180; // sidebar center x - sidebar spans x:10-350
 
-  makePanel(scene, CX, 300, 340, 580);
+  // Panel height 360 (was 580) - compressed to fit inside the safe zone
+  // (see SAFE_ZONE_TOP/BOTTOM above), spans 120-480: a few px of
+  // background bleeds past the safe zone at each edge (harmless - it's
+  // not interactive, just the panel's own rounded corner) so every real
+  // element below has a little breathing room inside it.
+  makePanel(scene, CX, 300, 340, 360);
 
   scene.add
-    .text(CX, 45, title, { fontSize: "22px", color: Theme.textAccent, fontStyle: "bold" })
+    .text(CX, 145, title, { fontSize: "20px", color: Theme.textAccent, fontStyle: "bold" })
     .setOrigin(0.5);
 
-  makeInset(scene, CX, 82, 300, 30, 15);
+  makeInset(scene, CX, 175, 300, 26, 13);
   const balanceText = scene.add
-    .text(CX, 82, "", { fontSize: "13px", color: Theme.textPrimary })
+    .text(CX, 175, "", { fontSize: "13px", color: Theme.textPrimary })
     .setOrigin(0.5);
 
-  const betControl = makeBetControl(scene, CX, 132, handlers.onBetChange ?? (() => {}));
+  const betControl = makeBetControl(scene, CX, 213, handlers.onBetChange ?? (() => {}));
 
   const multiplierText = scene.add
-    .text(CX, 178, "", { fontSize: "17px", color: Theme.textGold, fontStyle: "bold" })
+    .text(CX, 248, "", { fontSize: "16px", color: Theme.textGold, fontStyle: "bold" })
     .setOrigin(0.5);
 
   const messageText = scene.add
-    .text(CX, 212, "", {
-      fontSize: "13px",
+    .text(CX, 272, "", {
+      fontSize: "12px",
       color: Theme.textMuted,
       align: "center",
       wordWrap: { width: 300 }
     })
     .setOrigin(0.5);
 
-  // Heights 58/42 (not the original 50/34) - mobile touch-target pass, see
-  // makeBetControl's doc comment above for the same reasoning (this
-  // canvas typically renders at ~0.6-0.7x scale on a phone). These two
-  // are the most-tapped buttons in every game (the primary action, and
-  // the way out), so they get the largest bump of anything touched in
-  // this pass.
-  const startBtn = makeButton(scene, CX, 505, 300, 58, startLabel, Theme.accent, Theme.accentHover, handlers.onStart);
+  // Heights 54/36 (not the original 50/34) - still a mobile touch-target
+  // bump, just slightly smaller than the first pass to make room in the
+  // now-compressed band. Positions 400/445 keep both safely inside
+  // SAFE_ZONE_BOTTOM (470) with real margin, not sitting right on the edge.
+  const startBtn = makeButton(scene, CX, 400, 300, 54, startLabel, Theme.accent, Theme.accentHover, handlers.onStart);
   const cashOutBtn = makeButton(
     scene,
     CX,
-    505,
+    400,
     300,
-    58,
+    54,
     "CASH OUT",
     Theme.gold,
     Theme.goldHover,
@@ -499,7 +520,7 @@ export function makeGameShell(
   cashOutBtn.setEnabled(false);
   cashOutBtn.container.setVisible(false);
 
-  const walkAwayBtn = makeButton(scene, CX, 560, 230, 42, "WALK AWAY", Theme.danger, Theme.dangerHover, handlers.onWalkAway);
+  const walkAwayBtn = makeButton(scene, CX, 445, 230, 36, "WALK AWAY", Theme.danger, Theme.dangerHover, handlers.onWalkAway);
 
   return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }

@@ -45,11 +45,14 @@ const PANEL_X = 400;
 // Top of the screen, not the bottom - this panel is nearly full-width
 // (680 of the 800px canvas), so at its original PANEL_Y=520 it directly
 // overlapped the mobile touch joystick/interact button band (both sit
-// around y=500, see TouchControls.ts) - reported live as the tutorial
+// around y=385, see TouchControls.ts) - reported live as the tutorial
 // blocking the exact controls its own hands-on steps ask the player to
 // use. Nothing at the top of the overworld competes for this space the
-// way the bottom does.
-const PANEL_Y = 100;
+// way the bottom does. Y=210 - with PANEL_H=150 that spans 135-285,
+// clearing the measured mobile-crop safe zone (y=[130,470], see
+// uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) with real margin, not just
+// avoiding the joystick.
+const PANEL_Y = 210;
 const PANEL_W = 680;
 const PANEL_H = 150;
 const DEPTH = 500; // above every other Overworld panel (buy/wardrobe/chip panels top out around 201-401)

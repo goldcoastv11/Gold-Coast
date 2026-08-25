@@ -19,13 +19,19 @@ import { Theme } from "./Theme";
  */
 
 const JOYSTICK_X = 90;
-const JOYSTICK_Y = 500;
+// Y=385, not the original 500 - main.ts's Scale.ENVELOP-on-mobile crops
+// the canvas to fill a wide phone screen edge-to-edge, so nothing
+// tappable can sit outside the safe y=[130,470] band any more (see
+// uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM for the measured numbers this is
+// based on) - 385 keeps the joystick's full hit radius (74, see below)
+// inside that band with real margin.
+const JOYSTICK_Y = 385;
 const JOYSTICK_RADIUS = 50;
 const KNOB_RADIUS = 24;
 const DEADZONE_FRACTION = 0.25; // fraction of JOYSTICK_RADIUS before a direction registers
 
 const INTERACT_X = 730;
-const INTERACT_Y = 500;
+const INTERACT_Y = 385; // see JOYSTICK_Y's comment - same safe-zone constraint
 const INTERACT_RADIUS = 40;
 
 const CONTROLS_DEPTH = 500;

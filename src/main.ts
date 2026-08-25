@@ -20,6 +20,7 @@ import { BaccaratScene } from "./scenes/BaccaratScene";
 import { VideoPokerScene } from "./scenes/VideoPokerScene";
 import { setUnauthorizedHandler } from "./api/client";
 import { gameState } from "./GameState";
+import { isTouchDevice } from "./ui/TouchControls";
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -55,20 +56,25 @@ const config: Phaser.Types.Core.GameConfig = {
     activePointers: 2
   },
   scale: {
-    // FIT, not ENVELOP - reverted after a real-device test. ENVELOP scales
-    // up to fully cover the viewport with no letterbox bars, but crops
-    // whatever overflows to get there - on a typical phone's wide
-    // landscape aspect ratio (~19.5:9-21:9) vs this game's fixed 4:3
-    // layout, that meant cropping roughly 20% off the TOP AND BOTTOM to
-    // cover the extra width. Every bottom-anchored control (the touch
-    // joystick/interact button, Walk Away, every game's Cash Out button)
-    // sits close enough to y=500-600 to land inside that cropped zone -
-    // confirmed live: the joystick became unreachable. FIT always shows
-    // 100% of the canvas (letterboxed, never cropped), which is the
-    // correct tradeoff here - every control staying reachable matters more
-    // than eliminating the bars. The fullscreen toggle button (below) is
-    // a separate, compatible way to reclaim screen space (hides the
-    // browser's own chrome) without this cropping problem.
+    // FIT at boot, ENVELOP switched on at runtime for touch devices only
+    // (see the isTouchDevice() block below) - desktop keeps FIT
+    // unconditionally, letterboxed but with zero crop risk.
+    //
+    // History: ENVELOP was tried and reverted once already - it fills the
+    // viewport edge-to-edge with no bars, but crops whatever overflows to
+    // get there, and on a typical wide phone aspect ratio that meant
+    // cropping roughly the top/bottom 100px of the 800x600 canvas, which
+    // put the touch joystick out of reach (confirmed live). This time,
+    // every scene's UI (uiHelpers.ts's makeGameShell/makeBetControl,
+    // TouchControls.ts, TutorialGuide.ts, and OverworldScene's own
+    // corner/prompt/panel elements) has been deliberately laid out to fit
+    // entirely within that same safe y=[100,500] band first, so the crop
+    // this time doesn't cut off anything real - see each file's own
+    // "SAFE_ZONE"/"main.ts's Scale.ENVELOP" comments for the specific
+    // repositioning. Kept mobile-only (not applied on desktop) since
+    // desktop windows aren't usually pushed to the same aspect-ratio
+    // extremes a phone's landscape screen is, and FIT already has zero
+    // downside there.
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: 800,
@@ -107,6 +113,27 @@ const game = new Phaser.Game(config);
 // Debug handle only - lets the browser console inspect the running game
 // (e.g. `__game.scene.getScene("LoginScene")`). Harmless to leave in.
 (window as unknown as { __game: Phaser.Game }).__game = game;
+
+// ENVELOP on touch devices only - see the `scale` config's own comment
+// above for the full story.
+//
+// Setting `game.scale.scaleMode` alone is NOT enough, despite reading
+// back correctly afterward - verified live (checked Phaser's own source,
+// then confirmed with actual canvas measurements): the real FIT/ENVELOP/
+// etc. sizing math reads `displaySize.aspectMode` (a separate internal
+// value on the Size helper object), which Phaser only ever copies
+// `scaleMode` into once, during initial config parsing at boot. Setting
+// `game.scale.scaleMode` after that point updates a value nothing else
+// actually reads. `displaySize.setAspectMode()` is what updates the
+// value the layout math uses; `refresh()` then forces an immediate
+// recompute against it (this pairing is undocumented as a public runtime
+// API - Phaser expects scaleMode to be set once via config - but it's
+// what the source shows actually drives the sizing decision).
+if (isTouchDevice()) {
+  game.scale.scaleMode = Phaser.Scale.ENVELOP;
+  game.scale.displaySize.setAspectMode(Phaser.Scale.ENVELOP);
+  game.scale.refresh();
+}
 
 // Mobile landscape-lock defensive backstop (see index.html's #game-container
 // visibility:hidden comment for the actual root-cause fix - this is extra

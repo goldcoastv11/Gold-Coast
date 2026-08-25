@@ -654,7 +654,10 @@ export class OverworldScene extends Phaser.Scene {
     // the rest of the chrome system's panel/inset outline treatment instead
     // of Text's flat rectangular backgroundColor. See CHIP_BG_SOFT's comment
     // above for why the per-station labels stay on the simpler path.
-    this.promptText = makeTextChip(this, 400, 550, "", {
+    // Y=435, not the original 550 - main.ts's Scale.ENVELOP-on-mobile crops
+    // the canvas to fill a wide phone screen, so nothing needed on-screen
+    // can sit below y=470 any more (see uiHelpers.ts's SAFE_ZONE_BOTTOM).
+    this.promptText = makeTextChip(this, 400, 435, "", {
       fontSize: "16px",
       color: Theme.textPrimary
     });
@@ -671,8 +674,12 @@ export class OverworldScene extends Phaser.Scene {
     this.hudText.container.setDepth(90);
 
     // "Clothes" corner button - always available, opens the wardrobe
-    // (switch between skins you already own)
-    makeButton(this, 730, 30, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
+    // (switch between skins you already own). Y=155, not the original 30 -
+    // main.ts's Scale.ENVELOP-on-mobile crops the canvas to fill a wide
+    // phone screen, so nothing needed on-screen can sit outside the
+    // measured safe zone y=[130,470] any more (see uiHelpers.ts's
+    // SAFE_ZONE_TOP/BOTTOM).
+    makeButton(this, 730, 155, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
       this.openSkinPanel("wardrobe")
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -1655,7 +1662,7 @@ export class OverworldScene extends Phaser.Scene {
       elements.push(panel);
 
       const title = this.add
-        .text(400, 105, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
+        .text(400, 140, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
           fontSize: "20px",
           color: Theme.textGold,
           fontStyle: "bold"
@@ -1668,7 +1675,7 @@ export class OverworldScene extends Phaser.Scene {
       const sub = this.add
         .text(
           400,
-          130,
+          162,
           mode === "shop" ? `You have ${gameState.tickets} Tickets` : "Pick a look to wear",
           { fontSize: "13px", color: Theme.textMuted }
         )
@@ -1816,8 +1823,11 @@ export class OverworldScene extends Phaser.Scene {
       });
 
       if (totalPages > 1) {
+        // Y=405 (was 435) - see closeBtn's comment below, this row and
+        // Close both had to move up together to fit the mobile-crop-safe
+        // zone (y<=470) with Close still below this row.
         const pageLabel = this.add
-          .text(400, 435, `Page ${page + 1} / ${totalPages}`, {
+          .text(400, 405, `Page ${page + 1} / ${totalPages}`, {
             fontSize: "12px",
             color: Theme.textMuted
           })
@@ -1830,7 +1840,7 @@ export class OverworldScene extends Phaser.Scene {
           const prevBtn = makeButton(
             this,
             290,
-            435,
+            405,
             90,
             34,
             "◀ Prev",
@@ -1848,7 +1858,7 @@ export class OverworldScene extends Phaser.Scene {
           const nextBtn = makeButton(
             this,
             510,
-            435,
+            405,
             90,
             34,
             "Next ▶",
@@ -1864,7 +1874,10 @@ export class OverworldScene extends Phaser.Scene {
         }
       }
 
-      const closeBtn = makeButton(this, 400, 490, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
+      // Y=450, not the original 490 - keeps this button's full height
+      // inside the measured mobile-crop-safe zone y=[130,470] (see
+      // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM).
+      const closeBtn = makeButton(this, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
         cleanup();
         this.panelOpen = false;
         this.updateHud();
