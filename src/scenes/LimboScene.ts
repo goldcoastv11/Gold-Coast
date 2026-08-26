@@ -9,13 +9,14 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const PRESET_TARGETS = [1.5, 2, 3, 5, 10, 25, 50, 100];
 const DEFAULT_TARGET = 2;
@@ -39,6 +40,7 @@ export class LimboScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "sadDescent");
     this.target = DEFAULT_TARGET;
     this.running = false;
     this.presetButtons = [];
@@ -62,6 +64,8 @@ export class LimboScene extends Phaser.Scene {
     this.betControl = this.shell.betControl;
     this.playBtn = this.shell.startBtn;
     this.messageText.setText("Pick a target multiplier").setColor(Theme.textMuted);
+
+    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y, 410, 300);
 
     this.multiplierText = this.add
       .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 55, "1.00x", {

@@ -9,6 +9,7 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
@@ -16,7 +17,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BaccaratBetType } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 /**
  * Real published baccarat odds - no invented numbers. Standard 8-deck-shoe
@@ -103,6 +104,7 @@ export class BaccaratScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "italianMom");
     this.betType = "player";
     this.dealing = false;
     this.playerSlots = [];
@@ -125,6 +127,12 @@ export class BaccaratScene extends Phaser.Scene {
     this.messageText = this.shell.messageText;
     this.dealBtn = this.shell.startBtn;
     this.betControl = this.shell.betControl;
+
+    // Full safe-zone height (see uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) - the
+    // bet-type buttons above the hands already sit close to the top edge,
+    // so this doesn't add any padding beyond what the mobile-landscape crop
+    // already allows for every other game.
+    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y, 410, 340);
 
     this.renderBetButtons();
 
@@ -239,6 +247,7 @@ export class BaccaratScene extends Phaser.Scene {
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(false));
     this.clearSlots();
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
     api

@@ -17,7 +17,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { BlackjackOutcome } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 // #36: the deck, dealer AI, and win/payout math are all resolved
 // server-side (POST /games/blackjack/start|hit|stand) - the server only
@@ -87,6 +87,7 @@ export class BlackjackScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "missionPlausible");
     this.playerHand = [];
     this.dealerHand = [];
     this.dealerHoleHidden = true;
@@ -115,6 +116,14 @@ export class BlackjackScene extends Phaser.Scene {
 
     // Real table art as backdrop
     this.add.image(DX, DY, "blackjack_table").setDisplaySize(410, 320).setAlpha(0.85);
+
+    // Thin gold trim frame around the table, matching the "arcade cabinet"
+    // gold border every other game now has (see uiHelpers.ts's
+    // drawCabinetFrame) - stroke-only (no fill) so the felt table art
+    // underneath stays fully visible, just gives it a finished edge instead
+    // of fading into the plain dark background. Sized to the same 130-470
+    // safe-zone height every game respects (see SAFE_ZONE_TOP/BOTTOM).
+    this.add.graphics().lineStyle(4, Theme.gold, 1).strokeRoundedRect(DX - 215, DY - 170, 430, 340, 16);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
     const dealer = this.add.sprite(DX - 165, DY - 190, "dealer_sheet", 1).setScale(3.4);
@@ -163,6 +172,7 @@ export class BlackjackScene extends Phaser.Scene {
     this.newHandBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
     this.attemptStart(bet, true);

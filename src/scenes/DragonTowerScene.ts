@@ -8,13 +8,14 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const ROWS = 6;
 const TILES_PER_ROW = 4;
@@ -61,6 +62,7 @@ export class DragonTowerScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "retroBeat");
     this.active = false;
     this.busy = false;
     this.currentRow = 0;
@@ -84,6 +86,15 @@ export class DragonTowerScene extends Phaser.Scene {
     this.walkAwayBtn = this.shell.walkAwayBtn;
     this.betControl = this.shell.betControl;
     this.messageText.setText("Start a run to climb the tower");
+
+    // Cabinet frame - generous horizontal padding (there's plenty of spare
+    // width either side of the 4-wide tower), minimal vertical padding
+    // (the tower's own 6 rows already run close to the mobile-landscape
+    // safe zone's top/bottom edges - see uiHelpers.ts's
+    // SAFE_ZONE_TOP/BOTTOM).
+    const towerW = TILES_PER_ROW * TILE_SIZE + (TILES_PER_ROW - 1) * TILE_GAP;
+    const towerH = (ROWS - 1) * ROW_SPACING + TILE_SIZE;
+    drawCabinetFrame(this, TOWER_CENTER_X, BOTTOM_ROW_Y - (ROWS - 1) * (ROW_SPACING / 2), towerW + 160, towerH + 6);
 
     this.buildEmptyTowerVisuals();
     this.updateBalance();
@@ -305,16 +316,25 @@ export class DragonTowerScene extends Phaser.Scene {
           this.active = false;
           this.revealTower(res.badIndexPerRow ?? [], this.currentRow);
           this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          playSfx(this, "bust");
           playSfx(this, "lose");
           this.updateBalance();
           this.endRun();
           return;
         }
 
+        // Pop the tile that was just cleared before currentRow advances -
+        // renderTowerState()/revealTower() below repaint every tile every
+        // call, so this has to target the one real tile here, using the
+        // still-current row/col (the same pattern MinesScene.pickTile uses).
+        const clearedTile = this.tiles[this.currentRow]?.[col];
+        if (clearedTile) popIn(this, clearedTile.container);
+
         this.pickedColPerRow.push(col);
         this.currentRow = res.currentRow ?? this.currentRow + 1;
         this.multiplierText.setText(`Multiplier: ${res.multiplier}x`);
         popIn(this, this.multiplierText);
+        playSfx(this, "reveal");
 
         if (res.reachedTop) {
           this.active = false;

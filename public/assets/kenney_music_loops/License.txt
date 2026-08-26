@@ -1,0 +1,19 @@
+Music Loops (1.1)
+by  Kenney Vleugels (Kenney.nl)
+------------------------------
+
+License (Creative Commons Zero, CC0)
+http://creativecommons.org/publicdomain/zero/1.0/
+
+You may use these assets in personal and commercial projects.
+Credit (Kenney or www.kenney.nl) would be nice but is not mandatory.
+
+------------------------------
+
+This pack predates Kenney's current kenney.nl asset catalog (created
+2015-07-31; no longer listed on the current site nav as of 2026), so these
+files were pulled from a long-standing public mirror of Kenney's CC0
+catalog (gamesounds.xyz) rather than a kenney.nl direct-zip link - see
+casino-poc/AUDIO_GUIDE.md for the full sourcing note. Same CC0 1.0 terms as
+every other Kenney pack already in this repo (kenney_casino_audio,
+kenney_interface_sounds, kenney_rpg_urban_pack).

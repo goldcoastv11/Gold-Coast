@@ -18,10 +18,16 @@ import { playSfx } from "./SoundManager";
  * wire up on scene shutdown (a mid-animation scene swap just tears these
  * down with everything else Phaser already destroys).
  */
+/** Any payout at/above this plays the extra `bigWin` bong accent on top of the usual `confirm` chime - a flat TICKETS threshold, not bet-relative (this function only ever sees the payout, never the bet), same spirit as a real slot machine's fixed "jackpot bell" cutoff. */
+const BIG_WIN_THRESHOLD = 500;
+
 export function showWinCelebration(scene: Phaser.Scene, ticketsPayout: number): void {
   if (!(ticketsPayout > 0)) return;
 
   playSfx(scene, "confirm");
+  if (ticketsPayout >= BIG_WIN_THRESHOLD) {
+    playSfx(scene, "bigWin");
+  }
 
   const { width, height } = scene.scale;
   const DEPTH = 900; // above every game's own UI (panels/modals top out well under this)

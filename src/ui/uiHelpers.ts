@@ -525,6 +525,40 @@ export function makeGameShell(
   return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }
 
+/**
+ * Gold-trimmed "arcade cabinet" backdrop - a rounded near-black panel with a
+ * thick gold outer border and a thinner steel-blue inner border, drawn at
+ * depth -1 so every default-depth game object (reels, cards, grids, wheels)
+ * always renders in front of it regardless of creation order. First built
+ * for SlotsScene's reel cabinet, now shared so every game gets the same
+ * "arcade machine" framing instead of bare content floating on the flat
+ * scene background.
+ *
+ * IMPORTANT for callers: size (w, h) to hug the game's EXISTING content
+ * bounds - don't add new elements that extend beyond what was already
+ * on-screen and working. SlotsScene's first cabinet pass added a lever 20px
+ * outside the frame and it bled 8px past the canvas's actual right edge
+ * (800) on every platform; every cabinet since sizes strictly around
+ * content that was already verified to fit.
+ */
+export function drawCabinetFrame(
+  scene: Phaser.Scene,
+  cx: number,
+  cy: number,
+  w: number,
+  h: number,
+  radius = 20
+): Phaser.GameObjects.Graphics {
+  const g = scene.add.graphics().setDepth(-1);
+  g.fillStyle(Theme.outline, 1);
+  g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, radius);
+  g.lineStyle(5, Theme.gold, 1);
+  g.strokeRoundedRect(cx - w / 2, cy - h / 2, w, h, radius);
+  g.lineStyle(2, Theme.panelBorder, 1);
+  g.strokeRoundedRect(cx - w / 2 + 8, cy - h / 2 + 8, w - 16, h - 16, Math.max(4, radius - 6));
+  return g;
+}
+
 /** Punchy scale-pop animation for win text / results. */
 export function popIn(scene: Phaser.Scene, target: Phaser.GameObjects.GameObject) {
   const obj = target as unknown as { setScale: (s: number) => void };

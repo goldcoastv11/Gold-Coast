@@ -18,7 +18,7 @@ import {
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
 
 const TILE = 16; // real tileset is 16x16 pixels per tile
@@ -465,6 +465,7 @@ export class OverworldScene extends Phaser.Scene {
 
   create(data?: OverworldSceneData) {
     fadeInOnCreate(this);
+    playMusic(this, "alphaDance"); // lobby background loop - see ui/SoundManager.ts
 
     // Capture, then IMMEDIATELY clear, whatever data this scene was
     // started with - Phaser's Systems.start(data) only overwrites

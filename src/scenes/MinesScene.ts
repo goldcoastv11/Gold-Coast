@@ -8,13 +8,14 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const GRID_SIZE = 5; // 5x5 = 25 tiles
 const TOTAL_TILES = GRID_SIZE * GRID_SIZE;
@@ -59,6 +60,7 @@ export class MinesScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "retroMystic");
     this.active = false;
     this.busy = false;
     this.picksMade = 0;
@@ -83,6 +85,13 @@ export class MinesScene extends Phaser.Scene {
     this.walkAwayBtn = this.shell.walkAwayBtn;
     this.betControl = this.shell.betControl;
     this.messageText.setText(`${MINE_COUNT} mines hidden among ${TOTAL_TILES} tiles - start a game`);
+
+    // Cabinet frame hugs the grid's exact height (it already sits right at
+    // the mobile-landscape safe zone's top/bottom edges - see
+    // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM - so no vertical padding is added,
+    // only horizontal, which has plenty of spare room).
+    const gridSpan = GRID_SIZE * TILE_SIZE + (GRID_SIZE - 1) * TILE_GAP;
+    drawCabinetFrame(this, GRID_CENTER_X, GRID_CENTER_Y, gridSpan + 60, gridSpan);
 
     this.buildEmptyGridVisuals();
     this.updateBalance();
@@ -305,6 +314,7 @@ export class MinesScene extends Phaser.Scene {
           this.active = false;
           this.revealMines(res.minePositions ?? []);
           this.messageText.setText("💥 Boom! You lose your bet.").setColor(Theme.textDanger);
+          playSfx(this, "bust");
           playSfx(this, "lose");
           this.updateBalance();
           this.endRound();
@@ -315,6 +325,12 @@ export class MinesScene extends Phaser.Scene {
         this.picksMade = this.revealed.size;
         this.multiplierText.setText(`Multiplier: ${res.multiplier.toFixed(2)}x`);
         popIn(this, this.multiplierText);
+        playSfx(this, "reveal");
+        // Pop the specific tile that was just clicked - the gem reveal
+        // itself gets the same "juice" as the multiplier readout, not just
+        // an instant repaint (renderGridState() below repaints every tile
+        // every call, so this popIn has to target the one real tile here).
+        if (this.tiles[index]) popIn(this, this.tiles[index].container);
 
         if (res.boardCleared) {
           this.active = false;

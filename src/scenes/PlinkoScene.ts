@@ -8,13 +8,14 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   makeInset,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const ROWS = 8; // rows of pegs -> 9 landing slots
 const ROW_SPACING = 28;
@@ -52,6 +53,7 @@ export class PlinkoScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "flowingRocks");
     this.dropping = false;
     this.slotTexts = [];
     this.cameras.main.setBackgroundColor(Theme.bgDark);
@@ -73,6 +75,12 @@ export class PlinkoScene extends Phaser.Scene {
     this.dropBtn = this.shell.startBtn;
     this.betControl = this.shell.betControl;
     this.messageText.setText("Drop a ball and watch it bounce").setColor(Theme.textMuted);
+
+    // Cabinet frame - the peg board itself is narrower than most other
+    // games' content, so this widens out to the same ~410px family width
+    // used elsewhere (Slots/Dragon Tower/Dice/etc.) purely for a consistent
+    // "arcade cabinet" look, rather than hugging the board tightly.
+    drawCabinetFrame(this, BOARD_CENTER_X, 292, 410, 280);
 
     this.drawPegs();
     this.drawSlots();
@@ -136,6 +144,7 @@ export class PlinkoScene extends Phaser.Scene {
           y: BOARD_TOP_Y + (step + 1) * ROW_SPACING
         }));
         this.ball.setPosition(BOARD_CENTER_X, BOARD_TOP_Y - 16);
+        playSfx(this, "ballDrop");
         this.animateStep(waypoints, 0, () => this.resolveDrop(res));
       })
       .catch((err) => {

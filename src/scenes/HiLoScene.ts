@@ -9,6 +9,7 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
@@ -16,7 +17,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { HiLoGuess } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 // Stake-style layout: card/history/buttons centered in the shell's
 // right-side display area (see ui/uiHelpers.ts's makeGameShell) - the
@@ -88,6 +89,7 @@ export class HiLoScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "infiniteDescent");
     this.currentCard = null;
     this.history = [];
     this.correctGuesses = 0;
@@ -117,6 +119,8 @@ export class HiLoScene extends Phaser.Scene {
     this.betControl = this.shell.betControl;
     this.multiplierText.setText("Multiplier: 1.00x");
     this.messageText.setText("Start a run to deal the first card");
+
+    drawCabinetFrame(this, DX, DY, 410, 320);
 
     // Current card display
     this.cardBg = this.add.graphics();
@@ -248,6 +252,7 @@ export class HiLoScene extends Phaser.Scene {
     this.startBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Starting...").setColor(Theme.textMuted);
+    playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
     this.attemptStart(bet, true);

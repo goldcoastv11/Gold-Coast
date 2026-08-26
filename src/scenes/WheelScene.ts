@@ -9,13 +9,14 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
@@ -148,6 +149,7 @@ export class WheelScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "retroPolka");
     this.risk = "low";
     this.spinning = false;
     this.riskButtons = {};
@@ -170,6 +172,8 @@ export class WheelScene extends Phaser.Scene {
     this.betControl = this.shell.betControl;
     this.spinBtn = this.shell.startBtn;
     this.messageText.setText("Pick a risk level and spin").setColor(Theme.textMuted);
+
+    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, 292, 410, 320);
 
     this.renderRiskButtons();
 
@@ -308,6 +312,7 @@ export class WheelScene extends Phaser.Scene {
         // Rotate so segmentCenterDeg ends up at the pointer (-90deg / top).
         const targetAngle = extraSpins * 360 - 90 - segmentCenterDeg;
 
+        playSfx(this, "reelSpin");
         this.tweens.add({
           targets: this.wheelContainer,
           angle: targetAngle,
@@ -321,6 +326,7 @@ export class WheelScene extends Phaser.Scene {
 
   private resolveSpin(res: Awaited<ReturnType<typeof api.playWheel>>) {
     gameState.hydrateFromServer(res.user);
+    playSfx(this, "reelStop");
     const { multiplier, payout } = res.result;
 
     if (payout > 0) {

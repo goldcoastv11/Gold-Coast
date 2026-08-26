@@ -8,12 +8,13 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -66,6 +67,7 @@ export class DiceScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "drummingSticks");
     this.target = DEFAULT_TARGET;
     this.rolling = false;
     this.rollTimer = undefined;
@@ -92,6 +94,8 @@ export class DiceScene extends Phaser.Scene {
     this.betControl = this.shell.betControl;
     this.rollBtn = this.shell.startBtn;
     this.messageText.setText("Roll under your target to win").setColor(Theme.textMuted);
+
+    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y, 410, 300);
 
     this.rollText = this.add
       .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 60, "--", {

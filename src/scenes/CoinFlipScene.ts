@@ -9,6 +9,7 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
@@ -16,7 +17,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { CoinSide } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 export class CoinFlipScene extends Phaser.Scene {
   private coinText!: Phaser.GameObjects.Text;
@@ -27,6 +28,7 @@ export class CoinFlipScene extends Phaser.Scene {
   private walkAwayBtn?: UIButton;
   private flipping = false;
   private flipTimer?: Phaser.Time.TimerEvent;
+  private flipTween?: Phaser.Tweens.Tween;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
   /** Onboarding tutorial's "Play a Game" hands-on step - see gameState.tutorialAwaitingGamePlay's doc comment and OverworldScene.runHandsOnGameStep. */
@@ -38,6 +40,7 @@ export class CoinFlipScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "cheerfulAnnoyance");
     this.flipping = false;
     this.flipTimer = undefined;
     this.cameras.main.setBackgroundColor(Theme.bgDark);
@@ -47,6 +50,7 @@ export class CoinFlipScene extends Phaser.Scene {
         this.flipTimer.remove(false);
         this.flipTimer = undefined;
       }
+      this.tweens.killTweensOf(this.coinText);
     });
 
     // Stake-style shell: left sidebar (title/balance/bet/message/
@@ -69,6 +73,8 @@ export class CoinFlipScene extends Phaser.Scene {
     this.betControl = this.shell.betControl;
     this.walkAwayBtn = this.shell.walkAwayBtn;
     this.messageText.setText("Pick a side to flip").setColor(Theme.textMuted);
+
+    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y, 390, 300);
 
     this.coinText = this.add
       .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 40, "🪙", { fontSize: "90px" })
@@ -205,6 +211,18 @@ export class CoinFlipScene extends Phaser.Scene {
         ticks++;
       }
     });
+    // Squash the coin's horizontal scale toward 0 and back, repeating - a
+    // cheap "tumbling edge-on" spin effect layered on top of the emoji
+    // swap above, instead of the coin just sitting still while its face
+    // flickers.
+    this.flipTween = this.tweens.add({
+      targets: this.coinText,
+      scaleX: 0.15,
+      duration: 130,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.easeInOut"
+    });
 
     api
       .playCoinFlip(bet, "GC", guess)
@@ -215,9 +233,11 @@ export class CoinFlipScene extends Phaser.Scene {
   private resolveFlip(res: Awaited<ReturnType<typeof api.playCoinFlip>>) {
     this.flipTimer?.remove(false);
     this.flipTimer = undefined;
+    this.flipTween?.stop();
+    this.flipTween = undefined;
 
     gameState.hydrateFromServer(res.user);
-    this.coinText.setText("🪙");
+    this.coinText.setText("🪙").setScale(1);
 
     const { result, won, payout } = res.result;
     if (won) {
@@ -259,7 +279,9 @@ export class CoinFlipScene extends Phaser.Scene {
   private handleFlipError(err: unknown) {
     this.flipTimer?.remove(false);
     this.flipTimer = undefined;
-    this.coinText.setText("🪙");
+    this.flipTween?.stop();
+    this.flipTween = undefined;
+    this.coinText.setText("🪙").setScale(1);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
       this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);

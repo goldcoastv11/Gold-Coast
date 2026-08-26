@@ -16,7 +16,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import type { RouletteColor } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const RED_NUMBERS = new Set([
   1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36
@@ -64,6 +64,7 @@ export class RouletteScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "polkaTrain");
     this.spinning = false;
     this.spinTimer = undefined;
     this.betButtons = [];
@@ -100,6 +101,13 @@ export class RouletteScene extends Phaser.Scene {
       .image(GAME_SHELL_DISPLAY_CENTER_X, 300, "roulette_table")
       .setDisplaySize(400, 224)
       .setAlpha(0.5);
+
+    // Thin gold trim frame around the table - same treatment as
+    // BlackjackScene's, stroke-only so the table art stays visible.
+    this.add
+      .graphics()
+      .lineStyle(4, Theme.gold, 1)
+      .strokeRoundedRect(GAME_SHELL_DISPLAY_CENTER_X - 210, 300 - 122, 420, 244, 16);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
     // Scaled down from 4.4 to 3.2 and tucked into the top-left corner of the
@@ -178,6 +186,8 @@ export class RouletteScene extends Phaser.Scene {
     this.betButtons.forEach((b) => b.setEnabled(false));
     this.betControl?.setEnabled(false);
     this.messageText.setText("Spinning...").setColor(Theme.textMuted);
+    playSfx(this, "chipBet");
+    playSfx(this, "ballDrop");
 
     this.spinTimer = this.time.addEvent({
       delay: 70,
@@ -201,6 +211,7 @@ export class RouletteScene extends Phaser.Scene {
     this.spinTimer = undefined;
 
     gameState.hydrateFromServer(res.user);
+    playSfx(this, "reelStop");
 
     const { number, color, won, payout } = res.result;
     this.resultText.setText(String(number)).setColor(COLOR_HEX[color]);

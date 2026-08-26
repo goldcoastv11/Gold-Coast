@@ -8,13 +8,14 @@ import {
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 /**
  * Standard "9/6 Jacks or Better" paytable - the classic full-pay video
@@ -116,6 +117,7 @@ export class VideoPokerScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "swingingPants");
     this.hand = [];
     this.held = [false, false, false, false, false];
     this.stage = "idle";
@@ -141,6 +143,10 @@ export class VideoPokerScene extends Phaser.Scene {
     this.actionBtn = this.shell.startBtn;
     this.walkAwayBtn = this.shell.walkAwayBtn;
     this.betControl = this.shell.betControl;
+
+    // Full safe-zone height (see uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) - the
+    // paytable strip above the cards already sits close to the top edge.
+    drawCabinetFrame(this, DX, DY, 410, 340);
 
     this.paytableText = this.add
       .text(DX, DY - 185, "", {
@@ -241,6 +247,7 @@ export class VideoPokerScene extends Phaser.Scene {
     this.actionBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
     this.attemptDeal(bet, true);

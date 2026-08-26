@@ -8,13 +8,14 @@ import {
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
-import { playSfx } from "../ui/SoundManager";
+import { playSfx, playMusic } from "../ui/SoundManager";
 
 const TOTAL_NUMBERS = 40; // board is numbers 1-40
 const DRAWN_COUNT = 10; // 10 numbers get drawn each round
@@ -173,6 +174,7 @@ export class KenoScene extends Phaser.Scene {
 
   create() {
     fadeInOnCreate(this);
+    playMusic(this, "germanVirtue");
     this.picks = new Set();
     this.drawn = new Set();
     this.revealedSoFar = new Set();
@@ -204,6 +206,13 @@ export class KenoScene extends Phaser.Scene {
     this.infoText = this.add
       .text(GAME_SHELL_DISPLAY_CENTER_X, 130, "", { fontSize: "13px", color: Theme.textMuted })
       .setOrigin(0.5);
+
+    // Cabinet frame hugging just the number grid (not the info/paytable
+    // text above/below it) - Keno's grid is short enough to have generous
+    // room in every direction, unlike the taller grid games.
+    const gridW = GRID_COLS * CELL_SIZE + (GRID_COLS - 1) * CELL_GAP;
+    const gridH = GRID_ROWS * CELL_SIZE + (GRID_ROWS - 1) * CELL_GAP;
+    drawCabinetFrame(this, GRID_CENTER_X, GRID_CENTER_Y, gridW + 24, gridH + 24);
 
     this.buildGrid();
 
@@ -448,7 +457,10 @@ export class KenoScene extends Phaser.Scene {
         const idx = order[step];
         this.revealedSoFar.add(idx);
         this.paintCell(idx, this.cellState(idx));
-        if (this.cellState(idx) === "hit") popIn(this, this.cells[idx].container);
+        if (this.cellState(idx) === "hit") {
+          popIn(this, this.cells[idx].container);
+          playSfx(this, "reveal");
+        }
         step++;
         if (step >= order.length) {
           this.resolveRound(res);
