@@ -8,6 +8,7 @@
 import { TxClient } from "./economy/ledger";
 import { getBalance } from "./economy/ledger";
 import { listOwnedSkins, getEquippedSkin } from "./economy/skinShop";
+import { listOwnedItems, getEquippedItem } from "./economy/itemShop";
 import { prisma } from "./db";
 
 export interface MeResponse {
@@ -16,6 +17,10 @@ export interface MeResponse {
   tickets: number;
   skinsOwned: string[];
   equippedSkin: string;
+  /** Accessory/pet ids owned - see economy/itemShop.ts. Read defensively (see getItemShopState's doc comment) - never breaks the rest of this response if the items_owned/equipped_items tables aren't migrated yet on this environment. */
+  ownedItems: string[];
+  equippedAccessory: string | null;
+  equippedPet: string | null;
   lastPosition: { x: number; y: number } | null;
   attendantClaim: { lastClaimedAt: string | null };
   adReward: { lastClaimedAt: string | null };
@@ -63,12 +68,45 @@ async function getAdRewardLastClaimedAt(userId: string): Promise<string | null> 
   }
 }
 
+/**
+ * Same isolation as getAdRewardLastClaimedAt above, same reason: items_owned/
+ * equipped_items are a BRAND NEW migration (see schema.prisma's ItemOwned/
+ * EquippedItem doc comment) that won't exist on any environment until
+ * someone runs `railway run npx prisma migrate deploy` against it (see
+ * server/DEPLOYMENT.md) - which does NOT happen automatically on a plain
+ * `git push`/Netlify deploy. Reading these two tables on the caller's
+ * shared `tx` would abort that WHOLE transaction the instant this ships to
+ * an environment that hasn't had the migration applied yet - and
+ * serializeMe's `tx` is shared by literally every authenticated response
+ * (login, signup, /me, every skin/item/game route), so that single missing-
+ * migration gap would 500 the entire app, not just the new items feature.
+ * Reading on the separate top-level `prisma` client and swallowing to a
+ * safe empty/unequipped default means a missing migration just degrades
+ * this one feature (items show as empty/nothing-equipped) instead of
+ * breaking everything else.
+ */
+async function getItemShopState(
+  userId: string
+): Promise<{ ownedItems: string[]; equippedAccessory: string | null; equippedPet: string | null }> {
+  try {
+    const [ownedItems, equippedAccessory, equippedPet] = await Promise.all([
+      listOwnedItems(prisma, userId),
+      getEquippedItem(prisma, userId, "ACCESSORY"),
+      getEquippedItem(prisma, userId, "PET")
+    ]);
+    return { ownedItems, equippedAccessory, equippedPet };
+  } catch {
+    return { ownedItems: [], equippedAccessory: null, equippedPet: null };
+  }
+}
+
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
   const [
     goldCoins,
     tickets,
     skinsOwned,
     equippedSkin,
+    itemShopState,
     lastPosition,
     attendantClaim,
     adRewardLastClaimedAt,
@@ -78,6 +116,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     getBalance(tx, userId, "TICKETS"),
     listOwnedSkins(tx, userId),
     getEquippedSkin(tx, userId),
+    getItemShopState(userId),
     tx.lastPosition.findUnique({ where: { userId } }),
     tx.attendantClaim.findUnique({ where: { userId } }),
     getAdRewardLastClaimedAt(userId),
@@ -90,6 +129,9 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     tickets,
     skinsOwned,
     equippedSkin,
+    ownedItems: itemShopState.ownedItems,
+    equippedAccessory: itemShopState.equippedAccessory,
+    equippedPet: itemShopState.equippedPet,
     lastPosition: lastPosition ? { x: lastPosition.x, y: lastPosition.y } : null,
     attendantClaim: {
       lastClaimedAt: attendantClaim?.lastClaimedAt ? attendantClaim.lastClaimedAt.toISOString() : null

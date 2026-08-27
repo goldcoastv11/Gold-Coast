@@ -158,7 +158,11 @@ export class BootScene extends Phaser.Scene {
   }
 
   create() {
-    this.createKenneyWalkAnims("player_sheet", "player");
+    // Flat/vector player redesign (user direction: "overhaul the character
+    // design" + "like the Wii" - away from the old chibi-pixel-art Kenney
+    // look). Must exist before the anim below references its frames.
+    this.createFlatCharacterSheet();
+    this.createKenneyWalkAnims("player_flat_sheet", "player");
     this.createKenneyWalkAnims("npc_sheet", "npc");
     this.createKenneyWalkAnims("dealer_sheet", "dealer");
     this.createKenneyWalkAnims("npc2_sheet", "npc2");
@@ -192,6 +196,7 @@ export class BootScene extends Phaser.Scene {
     this.createCoinFlipMachineTexture();
     this.createDragonPedestalTexture();
     this.createTutorialGuideTexture();
+    this.createAccessoryTextures();
 
     fadeToScene(this, "LoginScene");
   }
@@ -1094,6 +1099,286 @@ export class BootScene extends Phaser.Scene {
 
     g.generateTexture("tutorial_guide", w, h);
     g.destroy();
+  }
+
+  /**
+   * Item Shop accessory badges (see itemCatalog.ts, worn above the head in
+   * OverworldScene.ts's applyEquippedAccessory) - drawn procedurally, same
+   * Graphics+generateTexture technique as every other placeholder in this
+   * file, rather than sourced from an external pack: no CC0 pixel-art pack
+   * was found that actually matched this project's specific 16x16 Kenney
+   * character scale/palette closely enough to not look like a mismatched
+   * sticker (a real risk raised and confirmed live - a first version of
+   * this rendered accessories as plain emoji, which read as "not on the
+   * person" rather than worn). Drawing from PALETTE guarantees the same
+   * palette/line-weight as the character rig and every other drawn texture
+   * in the game.
+   *
+   * One flat "worn from the front" icon per accessory, not 4 direction-
+   * specific variants - a deliberate simplification given the character's
+   * native 16x16 resolution (STYLE_GUIDE.md's own character sheet is only
+   * that large), where facing-specific detail on a hat/glasses would be
+   * imperceptible anyway. Sized small (14-16px wide) to sit convincingly on
+   * a head that's only ~10-12px wide at native scale.
+   */
+  private createAccessoryTextures() {
+    this.createTopHatTexture();
+    this.createShadesTexture();
+    this.createCrownTexture();
+    this.createHeadphonesTexture();
+    this.createBowTexture();
+  }
+
+  private createTopHatTexture() {
+    const w = 14;
+    const h = 12;
+    const g = this.add.graphics();
+
+    // Brim
+    g.fillStyle(PALETTE.outline, 1);
+    g.fillRoundedRect(0, 8, w, 3, 1.5);
+    // Crown (cylinder body)
+    g.fillStyle(0x1a1d24, 1); // near-black, matches Theme.cardTextBlack rather than pure PALETTE.outline so the band below actually reads against it
+    g.fillRoundedRect(3, 0, w - 6, 9, 1.5);
+    // Gold band
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillRect(3, 6, w - 6, 2);
+    g.lineStyle(1, PALETTE.outline, 1);
+    g.strokeRoundedRect(3, 0, w - 6, 9, 1.5);
+
+    g.generateTexture("acc_top_hat", w, h);
+    g.destroy();
+  }
+
+  private createShadesTexture() {
+    const w = 14;
+    const h = 6;
+    const g = this.add.graphics();
+
+    g.fillStyle(PALETTE.outline, 1);
+    // Bridge
+    g.fillRect(w / 2 - 2, 1.5, 4, 1.5);
+    // Lenses
+    g.fillRoundedRect(0, 0, 5.5, 5, 1.5);
+    g.fillRoundedRect(w - 5.5, 0, 5.5, 5, 1.5);
+    // Lens shine (small highlight so they don't read as two flat blobs)
+    g.fillStyle(0x4a7ad9, 0.7); // Theme.secondaryHover-ish blue glint
+    g.fillCircle(1.8, 1.6, 0.9);
+    g.fillCircle(w - 3.7, 1.6, 0.9);
+
+    g.generateTexture("acc_shades", w, h);
+    g.destroy();
+  }
+
+  private createCrownTexture() {
+    const w = 14;
+    const h = 10;
+    const g = this.add.graphics();
+
+    // Whole crown silhouette (band + zigzag top) as ONE filled polygon, not
+    // 3 separate abutting fillTriangle calls - the first version of this
+    // did that and left a visible vertical seam exactly where two
+    // triangles shared an edge (caught by sampling the actual rendered
+    // texture's pixel data, not just eyeballing the drawing code - the
+    // seam wasn't visible at a glance in the drawing math, only in the
+    // rasterized output). One continuous path also means the outline
+    // traces the real zigzag silhouette instead of just the band rect.
+    g.fillStyle(PALETTE.gold, 1);
+    g.beginPath();
+    g.moveTo(1, 9);
+    g.lineTo(1, 6);
+    g.lineTo(4, 0);
+    // Valley at y=5.5, NOT y=6 - the first version put it at exactly y=6,
+    // making (1,6)/(7,6)/(13,6) three exactly-collinear points. Verified
+    // live (sampling the actual rendered texture's pixels, not just the
+    // drawing code) that this produced a broken vertical hole straight
+    // through the band underneath it, surviving even a full rewrite from
+    // 3 separate triangles to this one polygon - a classic degenerate
+    // input for ear-clipping triangulation (Phaser's Graphics fillPath
+    // uses earcut under the hood), not a triangle-adjacency issue at all.
+    g.lineTo(7, 5.5);
+    g.lineTo(10, 0);
+    g.lineTo(13, 6);
+    g.lineTo(13, 9);
+    g.closePath();
+    g.fillPath();
+    g.lineStyle(1, PALETTE.outline, 1);
+    g.strokePath();
+    // Gems
+    g.fillStyle(PALETTE.danger, 1);
+    g.fillCircle(4, 3.5, 1.1);
+    g.fillStyle(PALETTE.sky, 1);
+    g.fillCircle(10, 3.5, 1.1);
+    g.fillStyle(PALETTE.mint, 1);
+    g.fillCircle(7, 1.8, 1.1);
+
+    g.generateTexture("acc_crown", w, h);
+    g.destroy();
+  }
+
+  private createHeadphonesTexture() {
+    const w = 16;
+    const h = 13;
+    const g = this.add.graphics();
+
+    g.lineStyle(2, PALETTE.outline, 1);
+    g.beginPath();
+    g.arc(w / 2, 6, 6, Phaser.Math.DegToRad(190), Phaser.Math.DegToRad(350));
+    g.strokePath();
+
+    // Ear cups
+    g.fillStyle(PALETTE.outline, 1);
+    g.fillRoundedRect(0, 5, 4, 7, 1.5);
+    g.fillRoundedRect(w - 4, 5, 4, 7, 1.5);
+    g.fillStyle(PALETTE.coral, 1);
+    g.fillRoundedRect(0.8, 6, 2.4, 5, 1);
+    g.fillRoundedRect(w - 3.2, 6, 2.4, 5, 1);
+
+    g.generateTexture("acc_headphones", w, h);
+    g.destroy();
+  }
+
+  private createBowTexture() {
+    const w = 12;
+    const h = 8;
+    const g = this.add.graphics();
+
+    g.fillStyle(PALETTE.danger, 1);
+    g.fillTriangle(w / 2, h / 2, 0, 0, 0, h);
+    g.fillTriangle(w / 2, h / 2, w, 0, w, h);
+    g.fillStyle(0xf06860, 1); // Theme.dangerHover - lighter center knot, distinct from the two wings
+    g.fillCircle(w / 2, h / 2, 2);
+    g.lineStyle(1, PALETTE.outline, 1);
+    g.strokeTriangle(w / 2, h / 2, 0, 0, 0, h);
+    g.strokeTriangle(w / 2, h / 2, w, 0, w, h);
+
+    g.generateTexture("acc_bow", w, h);
+    g.destroy();
+  }
+
+  /**
+   * Flat/vector player character (user direction: "we are going to have to
+   * overhaul the character design" + "like the Wii" + "make the casino not
+   * 8 bit anymore" - away from the old chibi Kenney pixel-art look). Phase
+   * 1 of a larger planned overhaul - floor/walls/furniture and the 16
+   * purchasable legacy-rig skins are separate follow-up phases, not
+   * touched here.
+   *
+   * Deliberately kept at the SAME 16x16-frame, 4-col [left,down,up,right] x
+   * 3-row layout as the Kenney rig it replaces (see createKenneyWalkAnims's
+   * DIRECTION_FRAMES) - a bigger frame size would need touching
+   * applyPlayerBody/applyPlayerScale/idleFrameForDir's existing
+   * `height <= 16` rig-detection branch in OverworldScene.ts, which every
+   * legacy-rig skin AND every accessory/pet positioning calculation added
+   * this pass also depends on. Same frame size means this is purely a new
+   * texture, zero changes needed anywhere else - the style change (flat
+   * rounded shapes, solid fills, no pixel-art dithering/outline-per-pixel
+   * detail) happens entirely within that unchanged budget instead. No walk-
+   * cycle spritesheet was sourced/drawn frame-by-frame either - the 3
+   * "frames" per direction are just a 1px foot-offset wiggle, procedurally
+   * varied per row below, reusing the exact same anim-key wiring
+   * (createKenneyWalkAnims, `${skin}_walk_${dir}`) the old rig used.
+   */
+  private createFlatCharacterSheet() {
+    const FRAME = 16;
+    const COLS = 4; // left, down, up, right - matches DIRECTION_FRAMES column order
+    const ROWS = 3;
+    const w = FRAME * COLS;
+    const h = FRAME * ROWS;
+    const g = this.add.graphics();
+
+    const BODY = PALETTE.sky; // electric mid-blue - matches this game's own accent family, not a sourced character's color
+    const BODY_DARK = 0x2a5a9e;
+    const SKIN = 0xffc999; // character skin tone - same reference value STYLE_GUIDE.md's own palette table already uses
+    const EYE = PALETTE.outline;
+
+    const DIRS: Array<{ col: number; dir: "left" | "down" | "up" | "right" }> = [
+      { col: 0, dir: "left" },
+      { col: 1, dir: "down" },
+      { col: 2, dir: "up" },
+      { col: 3, dir: "right" }
+    ];
+
+    for (const { col, dir } of DIRS) {
+      for (let row = 0; row < ROWS; row++) {
+        const ox = col * FRAME;
+        const oy = row * FRAME;
+        const footOffset = row === 0 ? -1 : row === 1 ? 0 : 1;
+
+        // Body - one flat rounded capsule, solid fill (no shading/dither -
+        // the actual "not 8-bit" difference from the old rig).
+        g.fillStyle(BODY, 1);
+        g.fillRoundedRect(ox + 4, oy + 7, 8, 7, 3);
+        g.lineStyle(1, BODY_DARK, 1);
+        g.strokeRoundedRect(ox + 4, oy + 7, 8, 7, 3);
+
+        // Head - flat circle.
+        g.fillStyle(SKIN, 1);
+        g.fillCircle(ox + 8, oy + 5, 4);
+
+        // Face - two dots facing down, one side-dot facing left/right
+        // (suggesting a profile), nothing facing up (back of the head) -
+        // same "no face when facing away" convention the old rig's own
+        // idle-pose handling already used.
+        if (dir === "down") {
+          g.fillStyle(EYE, 1);
+          // Radius 1.0, not an initial 0.7 - verified live (sampling the
+          // actual rendered texture's pixels) that 0.7 rendered as a soft
+          // brownish smudge rather than a crisp dot, small enough that
+          // anti-aliasing coverage dominated the whole shape instead of
+          // just its edge.
+          g.fillCircle(ox + 6.5, oy + 5, 1);
+          g.fillCircle(ox + 9.5, oy + 5, 1);
+        } else if (dir === "left" || dir === "right") {
+          g.fillStyle(EYE, 1);
+          g.fillCircle(ox + (dir === "left" ? 5.5 : 10.5), oy + 5, 1);
+        }
+
+        // Feet - two small dark ovals, offset per row for the walk wiggle.
+        g.fillStyle(BODY_DARK, 1);
+        g.fillEllipse(ox + 6 + footOffset, oy + 14.5, 2.4, 1.6);
+        g.fillEllipse(ox + 10 - footOffset, oy + 14.5, 2.4, 1.6);
+      }
+    }
+
+    g.generateTexture("player_flat_sheet", w, h);
+    g.destroy();
+
+    // generateTexture() (unlike load.spritesheet()) produces a texture with
+    // exactly ONE frame covering the whole packed image - it does NOT auto-
+    // slice into a grid the way a loaded spritesheet does. Verified live:
+    // without this, the texture had frameTotal 1, so every numeric frame
+    // index createKenneyWalkAnims()/idleFrameForDir() ask for (0-11) missed
+    // and fell back to rendering the ENTIRE 64x48 packed sheet wherever a
+    // single 16x16 frame was expected - which is exactly why the reported
+    // screenshot showed a dense grid of tiny repeated characters instead of
+    // one. This is the first ANIMATED multi-frame texture this project has
+    // generated procedurally (every earlier createXTexture() - furniture,
+    // accessories - is single-frame, so this gap never came up before).
+    // Manually registering each 16x16 region as frame 0..11 (row*4+col,
+    // matching DIRECTION_FRAMES' own numbering) makes it addressable
+    // exactly like a loaded spritesheet's frames.
+    const texture = this.textures.get("player_flat_sheet");
+    let frameIndex = 0;
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        texture.add(frameIndex, 0, col * FRAME, row * FRAME, FRAME, FRAME);
+        frameIndex++;
+      }
+    }
+
+    // Force nearest-neighbor filtering on this texture specifically -
+    // Graphics.fillCircle/fillRoundedRect/fillEllipse draw with true
+    // anti-aliased edges baked into the pixels (unlike this game's other,
+    // hand-authored pixel-art PNGs, which have zero anti-aliasing to begin
+    // with), and the default LINEAR filter smooths that further on top when
+    // Phaser scales the 16x16 texture up 2-3x for display - reported live
+    // as looking notably blurry. NEAREST stops that second layer of
+    // softening; it can't undo the anti-aliasing already baked into the
+    // source pixels themselves (that would need redrawing with only
+    // axis-aligned rectangles - a much blockier, more "8-bit" look, the
+    // opposite of the smooth-vector direction this redesign is going for).
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 
   /**

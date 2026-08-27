@@ -172,6 +172,10 @@ import type {
   PositionResponse,
   BuySkinResponse,
   EquipSkinResponse,
+  BuyItemResponse,
+  EquipItemResponse,
+  UnequipItemResponse,
+  ItemCategory,
   ClaimBonusResponse,
   ClaimAdRewardResponse,
   Currency,
@@ -233,6 +237,20 @@ export function buySkin(skinId: string): Promise<BuySkinResponse> {
 
 export function equipSkin(skinId: string): Promise<EquipSkinResponse> {
   return request<EquipSkinResponse>("/skins/equip", { method: "POST", body: { skinId } });
+}
+
+// ---- Items (accessories/pets) ----
+
+export function buyItem(itemId: string): Promise<BuyItemResponse> {
+  return request<BuyItemResponse>("/items/buy", { method: "POST", body: { itemId } });
+}
+
+export function equipItem(itemId: string): Promise<EquipItemResponse> {
+  return request<EquipItemResponse>("/items/equip", { method: "POST", body: { itemId } });
+}
+
+export function unequipItem(category: ItemCategory): Promise<UnequipItemResponse> {
+  return request<UnequipItemResponse>("/items/unequip", { method: "POST", body: { category } });
 }
 
 // ---- Attendant claim ----

@@ -50,6 +50,8 @@ model User {
   transactions        Transaction[]
   skinsOwned          SkinOwned[]
   equippedSkin        EquippedSkin?
+  itemsOwned          ItemOwned[]
+  equippedItems       EquippedItem[]
   lastPosition        LastPosition?
   playthroughProgress PlaythroughProgress?
   attendantClaim      AttendantClaim?
@@ -160,6 +162,43 @@ model EquippedSkin {
   skinId String @map("skin_id")
 
   @@map("equipped_skin")
+}
+
+// Cosmetic equip-slot categories beyond skins (see server/src/itemCatalog.ts
+// and economy/itemShop.ts) - a floating emoji badge worn above the head
+// (ACCESSORY) and a small companion sprite that follows the player around
+// the Overworld (PET). Both are TICKETS-only, same economy rule as skins
+// (repo-root CLAUDE.md) - structurally separate tables from SkinOwned/
+// EquippedSkin rather than folding into them, since unlike a skin (always
+// exactly one equipped, defaulting to "player") these can be equipped OR
+// NOT - "wearing nothing" is a valid, common state for both.
+enum ItemCategory {
+  ACCESSORY
+  PET
+}
+
+// Mirrors SkinOwned's shape exactly, generalized to any non-skin category.
+model ItemOwned {
+  userId String @map("user_id")
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  itemId String @map("item_id")
+
+  @@id([userId, itemId])
+  @@map("items_owned")
+}
+
+// One row per (user, category) - not per user like EquippedSkin, since a
+// user can have an accessory AND a pet equipped simultaneously (independent
+// slots). Absence of a row for a category means "nothing equipped there",
+// unlike EquippedSkin which always has an implicit "player" default.
+model EquippedItem {
+  userId   String       @map("user_id")
+  user     User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category ItemCategory
+  itemId   String       @map("item_id")
+
+  @@id([userId, category])
+  @@map("equipped_items")
 }
 
 model LastPosition {

@@ -73,7 +73,11 @@ export interface SkinDef {
 
 /** Every skin available in the game. "player_sheet" is the free default. */
 export const SKIN_CATALOG: SkinDef[] = [
-  { id: "player", textureKey: "player_sheet", name: "Classic", price: 0 },
+  // textureKey points at the new flat/vector rig (BootScene.ts's
+  // createFlatCharacterSheet) - "player_sheet" (old chibi Kenney pixel art)
+  // is unused now but left loaded rather than removed, same "leave it in
+  // place, no functional benefit to deleting" precedent as adRewards.ts.
+  { id: "player", textureKey: "player_flat_sheet", name: "Classic", price: 0 },
   { id: "skin_000", textureKey: "skin_000", name: "Outfit 1", price: 400 },
   { id: "skin_001", textureKey: "skin_001", name: "Outfit 2", price: 250 },
   { id: "skin_002", textureKey: "skin_002", name: "Outfit 3", price: 1000 },
@@ -207,6 +211,18 @@ class GameState {
 
   /** Skin ids the player owns. "player" (Classic) is always owned/free. */
   unlockedSkins: string[] = ["player"];
+
+  /**
+   * Accessory/pet ids owned - see economy/itemShop.ts's server counterpart.
+   * Server-hydrated only, same as _adRewardClaimedAt above - a new, fully
+   * server-authoritative feature with no pre-backend local-profile
+   * equivalent, so there's no legacy save()/login() persistence for these.
+   */
+  ownedItems: string[] = [];
+  /** Currently-worn accessory item id, or null if none equipped. Server-hydrated only. */
+  equippedAccessory: string | null = null;
+  /** Currently-worn pet item id, or null if none equipped. Server-hydrated only. */
+  equippedPet: string | null = null;
 
   /** Username of the currently logged-in profile, or null before login. */
   activeUsername: string | null = null;
@@ -365,6 +381,10 @@ class GameState {
 
   ownsSkin(id: string): boolean {
     return this.unlockedSkins.includes(id);
+  }
+
+  ownsItem(id: string): boolean {
+    return this.ownedItems.includes(id);
   }
 
   /** Attempts to purchase a skin with TICKETS. Returns false if already owned or can't afford it (see economy/skinShop.ts for the detailed-reason version). */
@@ -532,6 +552,9 @@ class GameState {
     this._ledger = createLedger(me.goldCoins, me.tickets);
     this.unlockedSkins = [...me.skinsOwned];
     this._currentSkin = me.equippedSkin;
+    this.ownedItems = [...me.ownedItems];
+    this.equippedAccessory = me.equippedAccessory;
+    this.equippedPet = me.equippedPet;
     this.lastPlayerPosition = me.lastPosition ? { x: me.lastPosition.x, y: me.lastPosition.y } : null;
     this._attendantClaimedAt = me.attendantClaim.lastClaimedAt
       ? Date.parse(me.attendantClaim.lastClaimedAt)
