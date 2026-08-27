@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { listSkins, SkinDef } from "../economy/skinShop";
+import { ITEM_CATALOG, ItemDef, ItemCategory, getItem, listItemsByCategory, walkAnimPrefixForTexture } from "../itemCatalog";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeInset, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
@@ -388,6 +389,13 @@ export class OverworldScene extends Phaser.Scene {
   /** Purely decorative background characters on simple back-and-forth patrols - see addAmbientNpc/updateAmbientNpcs. */
   private ambientNpcs: AmbientNpc[] = [];
 
+  /** Floating emoji badge worn above the head - see applyEquippedAccessory(). Undefined whenever gameState.equippedAccessory is null. */
+  private accessoryBadge?: Phaser.GameObjects.Image;
+  /** Small companion sprite that follows the player - see applyEquippedPet()/updatePetFollow(). Undefined whenever gameState.equippedPet is null. */
+  private petSprite?: Phaser.GameObjects.Sprite;
+  /** The pet's own facing, tracked separately from the player's lastDir since the pet lags behind and can be moving in a different direction than the player at any given moment. */
+  private petLastDir: "down" | "left" | "right" | "up" = "down";
+
   /** The onboarding tutorial's currently-showing "go do this for real" highlight ring + instruction bubble, if any - see runHandsOnStep/clearTutorialHighlight. */
   private activeTutorialHighlight?: HighlightHandle;
   private activeTutorialInstruction?: InstructionHandle;
@@ -511,6 +519,11 @@ export class OverworldScene extends Phaser.Scene {
     this.player.setDrag(0.85);
     this.applyPlayerBody();
     this.applyPlayerScale();
+    this.accessoryBadge = undefined;
+    this.petSprite = undefined;
+    this.petLastDir = "down";
+    this.applyEquippedAccessory();
+    this.applyEquippedPet();
 
     // Coin Kiosk furniture, in the center of the floor - per user
     // direction, a TV/screen-on-a-stand (BootScene.ts's createCoinKiosk
@@ -562,7 +575,7 @@ export class OverworldScene extends Phaser.Scene {
       skinAttendant,
       "Item Shop",
       "Press E to browse the Item Shop",
-      () => this.openSkinPanel("shop")
+      () => this.openShopCategoryMenu("shop")
     );
 
     // (67,38), the standalone "Ad Kiosk" station's old spot, is now empty -
@@ -681,7 +694,7 @@ export class OverworldScene extends Phaser.Scene {
     // measured safe zone y=[130,470] any more (see uiHelpers.ts's
     // SAFE_ZONE_TOP/BOTTOM).
     makeButton(this, 730, 155, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
-      this.openSkinPanel("wardrobe")
+      this.openShopCategoryMenu("wardrobe")
     ).container.setScrollFactor(0).setDepth(150);
 
     this.updateHud();
@@ -922,8 +935,16 @@ export class OverworldScene extends Phaser.Scene {
     this.handleProximity();
     this.handleInteraction();
 
-    // keep the coin tracker hovering just above the player's head
-    this.hudText.container.setPosition(this.player.x, this.player.y - this.player.displayHeight / 2 - 6);
+    // The accessory takes the "right above the head" spot the coin tracker
+    // normally sits in (reported live: with both only 20px apart, the hat
+    // read as floating up near the balance HUD instead of sitting on the
+    // person) - the tracker itself moves further up to make room ONLY when
+    // an accessory is actually equipped, so nothing shifts for anyone not
+    // wearing one.
+    const headTopY = this.player.y - this.player.displayHeight / 2;
+    this.hudText.container.setPosition(this.player.x, headTopY - (this.accessoryBadge ? 32 : 6));
+    this.accessoryBadge?.setPosition(this.player.x, headTopY - 6);
+    this.updatePetFollow();
   }
 
   private lastDir: "down" | "left" | "right" | "up" = "down";
@@ -1022,6 +1043,104 @@ export class OverworldScene extends Phaser.Scene {
   private applyPlayerScale() {
     const base = this.player.height <= 16 ? 2 : 1;
     this.player.setScale(isTouchDevice() ? base * MOBILE_CHAR_SCALE_BOOST : base);
+  }
+
+  /**
+   * (Re)creates or destroys the accessory badge worn above the head to
+   * match gameState.equippedAccessory - call once on create() (spawn) and
+   * again after any buy/equip/unequip in the Item Shop panel. Renders one
+   * of BootScene.ts's procedurally-drawn accessory textures (real pixel art
+   * in this project's own palette), NOT the catalog's `emoji` field - an
+   * emoji-only first version read as "floating near the HUD, not on the
+   * person" (reported live), see itemCatalog.ts's doc comment for why a
+   * sourced pack wasn't used either. Scaled to match the player's own
+   * current scale (applyPlayerScale()'s result) so it stays proportional
+   * to the character on mobile's extra size boost too, not just desktop.
+   */
+  private applyEquippedAccessory() {
+    this.accessoryBadge?.destroy();
+    this.accessoryBadge = undefined;
+
+    const id = gameState.equippedAccessory;
+    if (!id) return;
+    const item = getItem(id);
+    if (!item?.textureKey) return;
+
+    this.accessoryBadge = this.add
+      .image(this.player.x, this.player.y - this.player.displayHeight / 2 - 6, item.textureKey)
+      .setOrigin(0.5)
+      .setScale(this.player.scaleX)
+      .setDepth(91); // just above hudText's own 90
+  }
+
+  /**
+   * (Re)creates or destroys the small companion sprite to match
+   * gameState.equippedPet - same call sites as applyEquippedAccessory().
+   * "Easier version to test" per user direction: reuses an already-loaded
+   * spare Kenney NPC sheet (see itemCatalog.ts's doc comment) at a smaller
+   * scale than the player, rather than sourcing new creature art.
+   */
+  private applyEquippedPet() {
+    this.petSprite?.destroy();
+    this.petSprite = undefined;
+
+    const id = gameState.equippedPet;
+    if (!id) return;
+    const item = getItem(id);
+    if (!item?.textureKey) return;
+
+    // Spawns right behind the player (petTrailTarget() computes the same
+    // "behind current facing" point updatePetFollow() lerps toward every
+    // frame) rather than at the player's exact position, so it doesn't pop
+    // in already overlapping the player on the very first frame.
+    const spawn = this.petTrailTarget();
+    // Plain sprite, NOT physics.add.sprite - updatePetFollow() below moves
+    // it by lerping x/y directly every frame, no velocity/collision needed,
+    // so there's no reason to pay for (or have to disable) an Arcade
+    // Physics body it would never actually use.
+    this.petSprite = this.add.sprite(spawn.x, spawn.y, item.textureKey, 1).setScale(1.4).setDepth(5);
+  }
+
+  /** World point just behind the player's current facing direction - both applyEquippedPet()'s spawn point and updatePetFollow()'s per-frame target. */
+  private petTrailTarget(): { x: number; y: number } {
+    const offset = 26;
+    const dx = { left: 1, right: -1, up: 0, down: 0 }[this.lastDir];
+    const dy = { left: 0, right: 0, up: 1, down: -1 }[this.lastDir];
+    return { x: this.player.x + dx * offset, y: this.player.y + dy * offset };
+  }
+
+  /**
+   * Lerps the pet toward a trailing point behind the player every frame,
+   * switching its walk animation on/off (and facing) based on how far it
+   * still has to go - the same "moving vs idle" split handleMovement() does
+   * for the player itself, just driven by distance-to-target instead of
+   * real input.
+   */
+  private updatePetFollow() {
+    if (!this.petSprite) return;
+    const target = this.petTrailTarget();
+    const dx = target.x - this.petSprite.x;
+    const dy = target.y - this.petSprite.y;
+    const dist = Math.hypot(dx, dy);
+
+    const CATCH_UP_LERP = 0.08;
+    const MOVING_THRESHOLD = 4; // px - below this, treat the pet as "arrived" and idle instead of endlessly micro-stepping
+    if (dist > MOVING_THRESHOLD) {
+      this.petSprite.x += dx * CATCH_UP_LERP;
+      this.petSprite.y += dy * CATCH_UP_LERP;
+      this.petLastDir = Math.abs(dx) > Math.abs(dy) ? (dx < 0 ? "left" : "right") : dy < 0 ? "up" : "down";
+      const prefix = walkAnimPrefixForTexture(this.petSprite.texture.key);
+      this.petSprite.play(`${prefix}_walk_${this.petLastDir}`, true);
+    } else {
+      this.petSprite.stop();
+      // Same idle-frame formula as idleFrameForDir() below, inlined rather
+      // than shared - that method is written against `this.player`
+      // specifically, and every pet texture is always the new 16x16 Kenney
+      // rig (never the legacy 21x32 one a purchased skin can be), so it
+      // doesn't need that method's dual-rig branch at all.
+      const col = { left: 0, down: 1, up: 2, right: 3 } as const;
+      this.petSprite.setFrame(col[this.petLastDir] + 4);
+    }
   }
 
   /**
@@ -1625,6 +1744,308 @@ export class OverworldScene extends Phaser.Scene {
         });
       }
     });
+  }
+
+  /**
+   * Small category picker shown before either openSkinPanel() or
+   * openItemPanel() - both the Item Shop station and the Clothes corner
+   * button now open this first, instead of jumping straight to skins.
+   * Deliberately a separate entry step rather than folding a tab row into
+   * openSkinPanel() itself: that panel's layout is already tightly packed
+   * into the mobile-crop-safe zone (see its own SAFE_ZONE_TOP/BOTTOM-driven
+   * Y coordinates) and is live in production - this keeps it (and its
+   * skin-purchase flow) completely untouched, at the cost of one extra tap
+   * to pick a category.
+   */
+  private openShopCategoryMenu(mode: "shop" | "wardrobe") {
+    this.panelOpen = true;
+    playSfx(this, "open");
+
+    let elements: Phaser.GameObjects.GameObject[] = [];
+    const cleanup = () => {
+      elements.forEach((e) => e.destroy());
+      elements = [];
+    };
+
+    const panel = makePanel(this, 400, 260, 320, 220, 200).setScrollFactor(0);
+    elements.push(panel);
+    const title = this.add
+      .text(400, 190, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
+        fontSize: "20px",
+        color: Theme.textGold,
+        fontStyle: "bold"
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(201);
+    elements.push(title);
+    const sub = this.add
+      .text(400, 214, "What would you like to browse?", { fontSize: "12px", color: Theme.textMuted })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(201);
+    elements.push(sub);
+
+    const goTo = (openNext: () => void) => {
+      cleanup();
+      openNext();
+    };
+
+    const buttons: Array<[string, () => void]> = [
+      ["👕 Skins", () => this.openSkinPanel(mode)],
+      ["🎩 Accessories", () => this.openItemPanel("ACCESSORY", mode)],
+      ["🐾 Pets", () => this.openItemPanel("PET", mode)]
+    ];
+    buttons.forEach(([label, openNext], i) => {
+      const btn = makeButton(this, 400, 250 + i * 50, 260, 42, label, Theme.accent, Theme.accentHover, () =>
+        goTo(openNext)
+      );
+      btn.container.setScrollFactor(0).setDepth(201);
+      elements.push(btn.container);
+    });
+
+    const closeBtn = makeButton(this, 400, 400, 140, 38, "Close", Theme.danger, Theme.dangerHover, () => {
+      cleanup();
+      this.panelOpen = false;
+      this.updateHud();
+    });
+    closeBtn.container.setScrollFactor(0).setDepth(201);
+    elements.push(closeBtn.container);
+  }
+
+  /**
+   * Accessory/Pet browsing panel - structurally mirrors openSkinPanel()
+   * below (same paginated shop/wardrobe shape) but is a fully independent
+   * function reading ITEM_CATALOG instead of SKIN_CATALOG, so nothing here
+   * can regress the live, already-shipped skin-purchase flow. Two real
+   * differences from skins: the preview is an emoji (ACCESSORY) or a small
+   * character-sheet thumbnail (PET) instead of a real skin portrait, and
+   * "wearing nothing" is a valid state - the currently-equipped item's row
+   * gets a "Take Off" button instead of a disabled "Worn" one.
+   */
+  private openItemPanel(category: ItemCategory, mode: "shop" | "wardrobe") {
+    this.panelOpen = true;
+    playSfx(this, "open");
+    let page = 0;
+    const itemsPerPage = 4;
+    let elements: Phaser.GameObjects.GameObject[] = [];
+
+    const getItems = (): ItemDef[] =>
+      mode === "shop"
+        ? listItemsByCategory(category).filter((i) => !gameState.ownsItem(i.id))
+        : listItemsByCategory(category).filter((i) => gameState.ownsItem(i.id));
+
+    const currentlyEquipped = () => (category === "ACCESSORY" ? gameState.equippedAccessory : gameState.equippedPet);
+
+    const cleanup = () => {
+      elements.forEach((e) => e.destroy());
+      elements = [];
+    };
+
+    const applyEquipped = () => {
+      if (category === "ACCESSORY") this.applyEquippedAccessory();
+      else this.applyEquippedPet();
+    };
+
+    const label = category === "ACCESSORY" ? "Accessories" : "Pets";
+    const emoji = category === "ACCESSORY" ? "🎩" : "🐾";
+
+    const render = () => {
+      cleanup();
+      const items = getItems();
+      const totalPages = Math.max(1, Math.ceil(items.length / itemsPerPage));
+      page = Phaser.Math.Clamp(page, 0, totalPages - 1);
+      const pageItems = items.slice(page * itemsPerPage, page * itemsPerPage + itemsPerPage);
+
+      const panel = makePanel(this, 400, 300, 460, 440, 200).setScrollFactor(0);
+      elements.push(panel);
+
+      const title = this.add
+        .text(400, 140, `${emoji} ${mode === "shop" ? `${label} Shop` : label}`, {
+          fontSize: "20px",
+          color: Theme.textGold,
+          fontStyle: "bold"
+        })
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(201);
+      elements.push(title);
+
+      const sub = this.add
+        .text(
+          400,
+          162,
+          mode === "shop" ? `You have ${gameState.tickets} Tickets` : `Pick a ${label.slice(0, -1).toLowerCase()} to wear`,
+          { fontSize: "13px", color: Theme.textMuted }
+        )
+        .setOrigin(0.5)
+        .setScrollFactor(0)
+        .setDepth(201);
+      elements.push(sub);
+
+      if (pageItems.length === 0) {
+        const empty = this.add
+          .text(
+            400,
+            280,
+            mode === "shop" ? `You own every ${label.toLowerCase()} item!` : `Nothing owned yet.\nVisit the ${label} Shop to buy one.`,
+            { fontSize: "14px", color: Theme.textMuted, align: "center" }
+          )
+          .setOrigin(0.5)
+          .setScrollFactor(0)
+          .setDepth(201);
+        elements.push(empty);
+      }
+
+      pageItems.forEach((def, i) => {
+        const y = 165 + i * 58;
+        const row = makeInset(this, 400, y, 400, 48, 10);
+        row.setScrollFactor(0).setDepth(200);
+        elements.push(row);
+
+        const isEquipped = mode === "wardrobe" && currentlyEquipped() === def.id;
+
+        // Preview: the real drawn accessory texture (see
+        // BootScene.ts's createAccessoryTextures) scaled up so it's legible
+        // in the row, or a small character-sheet thumbnail (frame 1, same
+        // convention openSkinPanel's own preview uses) for pets.
+        const preview =
+          def.category === "ACCESSORY"
+            ? this.add.image(219, y, def.textureKey ?? "acc_bow").setScale(2.2)
+            : this.add.image(219, y, def.textureKey ?? "npc2_sheet", 1).setScale(1.6);
+        preview.setScrollFactor(0).setDepth(201);
+        elements.push(preview);
+
+        const nameLabel = this.add
+          .text(252, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
+            fontSize: "14px",
+            color: isEquipped ? Theme.textAccent : Theme.textPrimary,
+            fontStyle: isEquipped ? "bold" : "normal"
+          })
+          .setOrigin(0, 0.5)
+          .setScrollFactor(0)
+          .setDepth(201);
+        elements.push(nameLabel);
+
+        if (mode === "shop") {
+          const priceLabel = this.add
+            .text(370, y, `${def.price} Tickets`, { fontSize: "13px", color: Theme.textMuted })
+            .setOrigin(0, 0.5)
+            .setScrollFactor(0)
+            .setDepth(201);
+          elements.push(priceLabel);
+
+          const canAfford = gameState.tickets >= def.price;
+          const buyBtn = makeButton(
+            this,
+            540,
+            y,
+            90,
+            42,
+            "Buy",
+            canAfford ? Theme.accent : Theme.neutral,
+            canAfford ? Theme.accentHover : Theme.neutral,
+            () => {
+              // Same "a purchase also equips it" product decision as
+              // skins (see economy/itemShop.ts's purchaseItem doc comment).
+              buyBtn.setEnabled(false);
+              api
+                .buyItem(def.id)
+                .then((res) => {
+                  gameState.hydrateFromServer(res.user);
+                  applyEquipped();
+                  this.updateHud();
+                  this.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
+                  playSfx(this, "confirm");
+                  render();
+                })
+                .catch((err) => {
+                  this.showToast(this.describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
+                  playSfx(this, "error");
+                  render();
+                });
+            }
+          );
+          if (!canAfford) buyBtn.setEnabled(false);
+          buyBtn.container.setScrollFactor(0).setDepth(201);
+          elements.push(buyBtn.container);
+        } else if (isEquipped) {
+          // "wearing nothing" is a valid state for accessories/pets (unlike
+          // skins, which always fall back to "player") - the currently-worn
+          // row gets an active "Take Off" button instead of a disabled
+          // "Worn" one.
+          const takeOffBtn = makeButton(this, 540, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
+            takeOffBtn.setEnabled(false);
+            api
+              .unequipItem(category)
+              .then((res) => {
+                gameState.hydrateFromServer(res.user);
+                applyEquipped();
+                render();
+              })
+              .catch((err) => {
+                this.showToast(this.describeSkinError(err, `take off ${def.name}`), Theme.textDanger);
+                render();
+              });
+          });
+          takeOffBtn.container.setScrollFactor(0).setDepth(201);
+          elements.push(takeOffBtn.container);
+        } else {
+          const wearBtn = makeButton(this, 540, y, 90, 42, "Wear", Theme.accent, Theme.accentHover, () => {
+            wearBtn.setEnabled(false);
+            api
+              .equipItem(def.id)
+              .then((res) => {
+                gameState.hydrateFromServer(res.user);
+                applyEquipped();
+                render();
+              })
+              .catch((err) => {
+                this.showToast(this.describeSkinError(err, `wear ${def.name}`), Theme.textDanger);
+                render();
+              });
+          });
+          wearBtn.container.setScrollFactor(0).setDepth(201);
+          elements.push(wearBtn.container);
+        }
+      });
+
+      if (totalPages > 1) {
+        const pageLabel = this.add
+          .text(400, 405, `Page ${page + 1} / ${totalPages}`, { fontSize: "12px", color: Theme.textMuted })
+          .setOrigin(0.5)
+          .setScrollFactor(0)
+          .setDepth(201);
+        elements.push(pageLabel);
+
+        if (page > 0) {
+          const prevBtn = makeButton(this, 290, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
+            page--;
+            render();
+          });
+          prevBtn.container.setScrollFactor(0).setDepth(201);
+          elements.push(prevBtn.container);
+        }
+        if (page < totalPages - 1) {
+          const nextBtn = makeButton(this, 510, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
+            page++;
+            render();
+          });
+          nextBtn.container.setScrollFactor(0).setDepth(201);
+          elements.push(nextBtn.container);
+        }
+      }
+
+      const closeBtn = makeButton(this, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
+        cleanup();
+        this.panelOpen = false;
+        this.updateHud();
+      });
+      closeBtn.container.setScrollFactor(0).setDepth(201);
+      elements.push(closeBtn.container);
+    };
+
+    render();
   }
 
   /**

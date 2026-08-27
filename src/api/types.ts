@@ -14,6 +14,10 @@ export interface MeResponse {
   tickets: number;
   skinsOwned: string[];
   equippedSkin: string;
+  /** Accessory/pet ids owned (see server/src/economy/itemShop.ts). */
+  ownedItems: string[];
+  equippedAccessory: string | null;
+  equippedPet: string | null;
   lastPosition: { x: number; y: number } | null;
   attendantClaim: { lastClaimedAt: string | null };
   adReward: { lastClaimedAt: string | null };
@@ -73,6 +77,34 @@ export interface BuySkinResponse {
 /** POST /skins/equip */
 export interface EquipSkinResponse {
   equippedSkin: string;
+  user: MeResponse;
+}
+
+export type ItemCategory = "ACCESSORY" | "PET";
+
+export interface ItemDto {
+  id: string;
+  category: ItemCategory;
+  name: string;
+  price: number;
+  emoji?: string;
+  textureKey?: string;
+}
+
+/** POST /items/buy */
+export interface BuyItemResponse {
+  item: ItemDto;
+  user: MeResponse;
+}
+
+/** POST /items/equip */
+export interface EquipItemResponse {
+  item: ItemDto;
+  user: MeResponse;
+}
+
+/** POST /items/unequip */
+export interface UnequipItemResponse {
   user: MeResponse;
 }
 

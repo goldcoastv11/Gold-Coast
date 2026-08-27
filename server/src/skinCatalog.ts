@@ -14,7 +14,7 @@ export interface SkinDef {
 }
 
 export const SKIN_CATALOG: readonly SkinDef[] = [
-  { id: "player", textureKey: "player_sheet", name: "Classic", price: 0 },
+  { id: "player", textureKey: "player_flat_sheet", name: "Classic", price: 0 },
   { id: "skin_000", textureKey: "skin_000", name: "Outfit 1", price: 400 },
   { id: "skin_001", textureKey: "skin_001", name: "Outfit 2", price: 250 },
   { id: "skin_002", textureKey: "skin_002", name: "Outfit 3", price: 1000 },
