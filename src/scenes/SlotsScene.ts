@@ -13,6 +13,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
 
@@ -264,7 +265,7 @@ export class SlotsScene extends Phaser.Scene {
 
     api
       .playSlots(bet, "GC")
-      .then((res) => this.resolveSpin(res))
+      .then((res) => this.resolveSpin(res, bet))
       .catch((err) => this.handleSpinError(err));
   }
 
@@ -275,12 +276,24 @@ export class SlotsScene extends Phaser.Scene {
    * The win/lose message, payout, and highlight only appear after the last
    * reel lands.
    */
-  private resolveSpin(res: Awaited<ReturnType<typeof api.playSlots>>) {
+  private resolveSpin(res: Awaited<ReturnType<typeof api.playSlots>>, bet: number) {
     this.spinTimer?.remove(false);
 
     gameState.hydrateFromServer(res.user);
 
     const { reels, payout, winKey, winCount } = res.result;
+
+    // Retention Leg 1 (see src/api/track.ts) - recorded here, off the
+    // server's settled result, NOT after the staggered reel reveal below:
+    // the round is already resolved and the balance already moved by this
+    // point, so a player who backs out mid-animation still counts as
+    // having played it. betAmount is Gold Coins; payout is Tickets.
+    track(EVENTS.GAME_ROUND_PLAYED, {
+      game: "slots",
+      betAmount: bet,
+      outcome: payout > 0 ? "win" : "loss",
+      payout
+    });
     let step = 0;
     this.spinTimer = this.time.addEvent({
       delay: REEL_REVEAL_DELAY,

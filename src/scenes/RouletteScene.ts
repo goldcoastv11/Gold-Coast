@@ -14,6 +14,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 import type { RouletteColor } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
@@ -202,11 +203,12 @@ export class RouletteScene extends Phaser.Scene {
 
     api
       .playRoulette(wager, "GC", bet)
-      .then((res) => this.resolveSpin(res))
+      .then((res) => this.resolveSpin(res, wager))
       .catch((err) => this.handleSpinError(err));
   }
 
-  private resolveSpin(res: Awaited<ReturnType<typeof api.playRoulette>>) {
+  /** `wager` is threaded through purely so the round can be tracked with its stake - the play response doesn't echo it back. */
+  private resolveSpin(res: Awaited<ReturnType<typeof api.playRoulette>>, wager: number) {
     this.spinTimer?.remove(false);
     this.spinTimer = undefined;
 
@@ -214,6 +216,15 @@ export class RouletteScene extends Phaser.Scene {
     playSfx(this, "reelStop");
 
     const { number, color, won, payout } = res.result;
+
+    // Retention Leg 1 - see src/api/track.ts. Server-settled result only;
+    // betAmount is Gold Coins, payout is Tickets (separate ledgers).
+    track(EVENTS.GAME_ROUND_PLAYED, {
+      game: "roulette",
+      betAmount: wager,
+      outcome: won ? "win" : "loss",
+      payout
+    });
     this.resultText.setText(String(number)).setColor(COLOR_HEX[color]);
 
     if (won) {

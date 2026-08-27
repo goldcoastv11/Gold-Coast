@@ -15,6 +15,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 import type { CoinSide } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
@@ -226,11 +227,12 @@ export class CoinFlipScene extends Phaser.Scene {
 
     api
       .playCoinFlip(bet, "GC", guess)
-      .then((res) => this.resolveFlip(res))
+      .then((res) => this.resolveFlip(res, bet))
       .catch((err) => this.handleFlipError(err));
   }
 
-  private resolveFlip(res: Awaited<ReturnType<typeof api.playCoinFlip>>) {
+  /** `bet` is threaded through purely so the round can be tracked with its stake - the play response doesn't echo it back. */
+  private resolveFlip(res: Awaited<ReturnType<typeof api.playCoinFlip>>, bet: number) {
     this.flipTimer?.remove(false);
     this.flipTimer = undefined;
     this.flipTween?.stop();
@@ -240,6 +242,20 @@ export class CoinFlipScene extends Phaser.Scene {
     this.coinText.setText("🪙").setScale(1);
 
     const { result, won, payout } = res.result;
+
+    // Retention Leg 1 (see src/api/track.ts). Recorded from the SERVER's
+    // resolved result, not the local animation, and only once a round has
+    // actually settled - so the numbers here always match what the ledger
+    // did. betAmount is Gold Coins (the play currency, spent on every bet);
+    // payout is Tickets (the win currency) - the two are separate ledgers,
+    // so they are never summed into one "net" figure here.
+    track(EVENTS.GAME_ROUND_PLAYED, {
+      game: "coinflip",
+      betAmount: bet,
+      outcome: won ? "win" : "loss",
+      payout
+    });
+
     if (won) {
       this.messageText.setText(`${result.toUpperCase()}! You win +${payout} Tickets`).setColor(Theme.textAccent);
       popIn(this, this.coinText);

@@ -49,7 +49,11 @@ router.post("/signup", asyncHandler(async (req, res) => {
 
   const result = await prisma.$transaction(async (tx) => {
     const user = await tx.user.create({
-      data: { username, email: email ?? null, passwordHash }
+      // Retention Leg 1: a signup IS a login - the response hands back a
+      // JWT and the player walks straight into the game - so seed
+      // lastLoginAt here rather than leaving day 0 looking like "never
+      // signed in" until their second visit.
+      data: { username, email: email ?? null, passwordHash, lastLoginAt: new Date() }
     });
     await tx.balance.create({ data: { userId: user.id, goldCoins: 0, tickets: 0 } });
     await tx.equippedSkin.create({ data: { userId: user.id, skinId: "player" } });
@@ -95,6 +99,15 @@ router.post("/login", asyncHandler(async (req, res) => {
   }
 
   const token = signToken({ sub: user.id, username: user.username });
+
+  // Retention Leg 1: stamped only AFTER the password check passes, so a
+  // failed login attempt never moves it - "last time this account was
+  // actually used" is the whole point of the column. Not awaited into the
+  // response path's critical work beyond this line, but still awaited (not
+  // fire-and-forget) so the value is durable before the client is told it
+  // is signed in; the write is a single indexed-by-PK update.
+  await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+
   const me = await prisma.$transaction((tx) => serializeMe(tx, user.id, user.username));
 
   return res.json({ token, user: me });

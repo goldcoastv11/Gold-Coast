@@ -8,6 +8,7 @@ import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 import type { GcMultiplier, MeResponse } from "../api/types";
 
 const FIELD_W = 320;
@@ -322,6 +323,11 @@ export class LoginScene extends Phaser.Scene {
       try {
         const signupRes = await api.signup(username, password);
         api.setToken(signupRes.token);
+        // Retention Leg 1. Fired AFTER setToken so the event is attributed
+        // to the new account server-side rather than landing anonymous.
+        // No username, no email, no password - just "an account was
+        // created in this session" (see track.ts's PRIVACY note).
+        track(EVENTS.SIGNUP);
         gameState.hydrateFromServer(signupRes.user);
         await this.playForcedShuffleCup(signupRes.signupBonus.gcMultiplier);
         await this.runTripleChanceOffer(signupRes.signupBonus.gcAmount);
@@ -353,6 +359,12 @@ export class LoginScene extends Phaser.Scene {
     try {
       const loginRes = await api.login(username, password);
       api.setToken(loginRes.token);
+      // Retention Leg 1 - see the signup branch above for why this is
+      // after setToken. Only fires on a SUCCESSFUL sign-in; a wrong
+      // password throws past this line, so failed attempts are never
+      // recorded (deliberate - a credential-stuffing log is not something
+      // this table should hold).
+      track(EVENTS.LOGIN);
       gameState.hydrateFromServer(loginRes.user);
       await this.reconcileAndEnter(loginRes.user);
     } catch (err) {
