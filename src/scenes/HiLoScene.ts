@@ -1,10 +1,14 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeButton,
+  makeText,
+  makeDivider,
   makeGameShell,
+  formatBalance,
+  drawCardSurface,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -24,6 +28,35 @@ import { playSfx, playMusic } from "../ui/SoundManager";
 // sidebar now occupies the left third of the screen.
 const DX = GAME_SHELL_DISPLAY_CENTER_X;
 const DY = GAME_SHELL_DISPLAY_CENTER_Y;
+
+/**
+ * HI-LO, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * Cards are drawn with the shared card surfaces (uiHelpers' drawCardSurface)
+ * so all four card games print the same card. HIGHER/LOWER are raised
+ * SURFACES rather than accent buttons on purpose: this game's accent belongs
+ * to the shell's START RUN and, mid-run, CASH OUT - the decision that
+ * actually banks the money. Three green buttons on one screen would be
+ * exactly the "if two things are accent-coloured, one of them is wrong"
+ * failure direction note 2 warns about.
+ */
+const BOARD_W = 410;
+const BOARD_H = 320;
+const BOARD_LEFT = DX - BOARD_W / 2 + Tokens.space.xxl;
+const BOARD_RIGHT = DX + BOARD_W / 2 - Tokens.space.xxl;
+
+const CARD_W = 90;
+const CARD_H = 122;
+const CARD_Y = DY - 75;
+const HISTORY_Y = DY - 2;
+const HISTORY_CARD_W = 30;
+const HISTORY_CARD_H = 42;
+const HISTORY_MAX = 8;
+const DIVIDER_Y = DY + 14;
+const READOUT_Y = DY + 32;
+const GUESS_BTN_Y = DY + 70;
+const GUESS_BTN_H = 42;
+const GUESS_BTN_W = (BOARD_RIGHT - BOARD_LEFT - Tokens.space.sm) / 2;
 
 // #36: the deck, the current card, and the win/multiplier math are all
 // resolved server-side (POST /games/hilo/start|guess|cashout) - the server
@@ -99,7 +132,7 @@ export class HiLoScene extends Phaser.Scene {
     this.active = false;
     this.busy = false;
     this.roundId = null;
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. Higher/Lower/card/history live in the
@@ -120,32 +153,55 @@ export class HiLoScene extends Phaser.Scene {
     this.multiplierText.setText("Multiplier: 1.00x");
     this.messageText.setText("Start a run to deal the first card");
 
-    drawCabinetFrame(this, DX, DY, 410, 320);
+    drawCabinetFrame(this, DX, DY, BOARD_W, BOARD_H);
 
     // Current card display
     this.cardBg = this.add.graphics();
-    this.cardLabel = this.add.text(DX, DY - 75, "", { fontSize: "32px", fontStyle: "bold" }).setOrigin(0.5);
+    this.cardLabel = makeText(this, DX, CARD_Y, "", {
+      size: Tokens.type.glyph.lg,
+      weight: Tokens.type.weight.bold,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
     this.paintCard(null);
 
     this.historyContainer = this.add.container(0, 0);
 
-    this.readoutText = this.add
-      .text(DX, DY + 30, "", { fontSize: "12px", color: Theme.textMuted })
-      .setOrigin(0.5);
+    makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
+
+    this.readoutText = makeText(this, DX, READOUT_Y, "", {
+      size: Tokens.type.size.sm,
+      color: Tokens.text.muted,
+      align: "center",
+      originX: 0.5
+    });
 
     this.higherBtn = makeButton(
       this,
-      DX - 110,
-      DY + 68,
-      150,
-      42,
+      BOARD_LEFT + GUESS_BTN_W / 2,
+      GUESS_BTN_Y,
+      GUESS_BTN_W,
+      GUESS_BTN_H,
       "▲ HIGHER",
-      Theme.accent,
-      Theme.accentHover,
-      () => this.guess("higher")
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.guess("higher"),
+      Tokens.text.primary,
+      Tokens.radius.md
     );
-    this.lowerBtn = makeButton(this, DX + 110, DY + 68, 150, 42, "▼ LOWER", Theme.accent, Theme.accentHover, () =>
-      this.guess("lower")
+    this.lowerBtn = makeButton(
+      this,
+      BOARD_RIGHT - GUESS_BTN_W / 2,
+      GUESS_BTN_Y,
+      GUESS_BTN_W,
+      GUESS_BTN_H,
+      "▼ LOWER",
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.guess("lower"),
+      Tokens.text.primary,
+      Tokens.radius.md
     );
 
     this.setGuessButtonsVisible(false);
@@ -159,47 +215,36 @@ export class HiLoScene extends Phaser.Scene {
   }
 
   private paintCard(card: DisplayCard | null) {
-    const w = 90;
-    const h = 122;
     this.cardBg.clear();
     if (!card) {
-      this.cardBg.fillStyle(Theme.inset, 1);
-      this.cardBg.fillRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
-      this.cardBg.lineStyle(2, Theme.panelBorder, 1);
-      this.cardBg.strokeRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
-      this.cardLabel.setText("?").setColor(Theme.textMuted);
+      drawCardSurface(this.cardBg, DX, CARD_Y, CARD_W, CARD_H, "empty", Tokens.radius.md);
+      this.cardLabel.setText("?").setColor(Tokens.text.muted);
       return;
     }
-    this.cardBg.fillStyle(Theme.cardFace, 1);
-    this.cardBg.fillRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
-    this.cardBg.lineStyle(2, Theme.cardBorder, 1);
-    this.cardBg.strokeRoundedRect(DX - w / 2, DY - 75 - h / 2, w, h, 10);
-    this.cardLabel.setText(`${card.label}${card.suit}`).setColor(card.isRed ? Theme.cardTextRed : Theme.cardTextBlack);
+    drawCardSurface(this.cardBg, DX, CARD_Y, CARD_W, CARD_H, "face", Tokens.radius.md);
+    this.cardLabel
+      .setText(`${card.label}${card.suit}`)
+      .setColor(card.isRed ? Tokens.card.inkRed : Tokens.card.ink);
   }
 
   private renderHistory() {
     this.historyContainer.removeAll(true);
-    const recent = this.history.slice(-8);
-    const cw = 30;
-    const ch = 42;
-    const gap = 6;
-    const totalWidth = recent.length * cw + (recent.length - 1) * gap;
-    const startX = DX - totalWidth / 2 + cw / 2;
+    const recent = this.history.slice(-HISTORY_MAX);
+    const gap = Tokens.space.xs;
+    const totalWidth = recent.length * HISTORY_CARD_W + (recent.length - 1) * gap;
+    const startX = DX - totalWidth / 2 + HISTORY_CARD_W / 2;
     recent.forEach((card, i) => {
-      const x = startX + i * (cw + gap);
-      const y = DY - 2;
+      const x = startX + i * (HISTORY_CARD_W + gap);
       const bg = this.add.graphics();
-      bg.fillStyle(Theme.cardFace, 1);
-      bg.fillRoundedRect(x - cw / 2, y - ch / 2, cw, ch, 5);
-      bg.lineStyle(1, Theme.cardBorder, 1);
-      bg.strokeRoundedRect(x - cw / 2, y - ch / 2, cw, ch, 5);
-      const label = this.add
-        .text(x, y, `${card.label}${card.suit}`, {
-          fontSize: "10px",
-          fontStyle: "bold",
-          color: card.isRed ? Theme.cardTextRed : Theme.cardTextBlack
-        })
-        .setOrigin(0.5);
+      drawCardSurface(bg, x, HISTORY_Y, HISTORY_CARD_W, HISTORY_CARD_H, "face", Tokens.radius.xs);
+      const label = makeText(this, x, HISTORY_Y, `${card.label}${card.suit}`, {
+        size: Tokens.type.size.xs,
+        weight: Tokens.type.weight.semibold,
+        color: card.isRed ? Tokens.card.inkRed : Tokens.card.ink,
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
       this.historyContainer.add([bg, label]);
     });
   }
@@ -243,7 +288,7 @@ export class HiLoScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -251,7 +296,7 @@ export class HiLoScene extends Phaser.Scene {
     this.busy = true;
     this.startBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Starting...").setColor(Theme.textMuted);
+    this.messageText.setText("Starting...").setColor(Tokens.text.muted);
     playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
@@ -277,7 +322,7 @@ export class HiLoScene extends Phaser.Scene {
         this.paintCard(this.currentCard);
         this.renderHistory();
         this.multiplierText.setText(`Multiplier: ${this.multiplier.toFixed(2)}x`);
-        this.messageText.setText("Higher or lower than this card?").setColor(Theme.textMuted);
+        this.messageText.setText("Higher or lower than this card?").setColor(Tokens.text.muted);
 
         this.startBtn?.container.setVisible(false);
         this.startBtn?.setEnabled(false);
@@ -302,7 +347,7 @@ export class HiLoScene extends Phaser.Scene {
               this.betControl?.setEnabled(true);
               this.messageText
                 .setText("Couldn't recover an unfinished round - please try again.")
-                .setColor(Theme.textDanger);
+                .setColor(Tokens.text.negative);
             });
           return;
         }
@@ -356,7 +401,7 @@ export class HiLoScene extends Phaser.Scene {
           this.renderHistory();
           this.messageText
             .setText(`${nextCard.label}${nextCard.suit} - wrong guess. You lose your bet.`)
-            .setColor(Theme.textDanger);
+            .setColor(Tokens.text.negative);
           playSfx(this, "lose");
           this.updateBalance();
           this.endRun();
@@ -379,7 +424,7 @@ export class HiLoScene extends Phaser.Scene {
 
         if (res.deckExhausted) {
           this.active = false;
-          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
+          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} Tickets`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
           this.endRun();
@@ -390,7 +435,7 @@ export class HiLoScene extends Phaser.Scene {
         this.cashOutBtn?.setEnabled(true);
         this.messageText
           .setText(`Correct! ${nextCard.label}${nextCard.suit} - cash out or keep guessing`)
-          .setColor(Theme.textAccent);
+          .setColor(Tokens.text.accent);
         this.setGuessButtonsVisible(true);
         this.updateReadout();
 
@@ -398,7 +443,7 @@ export class HiLoScene extends Phaser.Scene {
           // No more valid guesses left (only same-rank cards remain, or the
           // server would reject any guess here) - force a cash out.
           this.setGuessButtonsVisible(false);
-          this.messageText.setText("No more winning guesses left - cash out!").setColor(Theme.textGold);
+          this.messageText.setText("No more winning guesses left - cash out!").setColor(Tokens.text.secondary);
         }
       })
       .catch((err) => {
@@ -422,7 +467,7 @@ export class HiLoScene extends Phaser.Scene {
         gameState.hydrateFromServer(res.user);
         this.busy = false;
         this.active = false;
-        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
+        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
         this.endRun();
@@ -437,11 +482,11 @@ export class HiLoScene extends Phaser.Scene {
 
   private showApiError(err: unknown, insufficientBalanceMessage: string) {
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+      this.messageText.setText(insufficientBalanceMessage).setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
@@ -458,6 +503,6 @@ export class HiLoScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

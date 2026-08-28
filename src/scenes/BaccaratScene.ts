@@ -1,10 +1,14 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeButton,
+  makeText,
+  makeDivider,
   makeGameShell,
+  formatBalance,
+  drawCardSurface,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -71,17 +75,40 @@ interface CardSlot {
   y: number;
 }
 
-// Stake-style layout: bet-type selector, player/banker hands, and totals
-// centered in the shell's right-side display area (see
-// ui/uiHelpers.ts's makeGameShell) - the sidebar now occupies the left
-// third of the screen. Vertical offsets from the old canvas center
-// (400,300) are unchanged (there's ample height to spare); horizontal
-// spacing (bet buttons, player/banker groups) was narrowed to fit the
-// ~430px-wide display area.
+/**
+ * BACCARAT, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * The board is one flat surface: a micro-label over the bet-type selector,
+ * a single hairline, then the two hands. The selected bet type is marked by
+ * a LIGHTER SURFACE and heavier text rather than by accent colour (the same
+ * way Limbo marks its selected target), so the accent stays on DEAL alone.
+ * Cards use the shared card surfaces so all four card games print the same
+ * card, and the board was tightened from 340px tall to 260 - the old
+ * version reserved the full safe zone and then left ~100px of empty surface
+ * under the totals.
+ */
 const DX = GAME_SHELL_DISPLAY_CENTER_X;
 const DY = GAME_SHELL_DISPLAY_CENTER_Y;
-const PLAYER_GROUP_X = DX - 115;
-const BANKER_GROUP_X = DX + 115;
+const BOARD_W = 410;
+const BOARD_H = 260;
+const BOARD_LEFT = DX - BOARD_W / 2 + Tokens.space.xxl;
+const BOARD_RIGHT = DX + BOARD_W / 2 - Tokens.space.xxl;
+
+const SECTION_LABEL_Y = 192;
+const BET_BTN_Y = 220;
+const BET_BTN_H = 32;
+const BET_BTN_W = (BOARD_RIGHT - BOARD_LEFT - Tokens.space.sm * 2) / 3;
+const DIVIDER_Y = 252;
+const HAND_LABEL_Y = 274;
+const CARD_Y = 326;
+const TOTAL_Y = 380;
+
+const CARD_W = 40;
+const CARD_H = 56;
+const CARD_GAP = Tokens.space.sm;
+const HAND_GROUP_OFFSET = 115;
+const PLAYER_GROUP_X = DX - HAND_GROUP_OFFSET;
+const BANKER_GROUP_X = DX + HAND_GROUP_OFFSET;
 
 export class BaccaratScene extends Phaser.Scene {
   private betType: BetType = "player";
@@ -110,7 +137,7 @@ export class BaccaratScene extends Phaser.Scene {
     this.playerSlots = [];
     this.bankerSlots = [];
     this.betButtons = {};
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. This game has no cash-out concept, so
@@ -128,33 +155,50 @@ export class BaccaratScene extends Phaser.Scene {
     this.dealBtn = this.shell.startBtn;
     this.betControl = this.shell.betControl;
 
-    // Full safe-zone height (see uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) - the
-    // bet-type buttons above the hands already sit close to the top edge,
-    // so this doesn't add any padding beyond what the mobile-landscape crop
-    // already allows for every other game.
-    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y, 410, 340);
+    drawCabinetFrame(this, DX, DY, BOARD_W, BOARD_H);
 
+    makeText(this, BOARD_LEFT, SECTION_LABEL_Y, "BET ON", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps
+    });
     this.renderBetButtons();
 
+    makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
+
     // Player hand (left) / Banker hand (right)
-    this.add
-      .text(PLAYER_GROUP_X, DY - 128, "PLAYER", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
-      .setOrigin(0.5);
-    this.add
-      .text(BANKER_GROUP_X, DY - 128, "BANKER", { fontSize: "14px", color: Theme.textPrimary, fontStyle: "bold" })
-      .setOrigin(0.5);
+    for (const [x, label] of [
+      [PLAYER_GROUP_X, "PLAYER"],
+      [BANKER_GROUP_X, "BANKER"]
+    ] as Array<[number, string]>) {
+      makeText(this, x, HAND_LABEL_Y, label, {
+        size: Tokens.type.size.xs,
+        color: Tokens.text.muted,
+        tracking: Tokens.type.tracking.caps,
+        align: "center",
+        originX: 0.5
+      });
+    }
 
-    this.playerSlots = this.buildCardSlots(PLAYER_GROUP_X, DY - 82);
-    this.bankerSlots = this.buildCardSlots(BANKER_GROUP_X, DY - 82);
+    this.playerSlots = this.buildCardSlots(PLAYER_GROUP_X, CARD_Y);
+    this.bankerSlots = this.buildCardSlots(BANKER_GROUP_X, CARD_Y);
 
-    this.playerTotalText = this.add
-      .text(PLAYER_GROUP_X, DY - 28, "", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
-    this.bankerTotalText = this.add
-      .text(BANKER_GROUP_X, DY - 28, "", { fontSize: "15px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
+    this.playerTotalText = makeText(this, PLAYER_GROUP_X, TOTAL_Y, "", {
+      size: Tokens.type.size.xl,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5
+    });
+    this.bankerTotalText = makeText(this, BANKER_GROUP_X, TOTAL_Y, "", {
+      size: Tokens.type.size.xl,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5
+    });
 
-    this.messageText.setText("Pick a bet, then deal");
+    this.messageText.setText("Pick a bet, then deal.").setColor(Tokens.text.muted);
 
     this.updateBalance();
   }
@@ -168,59 +212,59 @@ export class BaccaratScene extends Phaser.Scene {
       { key: "banker", label: `BANKER ${BANKER_WIN_MULT}x` },
       { key: "tie", label: `TIE ${TIE_WIN_MULT}x` }
     ];
-    const xs = [DX - 120, DX, DX + 120];
     options.forEach((opt, i) => {
       const selected = opt.key === this.betType;
       this.betButtons[opt.key] = makeButton(
         this,
-        xs[i],
-        DY - 166,
-        120,
-        28,
+        BOARD_LEFT + BET_BTN_W / 2 + i * (BET_BTN_W + Tokens.space.sm),
+        BET_BTN_Y,
+        BET_BTN_W,
+        BET_BTN_H,
         opt.label,
-        selected ? Theme.accent : Theme.neutral,
-        selected ? Theme.accentHover : Theme.neutralHover,
+        // Selection reads as a lighter surface plus brighter text - never as
+        // accent colour, which belongs to DEAL (direction note 2).
+        selected ? Tokens.color.surfaceHover : Tokens.color.surfaceRaised,
+        Tokens.color.surfaceHover,
         () => {
           if (this.dealing || this.betType === opt.key) return;
           this.betType = opt.key;
           this.renderBetButtons();
-        }
+        },
+        selected ? Tokens.text.primary : Tokens.text.secondary,
+        Tokens.radius.sm
       );
     });
   }
 
   private buildCardSlots(centerX: number, y: number): CardSlot[] {
     const slots: CardSlot[] = [];
-    const w = 40;
-    const h = 56;
-    const gap = 6;
     for (let i = 0; i < 3; i++) {
-      const x = centerX + (i - 1) * (w + gap);
+      const x = centerX + (i - 1) * (CARD_W + CARD_GAP);
       const bg = this.add.graphics();
-      const label = this.add.text(x, y, "", { fontSize: "16px", fontStyle: "bold" }).setOrigin(0.5);
+      const label = makeText(this, x, y, "", {
+        size: Tokens.type.glyph.xs,
+        weight: Tokens.type.weight.semibold,
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
       slots.push({ bg, label, x, y });
-      this.paintSlot(slots[i], null, w, h);
+      this.paintSlot(slots[i], null);
     }
     return slots;
   }
 
-  private paintSlot(slot: CardSlot, card: Card | null, w = 40, h = 56) {
+  private paintSlot(slot: CardSlot, card: Card | null) {
     slot.bg.clear();
     if (!card) {
-      slot.bg.fillStyle(Theme.inset, 1);
-      slot.bg.fillRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 6);
-      slot.bg.lineStyle(1, Theme.panelBorder, 1);
-      slot.bg.strokeRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 6);
+      drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, "empty");
       slot.label.setText("").setVisible(false);
       return;
     }
-    slot.bg.fillStyle(Theme.cardFace, 1);
-    slot.bg.fillRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 6);
-    slot.bg.lineStyle(1.5, Theme.cardBorder, 1);
-    slot.bg.strokeRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 6);
+    drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, "face");
     slot.label
       .setText(`${card.label}${card.suit}`)
-      .setColor(card.isRed ? Theme.cardTextRed : Theme.cardTextBlack)
+      .setColor(card.isRed ? Tokens.card.inkRed : Tokens.card.ink)
       .setVisible(true);
   }
 
@@ -236,7 +280,7 @@ export class BaccaratScene extends Phaser.Scene {
     if (this.dealing) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -246,7 +290,7 @@ export class BaccaratScene extends Phaser.Scene {
     this.betControl?.setEnabled(false);
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(false));
     this.clearSlots();
-    this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    this.messageText.setText("Dealing...").setColor(Tokens.text.muted);
     playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
@@ -268,7 +312,7 @@ export class BaccaratScene extends Phaser.Scene {
 
     let step = 0;
     this.time.addEvent({
-      delay: 220,
+      delay: Tokens.motion.duration.stagger,
       repeat: reveals.length - 1,
       callback: () => {
         reveals[step]();
@@ -295,16 +339,16 @@ export class BaccaratScene extends Phaser.Scene {
         // here - there's no "bet returned" in this currency, just a payout).
         this.messageText
           .setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - push! +${payout} Tickets`)
-          .setColor(Theme.textGold);
+          .setColor(Tokens.text.secondary);
       } else {
         this.messageText
           .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} Tickets`)
-          .setColor(Theme.textAccent);
+          .setColor(Tokens.text.accent);
         popIn(this, this.messageText);
       }
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - you lose`).setColor(Theme.textDanger);
+      this.messageText.setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - you lose`).setColor(Tokens.text.negative);
       playSfx(this, "lose");
     }
 
@@ -322,15 +366,15 @@ export class BaccaratScene extends Phaser.Scene {
     Object.values(this.betButtons).forEach((b) => b?.setEnabled(true));
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

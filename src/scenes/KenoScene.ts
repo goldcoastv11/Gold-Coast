@@ -1,10 +1,12 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeButton,
+  makeText,
   makeGameShell,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   popIn,
@@ -26,13 +28,18 @@ const MAX_MULTIPLIER = 10000; // caps the (extremely rare) top-hit jackpot tiers
 const GRID_COLS = 10;
 const GRID_ROWS = 4;
 const CELL_SIZE = 34;
-const CELL_GAP = 5;
+const CELL_GAP = Tokens.space.xs;
 // Stake-style layout: grid centered in the shell's right-side display area
 // (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
 // sidebar now occupies the left third of the screen. Y unchanged since it
 // was already offset from the old center the same way it is from the new one.
 const GRID_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
 const GRID_CENTER_Y = 262;
+/** Paytable strip + the two pick helpers sit below the board, on the token rhythm. */
+const PAYTABLE_Y = 356;
+const ACTION_ROW_Y = 412;
+const ACTION_BTN_W = 140;
+const ACTION_BTN_H = 34;
 
 // #36: the actual draw/hits/payout are now resolved server-side (POST
 // /games/keno/play, mirrored 1:1 in server/src/games/keno.ts) - everything
@@ -149,6 +156,32 @@ interface CellVisual {
 
 type CellState = "empty" | "picked" | "hit" | "miss" | "drawn";
 
+/**
+ * KENO cell states, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * Every cell used to be a fill plus a 2px coloured border, five different
+ * border colours deep - a 40-cell grid of boxes. It is now purely the
+ * surface ladder: an untouched number is a recessed well, a number the
+ * player picked is a raised control, a number the machine drew but the
+ * player didn't sits on the plain panel surface in between, and the two
+ * resolved outcomes take the muted state tints. Meaning is carried by the
+ * number's own colour, which is the only thing that changes hue.
+ */
+const CELL_FILL: Record<CellState, number> = {
+  empty: Tokens.color.inset,
+  picked: Tokens.color.surfaceRaised,
+  hit: Tokens.color.positiveMuted,
+  miss: Tokens.color.negativeMuted,
+  drawn: Tokens.color.surface
+};
+const CELL_TEXT: Record<CellState, string> = {
+  empty: Tokens.text.muted,
+  picked: Tokens.text.primary,
+  hit: Tokens.text.accent,
+  miss: Tokens.text.negative,
+  drawn: Tokens.text.secondary
+};
+
 export class KenoScene extends Phaser.Scene {
   private picks: Set<number> = new Set();
   private drawn: Set<number> = new Set();
@@ -180,7 +213,7 @@ export class KenoScene extends Phaser.Scene {
     this.revealedSoFar = new Set();
     this.drawing = false;
     this.cells = [];
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.drawTimer) {
@@ -201,51 +234,61 @@ export class KenoScene extends Phaser.Scene {
     this.messageText = this.shell.messageText;
     this.drawBtn = this.shell.startBtn;
     this.betControl = this.shell.betControl;
-    this.messageText.setText(`Pick up to ${MAX_PICKS} numbers, then draw`).setColor(Theme.textMuted);
+    this.messageText.setText(`Pick up to ${MAX_PICKS} numbers, then draw`).setColor(Tokens.text.muted);
 
-    this.infoText = this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, 130, "", { fontSize: "13px", color: Theme.textMuted })
-      .setOrigin(0.5);
+    this.infoText = makeText(this, GAME_SHELL_DISPLAY_CENTER_X, 134, "", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5
+    });
 
     // Cabinet frame hugging just the number grid (not the info/paytable
     // text above/below it) - Keno's grid is short enough to have generous
     // room in every direction, unlike the taller grid games.
     const gridW = GRID_COLS * CELL_SIZE + (GRID_COLS - 1) * CELL_GAP;
     const gridH = GRID_ROWS * CELL_SIZE + (GRID_ROWS - 1) * CELL_GAP;
-    drawCabinetFrame(this, GRID_CENTER_X, GRID_CENTER_Y, gridW + 24, gridH + 24);
+    const boardW = gridW + Tokens.space.xxl;
+    drawCabinetFrame(this, GRID_CENTER_X, GRID_CENTER_Y, boardW, gridH + Tokens.space.xxl);
 
     this.buildGrid();
 
-    this.paytableText = this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, 356, "", {
-        fontSize: "10px",
-        color: Theme.textGold,
-        align: "center",
-        wordWrap: { width: 400 }
-      })
-      .setOrigin(0.5);
+    this.paytableText = makeText(this, GAME_SHELL_DISPLAY_CENTER_X, PAYTABLE_Y, "", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.secondary,
+      align: "center",
+      originX: 0.5,
+      wordWrapWidth: boardW
+    });
 
+    // Quick Pick / Clear are helpers, not the action - a quiet raised
+    // surface with a muted label, so the accent stays on DRAW alone.
     this.quickPickBtn = makeButton(
       this,
-      GAME_SHELL_DISPLAY_CENTER_X - 110,
-      412,
-      140,
-      34,
+      GRID_CENTER_X - ACTION_BTN_W / 2 - Tokens.space.xs,
+      ACTION_ROW_Y,
+      ACTION_BTN_W,
+      ACTION_BTN_H,
       "QUICK PICK",
-      Theme.neutral,
-      Theme.neutralHover,
-      () => this.quickPick()
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.quickPick(),
+      Tokens.text.secondary,
+      Tokens.radius.sm
     );
     this.clearBtn = makeButton(
       this,
-      GAME_SHELL_DISPLAY_CENTER_X + 110,
-      412,
-      140,
-      34,
+      GRID_CENTER_X + ACTION_BTN_W / 2 + Tokens.space.xs,
+      ACTION_ROW_Y,
+      ACTION_BTN_W,
+      ACTION_BTN_H,
       "CLEAR",
-      Theme.neutral,
-      Theme.neutralHover,
-      () => this.clearPicks()
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.clearPicks(),
+      Tokens.text.secondary,
+      Tokens.radius.sm
     );
 
     this.updateBalance();
@@ -275,9 +318,13 @@ export class KenoScene extends Phaser.Scene {
   private makeCell(x: number, y: number, index: number): CellVisual {
     const container = this.add.container(x, y);
     const bg = this.add.graphics();
-    const label = this.add
-      .text(0, 0, String(index + 1), { fontSize: "13px", fontStyle: "bold" })
-      .setOrigin(0.5);
+    const label = makeText(this, 0, 0, String(index + 1), {
+      size: Tokens.type.size.lg,
+      weight: Tokens.type.weight.semibold,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
     container.add([bg, label]);
     container.setSize(CELL_SIZE, CELL_SIZE);
     container.setInteractive({ useHandCursor: true });
@@ -294,43 +341,10 @@ export class KenoScene extends Phaser.Scene {
   }
 
   private paintCellVisual(cell: CellVisual, state: CellState) {
-    // Cell-state tint fills, tied to Theme tokens so they track the shared
-    // dark "Arcade Nights" palette. "picked"/"drawn" used to be pale
-    // light-theme pastels (0xbee8f5/0xfce8c7) left over from the old
-    // cream-background look - unreadable now (their paired text colors,
-    // textPrimary/textGold, would sit near-invisible on a near-white fill
-    // against the new near-black surfaces), so both now use Theme.neutral,
-    // the same muted slate-blue dark fill the rest of the chrome system
-    // uses for a "plain/secondary" surface - still visually distinct from
-    // "empty" (Theme.inset) while keeping their border/text colors readable.
-    const colors: Record<CellState, number> = {
-      empty: Theme.inset,
-      picked: Theme.neutral, // "selected, not drawn yet"
-      hit: Theme.winZone, // matched number
-      miss: Theme.loseZone, // drawn, not picked
-      drawn: Theme.neutral // drawn, not picked, informational
-    };
-    const border: Record<CellState, number> = {
-      empty: Theme.panelBorder,
-      picked: Theme.secondary,
-      hit: Theme.accent,
-      miss: Theme.danger,
-      drawn: Theme.gold
-    };
-    const textColor: Record<CellState, string> = {
-      empty: Theme.textMuted,
-      picked: Theme.textPrimary,
-      hit: Theme.textAccent,
-      miss: Theme.textDanger,
-      drawn: Theme.textGold
-    };
-
     cell.bg.clear();
-    cell.bg.fillStyle(colors[state], 1);
-    cell.bg.fillRoundedRect(-CELL_SIZE / 2, -CELL_SIZE / 2, CELL_SIZE, CELL_SIZE, 6);
-    cell.bg.lineStyle(2, border[state], 1);
-    cell.bg.strokeRoundedRect(-CELL_SIZE / 2, -CELL_SIZE / 2, CELL_SIZE, CELL_SIZE, 6);
-    cell.label.setColor(textColor[state]);
+    cell.bg.fillStyle(CELL_FILL[state], 1);
+    cell.bg.fillRoundedRect(-CELL_SIZE / 2, -CELL_SIZE / 2, CELL_SIZE, CELL_SIZE, Tokens.radius.xs);
+    cell.label.setColor(CELL_TEXT[state]);
   }
 
   private cellState(index: number): CellState {
@@ -390,11 +404,11 @@ export class KenoScene extends Phaser.Scene {
     this.repaintAll();
     this.updateInfo();
     this.updatePaytable();
-    this.messageText.setText(`Pick up to ${MAX_PICKS} numbers, then draw`).setColor(Theme.textMuted);
+    this.messageText.setText(`Pick up to ${MAX_PICKS} numbers, then draw`).setColor(Tokens.text.muted);
   }
 
   private updateInfo() {
-    this.infoText.setText(`Picked: ${this.picks.size} / ${MAX_PICKS}`);
+    this.infoText.setText(`PICKED ${this.picks.size} / ${MAX_PICKS}`);
   }
 
   private updatePaytable() {
@@ -418,11 +432,11 @@ export class KenoScene extends Phaser.Scene {
   private play() {
     if (this.drawing) return;
     if (this.picks.size === 0) {
-      this.messageText.setText("Pick at least 1 number first!").setColor(Theme.textDanger);
+      this.messageText.setText("Pick at least 1 number first!").setColor(Tokens.text.negative);
       return;
     }
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -435,7 +449,7 @@ export class KenoScene extends Phaser.Scene {
     this.quickPickBtn?.setEnabled(false);
     this.clearBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Drawing...").setColor(Theme.textMuted);
+    this.messageText.setText("Drawing...").setColor(Tokens.text.muted);
 
     api
       .playKeno(this.currentBet, "GC", pickList)
@@ -451,7 +465,7 @@ export class KenoScene extends Phaser.Scene {
     const order = res.result.drawn;
     let step = 0;
     this.drawTimer = this.time.addEvent({
-      delay: 160,
+      delay: Tokens.motion.duration.stagger,
       repeat: order.length - 1,
       callback: () => {
         const idx = order[step];
@@ -477,10 +491,10 @@ export class KenoScene extends Phaser.Scene {
     if (payout > 0) {
       this.messageText
         .setText(`${hits}/${picksCount} matched - ${multiplier}x! +${payout} Tickets`)
-        .setColor(Theme.textAccent);
+        .setColor(Tokens.text.accent);
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText(`${hits}/${picksCount} matched - not enough to win`).setColor(Theme.textDanger);
+      this.messageText.setText(`${hits}/${picksCount} matched - not enough to win`).setColor(Tokens.text.negative);
       playSfx(this, "lose");
     }
 
@@ -502,15 +516,15 @@ export class KenoScene extends Phaser.Scene {
     this.betControl?.setEnabled(true);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

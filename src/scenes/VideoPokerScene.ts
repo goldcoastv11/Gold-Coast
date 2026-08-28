@@ -1,9 +1,13 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
+  makeText,
+  makeDivider,
   makeGameShell,
+  formatBalance,
+  drawCardSurface,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -84,15 +88,35 @@ interface CardSlot {
 
 type Stage = "idle" | "holding";
 
-// Stake-style layout: paytable strip and the 5-card hand centered in the
-// shell's right-side display area (see ui/uiHelpers.ts's makeGameShell) -
-// the sidebar now occupies the left third of the screen. The 5-card row
-// (390px wide at its original card size) already fits the ~430px-wide
-// display area, so only the paytable strip (previously a single wide line)
-// picked up a wordWrap to stay inside the narrower width; every offset from
-// the old canvas center (400,300) is otherwise unchanged.
+/**
+ * VIDEO POKER, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * A micro-label over the paytable strip, one hairline, then the hand -
+ * the same label/rule/content stack every converted game uses. Cards come
+ * from the shared card surfaces; the accent ring on a HELD card is the one
+ * stroke on the screen, and it earns it by marking a real player decision
+ * rather than outlining a box (direction note 3).
+ *
+ * The paytable used to sit at y=115, above the mobile-landscape safe zone
+ * (uiHelpers.ts's SAFE_ZONE_TOP = 130) and therefore croppable on a phone;
+ * the board is also 80px shorter now, since the old one reserved the full
+ * safe zone and left the bottom third empty.
+ */
 const DX = GAME_SHELL_DISPLAY_CENTER_X;
 const DY = GAME_SHELL_DISPLAY_CENTER_Y;
+const BOARD_W = 410;
+const BOARD_H = 260;
+const BOARD_LEFT = DX - BOARD_W / 2 + Tokens.space.xxl;
+const BOARD_RIGHT = DX + BOARD_W / 2 - Tokens.space.xxl;
+
+const SECTION_LABEL_Y = 176;
+const PAYTABLE_Y = 198;
+const DIVIDER_Y = 228;
+const CARD_W = 70;
+const CARD_H = 96;
+const CARD_GAP = Tokens.space.sm;
+const CARD_Y = 296;
+const HOLD_LABEL_Y = CARD_Y + CARD_H / 2 + Tokens.space.md;
 
 export class VideoPokerScene extends Phaser.Scene {
   private hand: Card[] = [];
@@ -124,7 +148,7 @@ export class VideoPokerScene extends Phaser.Scene {
     this.busy = false;
     this.roundId = null;
     this.slots = [];
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. This game has no cash-out concept, so
@@ -144,23 +168,27 @@ export class VideoPokerScene extends Phaser.Scene {
     this.walkAwayBtn = this.shell.walkAwayBtn;
     this.betControl = this.shell.betControl;
 
-    // Full safe-zone height (see uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) - the
-    // paytable strip above the cards already sits close to the top edge.
-    drawCabinetFrame(this, DX, DY, 410, 340);
+    drawCabinetFrame(this, DX, DY, BOARD_W, BOARD_H);
 
-    this.paytableText = this.add
-      .text(DX, DY - 185, "", {
-        fontSize: "9px",
-        color: Theme.textGold,
-        align: "center",
-        wordWrap: { width: 420 }
-      })
-      .setOrigin(0.5);
+    makeText(this, BOARD_LEFT, SECTION_LABEL_Y, "9/6 JACKS OR BETTER", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps
+    });
+    this.paytableText = makeText(this, DX, PAYTABLE_Y, "", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.secondary,
+      align: "center",
+      originX: 0.5,
+      wordWrapWidth: BOARD_RIGHT - BOARD_LEFT
+    });
     this.renderPaytable();
+
+    makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
 
     this.slots = this.buildCardSlots();
 
-    this.messageText.setText("Deal to start a hand - 9/6 Jacks or Better");
+    this.messageText.setText("Deal to start a hand.").setColor(Tokens.text.muted);
 
     this.updateBalance();
   }
@@ -172,48 +200,49 @@ export class VideoPokerScene extends Phaser.Scene {
 
   private buildCardSlots(): CardSlot[] {
     const slots: CardSlot[] = [];
-    const w = 70;
-    const h = 96;
-    const gap = 10;
-    const totalWidth = 5 * w + 4 * gap;
-    const startX = DX - totalWidth / 2 + w / 2;
-    const y = DY - 80;
+    const totalWidth = 5 * CARD_W + 4 * CARD_GAP;
+    const startX = DX - totalWidth / 2 + CARD_W / 2;
 
     for (let i = 0; i < 5; i++) {
-      const x = startX + i * (w + gap);
+      const x = startX + i * (CARD_W + CARD_GAP);
       const bg = this.add.graphics();
-      const label = this.add.text(x, y, "", { fontSize: "22px", fontStyle: "bold" }).setOrigin(0.5);
-      const holdLabel = this.add
-        .text(x, y + h / 2 + 12, "", { fontSize: "12px", color: Theme.textAccent, fontStyle: "bold" })
-        .setOrigin(0.5);
-      const hitZone = this.add.zone(x, y, w, h).setInteractive({ useHandCursor: true });
+      const label = makeText(this, x, CARD_Y, "", {
+        size: Tokens.type.glyph.md,
+        weight: Tokens.type.weight.semibold,
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
+      const holdLabel = makeText(this, x, HOLD_LABEL_Y, "", {
+        size: Tokens.type.size.xs,
+        weight: Tokens.type.weight.semibold,
+        color: Tokens.text.accent,
+        tracking: Tokens.type.tracking.caps,
+        align: "center",
+        originX: 0.5
+      });
+      const hitZone = this.add.zone(x, CARD_Y, CARD_W, CARD_H).setInteractive({ useHandCursor: true });
       const index = i;
       hitZone.on("pointerdown", () => this.toggleHold(index));
-      const slot: CardSlot = { bg, label, holdLabel, hitZone, x, y };
+      const slot: CardSlot = { bg, label, holdLabel, hitZone, x, y: CARD_Y };
       slots.push(slot);
-      this.paintSlot(slot, null, false, w, h);
+      this.paintSlot(slot, null, false);
     }
     return slots;
   }
 
-  private paintSlot(slot: CardSlot, card: Card | null, held: boolean, w = 70, h = 96) {
+  private paintSlot(slot: CardSlot, card: Card | null, held: boolean) {
     slot.bg.clear();
     if (!card) {
-      slot.bg.fillStyle(Theme.inset, 1);
-      slot.bg.fillRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 8);
-      slot.bg.lineStyle(2, Theme.panelBorder, 1);
-      slot.bg.strokeRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 8);
+      drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, "empty", Tokens.radius.md);
       slot.label.setText("").setVisible(false);
       slot.holdLabel.setText("");
       return;
     }
-    slot.bg.fillStyle(Theme.cardFace, 1);
-    slot.bg.fillRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 8);
-    slot.bg.lineStyle(held ? 3 : 2, held ? Theme.accent : Theme.cardBorder, 1);
-    slot.bg.strokeRoundedRect(slot.x - w / 2, slot.y - h / 2, w, h, 8);
+    drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, held ? "held" : "face", Tokens.radius.md);
     slot.label
       .setText(`${card.label}${card.suit}`)
-      .setColor(card.isRed ? Theme.cardTextRed : Theme.cardTextBlack)
+      .setColor(card.isRed ? Tokens.card.inkRed : Tokens.card.ink)
       .setVisible(true);
     slot.holdLabel.setText(held ? "HELD" : "");
   }
@@ -238,7 +267,7 @@ export class VideoPokerScene extends Phaser.Scene {
 
   private deal() {
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -246,7 +275,7 @@ export class VideoPokerScene extends Phaser.Scene {
     this.busy = true;
     this.actionBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    this.messageText.setText("Dealing...").setColor(Tokens.text.muted);
     playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
@@ -266,7 +295,7 @@ export class VideoPokerScene extends Phaser.Scene {
         this.stage = "holding";
 
         this.renderHand();
-        this.messageText.setText("Tap cards to HOLD, then draw").setColor(Theme.textMuted);
+        this.messageText.setText("Tap cards to HOLD, then draw").setColor(Tokens.text.muted);
         this.actionBtn?.setLabel("DRAW");
         this.actionBtn?.setEnabled(true);
         this.updateBalance();
@@ -285,7 +314,7 @@ export class VideoPokerScene extends Phaser.Scene {
               this.betControl?.setEnabled(true);
               this.messageText
                 .setText("Couldn't recover an unfinished round - please try again.")
-                .setColor(Theme.textDanger);
+                .setColor(Tokens.text.negative);
             });
           return;
         }
@@ -334,14 +363,14 @@ export class VideoPokerScene extends Phaser.Scene {
             // A push still pays TICKETS = the GC bet amount (the GC wager
             // itself was already spent at deal time) - no "bet returned" in
             // this currency, just a payout.
-            this.messageText.setText(`${res.rank} - push! +${res.payout} Tickets`).setColor(Theme.textGold);
+            this.messageText.setText(`${res.rank} - push! +${res.payout} Tickets`).setColor(Tokens.text.secondary);
           } else {
-            this.messageText.setText(`${res.rank}! +${res.payout} Tickets`).setColor(Theme.textAccent);
+            this.messageText.setText(`${res.rank}! +${res.payout} Tickets`).setColor(Tokens.text.accent);
             popIn(this, this.messageText);
           }
           showWinCelebration(this, res.payout);
         } else {
-          this.messageText.setText("No winning hand - you lose").setColor(Theme.textDanger);
+          this.messageText.setText("No winning hand - you lose").setColor(Tokens.text.negative);
           playSfx(this, "lose");
         }
 
@@ -360,15 +389,15 @@ export class VideoPokerScene extends Phaser.Scene {
 
   private showApiError(err: unknown, insufficientBalanceMessage: string) {
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+      this.messageText.setText(insufficientBalanceMessage).setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }
