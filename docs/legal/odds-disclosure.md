@@ -28,7 +28,7 @@ you get 97% of your money back. No money comes back, because none was ever at st
 measure of how generous a game is with an in-game score, not a rate of return.
 
 **One important consequence:** because these are separate currencies, these percentages do not have
-to be under 100%, and one of them is not. See Plinko below.
+to be under 100%, and one of them is not. See Dragon Tower below.
 
 ## How outcomes are decided
 
@@ -130,36 +130,18 @@ edge slots, and pay less.
 | Slot | Chance | Pays |
 |---|---|---|
 | Far left / far right | 0.39% each | 16× |
-| Second from each edge | 3.13% each | 9× |
-| Third from each edge | 10.94% each | 2× |
-| Fourth from each edge | 21.88% each | 1.4× |
-| Centre | 27.34% | 0.6× |
+| Second from each edge | 3.13% each | 5× |
+| Third from each edge | 10.94% each | 1.2× |
+| Fourth from each edge | 21.88% each | 0.5× |
+| Centre | 27.34% | 0.2× |
 
-**Average return: 190.2%.**
+**Average return: 97.3%.**
 
-> **[FOUNDER: needs your input — read this one carefully.]**
->
-> That figure is not a typo and it is not an error in my arithmetic; I computed it directly from
-> the multiplier table and the binomial slot probabilities in the code, and checked it numerically.
-> Plinko pays out roughly **190 Tickets for every 100 Gold Coins bet**, long-run. Every other game
-> in the arcade sits between 94% and 100%.
->
-> Why this is **not** a compliance or money problem: Tickets have no cash value, cannot be cashed
-> out, and only buy cosmetics. Nobody can extract anything from this. You are not losing money.
->
-> Why it still matters, and quite a lot: it makes Plinko roughly twice as Ticket-efficient as
-> anything else in the arcade, so a player who works out the maths just plays Plinko and buys out
-> the Item Shop far faster than intended. That directly undercuts Phase 1's "economy balanced in
-> internal testing" exit criterion, and it undercuts the Item Shop as a progression goal.
->
-> What I would do: treat this as an economy bug for the CTO, not a disclosure problem, and fix the
-> multiplier table before publishing this document — otherwise you are publishing a number you are
-> about to change. For reference, a table returning ~97% with the same shape would need the centre
-> slot near 0.3× and the edges near 8×, but picking the actual numbers is a game-design call, not
-> mine to make.
->
-> **Do not publish this section as-is.** Either fix the table first, or publish the corrected
-> figure once it is fixed.
+The slot chances above are fixed by the shape of the board — eight fair left/right bounces — and
+cannot be changed without changing the board. Almost every drop lands near the middle: the three
+central slots take 71.1% of all drops between them, and each pays back **less than you bet** (0.5×,
+0.2× and 0.5×). That is where the house edge comes from. The two 16× edge slots, which are what the
+game is really about, come up on about 1 drop in 128.
 
 ## Wheel
 
@@ -239,26 +221,14 @@ black, or green.
 |---|---|---|---|
 | Red | 18 in 37 (48.6%) | 2× | 97.3% |
 | Black | 18 in 37 (48.6%) | 2× | 97.3% |
-| Green (0) | 1 in 37 (2.7%) | 20× | **54.1%** |
+| Green (0) | 1 in 37 (2.7%) | 36× | 97.3% |
 
-**Average return: 97.3% on red or black. 54.1% on green.**
+**Average return: 97.3% on all three bets.**
 
-> **[FOUNDER: needs your input — the green bet is a serious outlier.]**
->
-> Red and black are textbook single-zero roulette at 97.3%, which is fine. But green pays 20× on a
-> 1-in-37 chance. A fair payout would be 37×; even a real casino's single-number bet pays 36×. At
-> 20× the green bet returns 54 Tickets per 100 Gold Coins — barely half of what every other bet in
-> the arcade returns, and roughly a 46% house edge.
->
-> This is the mirror image of the Plinko and Slots problems: those are far too generous, this is
-> far too harsh. It is not a legal problem — no money is at stake either way — but publishing
-> "54.1%" next to "97.3%" on the same wheel invites the obvious question, and a player who bets
-> green thinking it is the exciting long-shot is getting a much worse deal than they would
-> anywhere else.
->
-> I would raise the green payout (36× would match a real wheel and land the return at 97.3%,
-> matching red and black) before publishing. That is the CTO's change to make, and a game-design
-> call for you to sign off.
+All three bets return the same amount over time. Green is the long shot — it wins about once in
+every 37 spins instead of about once in every two — but it pays 36× when it does, which works out
+to the same 97.3% as red or black. Choosing green trades frequency for size and nothing else. This
+matches a real single-zero wheel, where a straight-up bet on a single number also pays 36×.
 
 ## Slots
 
@@ -267,11 +237,11 @@ symbols are not equally likely — common symbols come up far more often and pay
 
 | Symbol | Chance per reel | Three of a kind pays | Exactly two pays |
 |---|---|---|---|
-| Cherry | 35% | 2× | 0.6× |
-| Lemon | 28% | 4× | 1× |
-| Bell | 20% | 20× | 2.4× |
-| Diamond | 12% | 80× | 6× |
-| Seven | 5% | 400× | 30× |
+| Cherry | 35% | 2× | 0.2× |
+| Lemon | 28% | 4× | 0.5× |
+| Bell | 20% | 20× | 1.1× |
+| Diamond | 12% | 80× | 2.5× |
+| Seven | 5% | 400× | 15× |
 
 **Your chance of any result:**
 
@@ -283,21 +253,16 @@ symbols are not equally likely — common symbols come up far more often and pay
 
 **Chance of the top prize (three sevens): 0.0125%, or about 1 in 8,000 spins.**
 
-Note that a pair of cherries pays 0.6×, which is **less than you bet**. It looks like a win on
-screen but it is not one.
+Note that a pair of cherries pays 0.2× and a pair of lemons 0.5×, both **less than you bet**. They
+look like a win on screen but they are not one. Between them these two are the most common paying
+result on the machine, at about 41% of all spins.
 
-**Average return: 150.7%.**
+**Average return: 96.2%.**
 
-> **[FOUNDER: needs your input — same family of problem as Plinko.]**
->
-> Slots pays out about 151 Tickets per 100 Gold Coins bet, long-run. The reason is the "exactly
-> two matching" tier: pairs come up on 55% of all spins, and the pair payouts are too generous
-> relative to how often they land. Cherry pairs alone (24% of all spins) carry a big chunk of it.
->
-> Again: not a money problem, no cash is at risk, nothing can be extracted. It is an
-> economy-balance problem, and slots is likely the single most-played cabinet in the arcade, so it
-> matters more than most. Same recommendation as Plinko — fix the paytable before publishing the
-> figure, or you will publish a number you are about to change.
+Where that comes from: three of a kind contributes 52.2 of those 96.2 points, and "exactly two
+matching" the remaining 44.0. Pairs land on more than half of all spins, so their payouts are what
+sets the overall level; the three-of-a-kind prizes, including the 400× seven, are what make the
+game worth playing.
 
 ---
 
@@ -355,6 +320,12 @@ Your chance of clearing any single row is 3 in 4 (75%).
 **Average return: 97.5% if you stop at row 1, rising to 213.6% if you always climb to the top.**
 
 > **[FOUNDER: needs your input — the biggest imbalance in the arcade.]**
+>
+> **Status (2026-08-27): known open item, deliberately deferred.** The founder's decision is to
+> leave Dragon Tower alone for now and address it as part of a wider game-mechanics pass; the
+> other three mis-tuned games (Plinko, Slots, Roulette green) were rebalanced on that date and
+> their figures above are current. The figures in this section are Dragon Tower's true, present
+> values — this section has not been corrected because nothing about the game has changed.
 >
 > Unlike Mines, Dragon Tower's paytable is hand-picked rather than derived from the odds, and it
 > drifts further from fair with every row. Row 1 is about right at 97.5%. By row 3 it is over 100%,
@@ -590,13 +561,13 @@ call, and a CTO job either way.]
 | Baccarat — Banker | 98.9% | Exact. |
 | Baccarat — Player | 98.8% | Exact. |
 | Wheel (all risk levels) | 97.0–97.2% | Exact. |
-| Roulette — red/black | 97.3% | Exact. |
+| Roulette — red/black | 97.3% | Exact, and covered by an automated test. |
+| Roulette — green | 97.3% | Exact, and covered by an automated test. Same as red/black; green just pays more, less often. |
+| Plinko | 97.3% | Exact, and covered by an automated test. |
+| Slots | 96.2% | Exact, and covered by an automated test. |
 | Keno (any pick count) | 94.0% | Exact, and covered by an automated test. |
 | Baccarat — Tie | 85.9% | Exact. Much worse than the other two bets. |
-| Roulette — green | 54.1% | Exact. **Far out of line — recommend fixing.** |
-| Slots | 150.7% | Exact. **Too generous — recommend fixing.** |
-| Plinko | 190.2% | Exact. **Too generous — recommend fixing.** |
-| Dragon Tower | 97.5% to 213.6% | Exact. **Depends on strategy — recommend fixing.** |
+| Dragon Tower | 97.5% to 213.6% | Exact. **Depends on strategy — known open item, deferred to a later game-mechanics pass.** |
 | Triple Chance | 100% | Exact. Deliberately fair; a bonus round, pays Gold Coins. |
 | Video Poker | **needs verification** | Requires an optimal-strategy computation. |
 | Blackjack | **needs verification** | Requires an optimal-strategy computation. |
@@ -607,14 +578,20 @@ verification" are the two games where the player's own decisions determine the o
 figure is meaningful without computing optimal play — and I would rather leave them blank than put
 a wrong number in a compliance document.
 
-**Four games are recommended for fixing before this is published**: Plinko, Slots, Dragon Tower,
-and the Roulette green bet. Three pay far too much and one pays far too little. None of them is a
-legal or financial risk — no cash is at stake anywhere in this arcade — but publishing figures you
-are about to change is self-defeating, and the three over-generous games undermine the Item Shop as
-something to work toward.
+**Four games were identified as mis-tuned; three of them have been fixed.** Plinko (was 190.2%) and
+Slots (was 150.7%) paid far too much, and the Roulette green bet (was 54.1%) paid far too little.
+All three were rebalanced on 2026-08-27, the figures in this document are the ones the game now
+runs on, and each is now covered by an automated test that fails if its return drifts back outside
+94–100%.
+
+**Dragon Tower is the fourth, and it has not been fixed.** At up to 213.6% it is still the largest
+imbalance in the arcade. This is a known open item deferred by founder decision on 2026-08-27, to
+be addressed as part of a wider game-mechanics pass — not an oversight. Its figures above are its
+true present values, and the "do not publish this table as-is" note in that section still stands.
+No other game's numbers were changed.
 
 **A closing note on what all these numbers mean.** Every figure on this page describes Tickets paid
 per Gold Coin bet. Tickets buy cosmetic items and nothing else. They cannot be sold, traded,
 gifted, or exchanged for money, and there is no way to withdraw anything from this arcade. A game
-returning 190% is not paying anyone 190% of their money — it is handing out an in-game score
+returning 214% is not paying anyone 214% of their money — it is handing out an in-game score
 slightly faster than intended.

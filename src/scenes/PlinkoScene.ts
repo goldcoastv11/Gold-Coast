@@ -28,11 +28,14 @@ const BOARD_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
 const SLOTS_Y = 402;
 
 // Symmetric payout table, one entry per slot (index = number of "right" bounces) - mirrors server/src/games/plinko.ts's PLINKO_MULTIPLIERS exactly (display/preview only; the server is what actually resolves a drop, see drop()).
-const MULTIPLIERS = [16, 9, 2, 1.4, 0.6, 1.4, 2, 9, 16];
+const MULTIPLIERS = [16, 5, 1.2, 0.5, 0.2, 0.5, 1.2, 5, 16];
 
+// Bands re-cut alongside the 2026-08-27 rebalance: the multipliers all moved down, so the old
+// thresholds (>=9 gold, >=2 accent, >=1 neutral) would have painted every slot but the two edges
+// as a loss. These keep the same visual story - jackpot edges, good, break-even-ish, loss.
 function colorForMultiplier(m: number): number {
-  if (m >= 9) return Theme.gold;
-  if (m >= 2) return Theme.accent;
+  if (m >= 16) return Theme.gold;
+  if (m >= 5) return Theme.accent;
   if (m >= 1) return Theme.neutral;
   return Theme.danger;
 }

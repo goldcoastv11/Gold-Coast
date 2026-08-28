@@ -4,6 +4,7 @@ import { app } from "../src/app";
 import { resetDb, signupUser, authed } from "./helpers";
 import { ROULETTE_PAYOUTS, colorOf } from "../src/games/roulette";
 import { PLINKO_MULTIPLIERS, PLINKO_ROWS } from "../src/games/plinko";
+import { SLOT_SYMBOLS, scoreSlotsSpin } from "../src/games/slots";
 import { kenoMultiplier, kenoMinPayHits, kenoHitProbability, KENO_HOUSE_EDGE, KENO_MAX_PICKS } from "../src/games/keno";
 import { PLAYER_WIN_MULT, BANKER_WIN_MULT, TIE_WIN_MULT } from "../src/games/baccarat";
 import { buildWheelSegments, WHEEL_SEGMENT_COUNT } from "../src/games/wheel";
@@ -250,5 +251,65 @@ describe("POST /games/baccarat/play", () => {
       }
     }
     expect(sawTieLoss).toBe(true);
+  });
+});
+
+/**
+ * Payout rebalance (2026-08-27) guard rail.
+ *
+ * Roulette green (20x -> 36x), Plinko's multiplier table and Slots' pair payouts were all retuned
+ * to bring their long-run return into the arcade's 94-100% band. These are hand-picked tables, so
+ * nothing else in the codebase stops someone nudging a number and quietly reintroducing a 190%
+ * game. Each case below computes the return from the true outcome probabilities x the paytable the
+ * server actually ships, in the same spirit as the Keno RTP invariant above.
+ */
+const REBALANCE_MIN_RTP = 0.94;
+const REBALANCE_MAX_RTP = 1.0;
+
+describe("rebalanced games return 94-100% (analytic, no RNG)", () => {
+  it("roulette returns 94-100% on every one of the three bets", () => {
+    // 37 pockets: 18 red, 18 black, 1 green.
+    const pockets: Record<string, number> = { red: 18, black: 18, green: 1 };
+    for (const [bet, count] of Object.entries(pockets)) {
+      const rtp = (count / 37) * ROULETTE_PAYOUTS[bet as keyof typeof ROULETTE_PAYOUTS];
+      expect(rtp).toBeGreaterThanOrEqual(REBALANCE_MIN_RTP);
+      expect(rtp).toBeLessThanOrEqual(REBALANCE_MAX_RTP);
+    }
+  });
+
+  it("plinko returns 94-100% against the true binomial slot probabilities", () => {
+    // A drop is PLINKO_ROWS fair left/right bounces, so slot i has probability C(rows, i) / 2^rows.
+    const choose = (n: number, k: number) => {
+      let c = 1;
+      for (let i = 0; i < k; i++) c = (c * (n - i)) / (i + 1);
+      return c;
+    };
+    const total = 2 ** PLINKO_ROWS;
+    let rtp = 0;
+    for (let slot = 0; slot < PLINKO_MULTIPLIERS.length; slot++) {
+      rtp += (choose(PLINKO_ROWS, slot) / total) * PLINKO_MULTIPLIERS[slot];
+    }
+    expect(rtp).toBeGreaterThanOrEqual(REBALANCE_MIN_RTP);
+    expect(rtp).toBeLessThanOrEqual(REBALANCE_MAX_RTP);
+  });
+
+  it("slots returns 94-100% over all 125 reel combinations, scored by the real payout rules", () => {
+    // Enumerated through scoreSlotsSpin (the server's own scoring), not a reimplementation of it.
+    const totalWeight = SLOT_SYMBOLS.reduce((sum, s) => sum + s.weight, 0);
+    // Big enough that every multiplier in the table is a whole number of coins, so the payout
+    // rounding inside scoreSlotsSpin can't skew the figure.
+    const bet = 1_000_000;
+    let weightedPayout = 0;
+    for (const a of SLOT_SYMBOLS) {
+      for (const b of SLOT_SYMBOLS) {
+        for (const c of SLOT_SYMBOLS) {
+          const probability = (a.weight / totalWeight) * (b.weight / totalWeight) * (c.weight / totalWeight);
+          weightedPayout += probability * scoreSlotsSpin([a, b, c], bet).payout;
+        }
+      }
+    }
+    const rtp = weightedPayout / bet;
+    expect(rtp).toBeGreaterThanOrEqual(REBALANCE_MIN_RTP);
+    expect(rtp).toBeLessThanOrEqual(REBALANCE_MAX_RTP);
   });
 });
