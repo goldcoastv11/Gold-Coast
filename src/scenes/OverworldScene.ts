@@ -1,10 +1,16 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { listSkins, SkinDef } from "../economy/skinShop";
-import { ITEM_CATALOG, ItemDef, ItemCategory, getItem, listItemsByCategory, walkAnimPrefixForTexture } from "../itemCatalog";
+import { ITEM_CATALOG, ItemCategory, getItem, walkAnimPrefixForTexture } from "../itemCatalog";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
-import { makeButton, makePanel, makeInset, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
+import { makeButton, makePanel, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
+import {
+  openShopCategoryMenu,
+  openItemPanel,
+  openSkinPanel,
+  ShopPanelHost
+} from "../ui/ShopPanel";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { offerCoinKiosk } from "../ui/CoinKioskOffer";
@@ -1700,24 +1706,6 @@ export class OverworldScene extends Phaser.Scene {
     this.hudText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
   }
 
-  /** Turns a /skins/buy or /skins/equip failure into a short user-facing toast message. */
-  private describeSkinError(err: unknown, action: string): string {
-    if (err instanceof ApiError) {
-      switch (err.code) {
-        case "INSUFFICIENT_TICKETS":
-          return "Not enough Tickets.";
-        case "ALREADY_OWNED":
-          return "You already own that.";
-        case "NOT_FOUND":
-          return "That skin doesn't exist - try again.";
-        default:
-          return err.message;
-      }
-    }
-    if (err instanceof NetworkError) return err.message;
-    return `Couldn't ${action} - try again.`;
-  }
-
   private activeToast?: TextChip;
 
   /**
@@ -1762,584 +1750,49 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * Small category picker shown before either openSkinPanel() or
-   * openItemPanel() - both the Item Shop station and the Clothes corner
-   * button now open this first, instead of jumping straight to skins.
-   * Deliberately a separate entry step rather than folding a tab row into
-   * openSkinPanel() itself: that panel's layout is already tightly packed
-   * into the mobile-crop-safe zone (see its own SAFE_ZONE_TOP/BOTTOM-driven
-   * Y coordinates) and is live in production - this keeps it (and its
-   * skin-purchase flow) completely untouched, at the cost of one extra tap
-   * to pick a category.
+   * The skin panel, the accessory/pet panel and the category picker that
+   * fronts them both now live in ui/ShopPanel.ts - they were ~580 lines of
+   * this file and are the same kind of thing as each other, not the same
+   * kind of thing as the casino floor, the tutorial or the Coin Kiosk that
+   * surround them here. The panels are unchanged; only their address is.
+   *
+   * These three wrappers stay so the existing call sites (the Item Shop
+   * station, the Clothes corner button, and the tutorial) keep reading the
+   * way they always did.
    */
   private openShopCategoryMenu(mode: "shop" | "wardrobe") {
-    this.panelOpen = true;
-    playSfx(this, "open");
-
-    let elements: Phaser.GameObjects.GameObject[] = [];
-    const cleanup = () => {
-      elements.forEach((e) => e.destroy());
-      elements = [];
-    };
-
-    const panel = makePanel(this, 400, 260, 320, 220, 200).setScrollFactor(0);
-    elements.push(panel);
-    const title = this.add
-      .text(400, 190, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
-        fontSize: "20px",
-        color: Theme.textGold,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(201);
-    elements.push(title);
-    const sub = this.add
-      .text(400, 214, "What would you like to browse?", { fontSize: "12px", color: Theme.textMuted })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(201);
-    elements.push(sub);
-
-    const goTo = (openNext: () => void) => {
-      cleanup();
-      openNext();
-    };
-
-    const buttons: Array<[string, () => void]> = [
-      ["👕 Skins", () => this.openSkinPanel(mode)],
-      ["🎩 Accessories", () => this.openItemPanel("ACCESSORY", mode)],
-      ["🐾 Pets", () => this.openItemPanel("PET", mode)]
-    ];
-    buttons.forEach(([label, openNext], i) => {
-      const btn = makeButton(this, 400, 250 + i * 50, 260, 42, label, Theme.accent, Theme.accentHover, () =>
-        goTo(openNext)
-      );
-      btn.container.setScrollFactor(0).setDepth(201);
-      elements.push(btn.container);
-    });
-
-    const closeBtn = makeButton(this, 400, 400, 140, 38, "Close", Theme.danger, Theme.dangerHover, () => {
-      cleanup();
-      this.panelOpen = false;
-      this.updateHud();
-    });
-    closeBtn.container.setScrollFactor(0).setDepth(201);
-    elements.push(closeBtn.container);
+    openShopCategoryMenu(this.shopPanelHost, mode);
   }
 
-  /**
-   * Accessory/Pet browsing panel - structurally mirrors openSkinPanel()
-   * below (same paginated shop/wardrobe shape) but is a fully independent
-   * function reading ITEM_CATALOG instead of SKIN_CATALOG, so nothing here
-   * can regress the live, already-shipped skin-purchase flow. Two real
-   * differences from skins: the preview is an emoji (ACCESSORY) or a small
-   * character-sheet thumbnail (PET) instead of a real skin portrait, and
-   * "wearing nothing" is a valid state - the currently-equipped item's row
-   * gets a "Take Off" button instead of a disabled "Worn" one.
-   */
   private openItemPanel(category: ItemCategory, mode: "shop" | "wardrobe") {
-    this.panelOpen = true;
-    playSfx(this, "open");
-    let page = 0;
-    const itemsPerPage = 4;
-    let elements: Phaser.GameObjects.GameObject[] = [];
+    openItemPanel(this.shopPanelHost, category, mode);
+  }
 
-    const getItems = (): ItemDef[] =>
-      mode === "shop"
-        ? listItemsByCategory(category).filter((i) => !gameState.ownsItem(i.id))
-        : listItemsByCategory(category).filter((i) => gameState.ownsItem(i.id));
-
-    const currentlyEquipped = () => (category === "ACCESSORY" ? gameState.equippedAccessory : gameState.equippedPet);
-
-    const cleanup = () => {
-      elements.forEach((e) => e.destroy());
-      elements = [];
-    };
-
-    const applyEquipped = () => {
-      if (category === "ACCESSORY") this.applyEquippedAccessory();
-      else this.applyEquippedPet();
-    };
-
-    const label = category === "ACCESSORY" ? "Accessories" : "Pets";
-    const emoji = category === "ACCESSORY" ? "🎩" : "🐾";
-
-    const render = () => {
-      cleanup();
-      const items = getItems();
-      const totalPages = Math.max(1, Math.ceil(items.length / itemsPerPage));
-      page = Phaser.Math.Clamp(page, 0, totalPages - 1);
-      const pageItems = items.slice(page * itemsPerPage, page * itemsPerPage + itemsPerPage);
-
-      const panel = makePanel(this, 400, 300, 460, 440, 200).setScrollFactor(0);
-      elements.push(panel);
-
-      const title = this.add
-        .text(400, 140, `${emoji} ${mode === "shop" ? `${label} Shop` : label}`, {
-          fontSize: "20px",
-          color: Theme.textGold,
-          fontStyle: "bold"
-        })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(title);
-
-      const sub = this.add
-        .text(
-          400,
-          162,
-          mode === "shop" ? `You have ${gameState.tickets} Tickets` : `Pick a ${label.slice(0, -1).toLowerCase()} to wear`,
-          { fontSize: "13px", color: Theme.textMuted }
-        )
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(sub);
-
-      if (pageItems.length === 0) {
-        const empty = this.add
-          .text(
-            400,
-            280,
-            mode === "shop" ? `You own every ${label.toLowerCase()} item!` : `Nothing owned yet.\nVisit the ${label} Shop to buy one.`,
-            { fontSize: "14px", color: Theme.textMuted, align: "center" }
-          )
-          .setOrigin(0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(empty);
-      }
-
-      pageItems.forEach((def, i) => {
-        const y = 165 + i * 58;
-        const row = makeInset(this, 400, y, 400, 48, 10);
-        row.setScrollFactor(0).setDepth(200);
-        elements.push(row);
-
-        const isEquipped = mode === "wardrobe" && currentlyEquipped() === def.id;
-
-        // Preview: the real drawn accessory texture (see
-        // BootScene.ts's createAccessoryTextures) scaled up so it's legible
-        // in the row, or a small character-sheet thumbnail (frame 1, same
-        // convention openSkinPanel's own preview uses) for pets.
-        const preview =
-          def.category === "ACCESSORY"
-            ? this.add.image(219, y, def.textureKey ?? "acc_bow").setScale(2.2)
-            : this.add.image(219, y, def.textureKey ?? "npc2_sheet", 1).setScale(1.6);
-        preview.setScrollFactor(0).setDepth(201);
-        elements.push(preview);
-
-        const nameLabel = this.add
-          .text(252, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
-            fontSize: "14px",
-            color: isEquipped ? Theme.textAccent : Theme.textPrimary,
-            fontStyle: isEquipped ? "bold" : "normal"
-          })
-          .setOrigin(0, 0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(nameLabel);
-
-        if (mode === "shop") {
-          const priceLabel = this.add
-            .text(370, y, `${def.price} Tickets`, { fontSize: "13px", color: Theme.textMuted })
-            .setOrigin(0, 0.5)
-            .setScrollFactor(0)
-            .setDepth(201);
-          elements.push(priceLabel);
-
-          const canAfford = gameState.tickets >= def.price;
-          const buyBtn = makeButton(
-            this,
-            540,
-            y,
-            90,
-            42,
-            "Buy",
-            canAfford ? Theme.accent : Theme.neutral,
-            canAfford ? Theme.accentHover : Theme.neutral,
-            () => {
-              // Same "a purchase also equips it" product decision as
-              // skins (see economy/itemShop.ts's purchaseItem doc comment).
-              buyBtn.setEnabled(false);
-              api
-                .buyItem(def.id)
-                .then((res) => {
-                  // Retention Leg 1: what players spend their TICKETS on -
-                  // catalog id and price only, both already-public catalog
-                  // facts. Fired on the server's confirmed success, never
-                  // on the optimistic click.
-                  track(EVENTS.ITEM_PURCHASED, { itemId: def.id, price: def.price });
-                  gameState.hydrateFromServer(res.user);
-                  applyEquipped();
-                  this.updateHud();
-                  this.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
-                  playSfx(this, "confirm");
-                  render();
-                })
-                .catch((err) => {
-                  this.showToast(this.describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
-                  playSfx(this, "error");
-                  render();
-                });
-            }
-          );
-          if (!canAfford) buyBtn.setEnabled(false);
-          buyBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(buyBtn.container);
-        } else if (isEquipped) {
-          // "wearing nothing" is a valid state for accessories/pets (unlike
-          // skins, which always fall back to "player") - the currently-worn
-          // row gets an active "Take Off" button instead of a disabled
-          // "Worn" one.
-          const takeOffBtn = makeButton(this, 540, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
-            takeOffBtn.setEnabled(false);
-            api
-              .unequipItem(category)
-              .then((res) => {
-                gameState.hydrateFromServer(res.user);
-                applyEquipped();
-                render();
-              })
-              .catch((err) => {
-                this.showToast(this.describeSkinError(err, `take off ${def.name}`), Theme.textDanger);
-                render();
-              });
-          });
-          takeOffBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(takeOffBtn.container);
-        } else {
-          const wearBtn = makeButton(this, 540, y, 90, 42, "Wear", Theme.accent, Theme.accentHover, () => {
-            wearBtn.setEnabled(false);
-            api
-              .equipItem(def.id)
-              .then((res) => {
-                // Retention Leg 1: equipping is the "do players care about
-                // the cosmetics they bought" signal - a bought-and-never-
-                // worn item is a very different product answer to a
-                // bought-and-worn one.
-                track(EVENTS.ITEM_EQUIPPED, { itemId: def.id });
-                gameState.hydrateFromServer(res.user);
-                applyEquipped();
-                render();
-              })
-              .catch((err) => {
-                this.showToast(this.describeSkinError(err, `wear ${def.name}`), Theme.textDanger);
-                render();
-              });
-          });
-          wearBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(wearBtn.container);
-        }
-      });
-
-      if (totalPages > 1) {
-        const pageLabel = this.add
-          .text(400, 405, `Page ${page + 1} / ${totalPages}`, { fontSize: "12px", color: Theme.textMuted })
-          .setOrigin(0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(pageLabel);
-
-        if (page > 0) {
-          const prevBtn = makeButton(this, 290, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
-            page--;
-            render();
-          });
-          prevBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(prevBtn.container);
-        }
-        if (page < totalPages - 1) {
-          const nextBtn = makeButton(this, 510, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
-            page++;
-            render();
-          });
-          nextBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(nextBtn.container);
-        }
-      }
-
-      const closeBtn = makeButton(this, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
-        cleanup();
-        this.panelOpen = false;
-        this.updateHud();
-      });
-      closeBtn.container.setScrollFactor(0).setDepth(201);
-      elements.push(closeBtn.container);
-    };
-
-    render();
+  private openSkinPanel(mode: "shop" | "wardrobe") {
+    openSkinPanel(this.shopPanelHost, mode);
   }
 
   /**
-   * Shared panel for both the Skin Attendant ("shop" - buy skins you don't
-   * own) and the Clothes corner button ("wardrobe" - equip a skin you do
-   * own). Paginated since the catalog is bigger than fits on one screen.
+   * Everything ui/ShopPanel.ts needs back from this scene. Each member is a
+   * straight hand-off to the private method the panel code used to call
+   * directly when it lived here - no new behaviour, just a named seam.
    */
-  private openSkinPanel(mode: "shop" | "wardrobe") {
-    this.panelOpen = true;
-    playSfx(this, "open");
-    let page = 0;
-    const itemsPerPage = 4;
-    let elements: Phaser.GameObjects.GameObject[] = [];
-
-    // Catalog comes from the skin shop backend (economy/skinShop.ts), not
-    // GameState directly - owned/equipped state still comes from GameState
-    // since that's the player's live profile data, not catalog data.
-    const getItems = (): readonly SkinDef[] =>
-      mode === "shop"
-        ? listSkins().filter((s) => !gameState.ownsSkin(s.id))
-        : listSkins().filter((s) => gameState.ownsSkin(s.id));
-
-    const cleanup = () => {
-      elements.forEach((e) => e.destroy());
-      elements = [];
-    };
-
-    const render = () => {
-      cleanup();
-      const items = getItems();
-      const totalPages = Math.max(1, Math.ceil(items.length / itemsPerPage));
-      page = Phaser.Math.Clamp(page, 0, totalPages - 1);
-      const pageItems = items.slice(page * itemsPerPage, page * itemsPerPage + itemsPerPage);
-
-      const panel = makePanel(this, 400, 300, 460, 440, 200).setScrollFactor(0);
-      elements.push(panel);
-
-      const title = this.add
-        .text(400, 140, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
-          fontSize: "20px",
-          color: Theme.textGold,
-          fontStyle: "bold"
-        })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(title);
-
-      const sub = this.add
-        .text(
-          400,
-          162,
-          mode === "shop" ? `You have ${gameState.tickets} Tickets` : "Pick a look to wear",
-          { fontSize: "13px", color: Theme.textMuted }
-        )
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(sub);
-
-      if (pageItems.length === 0) {
-        const empty = this.add
-          .text(
-            400,
-            280,
-            mode === "shop"
-              ? "You own every skin!"
-              : "Nothing owned yet.\nVisit the Item Shop to buy one.",
-            { fontSize: "14px", color: Theme.textMuted, align: "center" }
-          )
-          .setOrigin(0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(empty);
+  private get shopPanelHost(): ShopPanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      },
+      updateHud: () => this.updateHud(),
+      showToast: (message, color) => this.showToast(message, color),
+      applyEquippedAccessory: () => this.applyEquippedAccessory(),
+      applyEquippedPet: () => this.applyEquippedPet(),
+      applyPlayerSkin: (textureKey) => {
+        this.player.setTexture(textureKey, this.player.frame.name);
+        this.applyPlayerBody();
+        this.applyPlayerScale();
       }
-
-      pageItems.forEach((def, i) => {
-        const y = 165 + i * 58;
-        const row = makeInset(this, 400, y, 400, 48, 10);
-        row.setScrollFactor(0).setDepth(200);
-        elements.push(row);
-
-        const isEquipped = mode === "wardrobe" && gameState.currentSkin === def.id;
-
-        // Small preview of the skin's idle-down pose, so you can see what
-        // you're buying/wearing before committing
-        const preview = this.add
-          .image(219, y, def.textureKey, 1)
-          .setOrigin(0.5)
-          .setScale(1.4)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(preview);
-
-        const nameLabel = this.add
-          .text(252, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
-            fontSize: "14px",
-            color: isEquipped ? Theme.textAccent : Theme.textPrimary,
-            fontStyle: isEquipped ? "bold" : "normal"
-          })
-          .setOrigin(0, 0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(nameLabel);
-
-        if (mode === "shop") {
-          const priceLabel = this.add
-            .text(370, y, `${def.price} Tickets`, { fontSize: "13px", color: Theme.textMuted })
-            .setOrigin(0, 0.5)
-            .setScrollFactor(0)
-            .setDepth(201);
-          elements.push(priceLabel);
-
-          const canAfford = gameState.tickets >= def.price;
-          const buyBtn = makeButton(
-            this,
-            540,
-            y,
-            90,
-            42,
-            "Buy",
-            canAfford ? Theme.accent : Theme.neutral,
-            canAfford ? Theme.accentHover : Theme.neutral,
-            () => {
-              // Task #37: POST /skins/buy - TICKETS-only, server-authoritative.
-              // The canAfford/ownership checks above are optimistic UI only;
-              // the server re-checks both (INSUFFICIENT_TICKETS/ALREADY_OWNED)
-              // and is the one that actually decides. A purchase now also
-              // equips server-side (economy/skinShop.ts's purchaseSkin, per
-              // product decision: buying a skin means wearing it) - so
-              // `res.user.equippedSkin` is already the new skin here, and
-              // the player sprite needs the same texture/body/scale update
-              // the "Wear" button below applies, not just a balance refresh.
-              buyBtn.setEnabled(false);
-              api
-                .buySkin(def.id)
-                .then((res) => {
-                  // Retention Leg 1 - same rationale as the Item Shop's
-                  // buy handler above.
-                  track(EVENTS.SKIN_PURCHASED, { skinId: def.id, price: def.price });
-                  gameState.hydrateFromServer(res.user);
-                  this.player.setTexture(def.textureKey, this.player.frame.name);
-                  this.applyPlayerBody();
-                  this.applyPlayerScale();
-                  this.updateHud();
-                  this.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
-                  playSfx(this, "confirm");
-                  render();
-                  // Onboarding tutorial's Skin Attendant hands-on step
-                  // (see startOnboardingTutorial) listens for this -
-                  // harmless no-op emit when the tutorial isn't running.
-                  this.events.emit("tutorial:skinPurchased");
-                })
-                .catch((err) => {
-                  this.showToast(this.describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
-                  playSfx(this, "error");
-                  render();
-                });
-            }
-          );
-          if (!canAfford) buyBtn.setEnabled(false);
-          buyBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(buyBtn.container);
-        } else {
-          const wearBtn = makeButton(
-            this,
-            540,
-            y,
-            90,
-            42,
-            isEquipped ? "Worn" : "Wear",
-            isEquipped ? Theme.neutral : Theme.accent,
-            isEquipped ? Theme.neutral : Theme.accentHover,
-            () => {
-              // Task #37: POST /skins/equip - server-authoritative; only
-              // touch the player's texture/body once the server confirms.
-              wearBtn.setEnabled(false);
-              api
-                .equipSkin(def.id)
-                .then((res) => {
-                  // Retention Leg 1 - same rationale as the item "Wear"
-                  // handler above.
-                  track(EVENTS.ITEM_EQUIPPED, { skinId: def.id });
-                  gameState.hydrateFromServer(res.user);
-                  this.player.setTexture(def.textureKey, this.player.frame.name);
-                  // Re-tune the collision body and on-screen scale for
-                  // whichever rig this skin uses (16x16 Kenney vs 21x32
-                  // legacy) - see applyPlayerBody's/applyPlayerScale's comments.
-                  this.applyPlayerBody();
-                  this.applyPlayerScale();
-                  render();
-                })
-                .catch((err) => {
-                  this.showToast(this.describeSkinError(err, `wear ${def.name}`), Theme.textDanger);
-                  render();
-                });
-            }
-          );
-          if (isEquipped) wearBtn.setEnabled(false);
-          wearBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(wearBtn.container);
-        }
-      });
-
-      if (totalPages > 1) {
-        // Y=405 (was 435) - see closeBtn's comment below, this row and
-        // Close both had to move up together to fit the mobile-crop-safe
-        // zone (y<=470) with Close still below this row.
-        const pageLabel = this.add
-          .text(400, 405, `Page ${page + 1} / ${totalPages}`, {
-            fontSize: "12px",
-            color: Theme.textMuted
-          })
-          .setOrigin(0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(pageLabel);
-
-        if (page > 0) {
-          const prevBtn = makeButton(
-            this,
-            290,
-            405,
-            90,
-            34,
-            "◀ Prev",
-            Theme.neutral,
-            Theme.neutralHover,
-            () => {
-              page--;
-              render();
-            }
-          );
-          prevBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(prevBtn.container);
-        }
-        if (page < totalPages - 1) {
-          const nextBtn = makeButton(
-            this,
-            510,
-            405,
-            90,
-            34,
-            "Next ▶",
-            Theme.neutral,
-            Theme.neutralHover,
-            () => {
-              page++;
-              render();
-            }
-          );
-          nextBtn.container.setScrollFactor(0).setDepth(201);
-          elements.push(nextBtn.container);
-        }
-      }
-
-      // Y=450, not the original 490 - keeps this button's full height
-      // inside the measured mobile-crop-safe zone y=[130,470] (see
-      // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM).
-      const closeBtn = makeButton(this, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
-        cleanup();
-        this.panelOpen = false;
-        this.updateHud();
-      });
-      closeBtn.container.setScrollFactor(0).setDepth(201);
-      elements.push(closeBtn.container);
     };
-
-    render();
   }
 
   private buildFloor() {
