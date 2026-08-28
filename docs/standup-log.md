@@ -80,3 +80,33 @@ notice can buy out the Item Shop far faster than intended.
    apply, and explicit confirmation that the "not a sweepstakes" position holds up as built.
 
 See `docs/legal/open-questions.md` for the full list.
+
+---
+
+## Session — 2026-08-28 (evening, live with founder)
+
+**Merged and live on goldcoastv1.netlify.app:**
+- Player activity tracking (PR #2) — migration deployed to prod, verified serving
+- Game payout rebalance (PR #3) — Plinko 190%→97%, Slots 151%→96%, Roulette green 54%→97%
+- Currency wording (PR #4) — Triple Chance and shuffle-cup now name Gold Coins
+- Shop panels extracted from OverworldScene (PR #6) — 2,401 → 1,885 lines
+- Stake visual foundation (PR #5) — design tokens, rebuilt game shell, Limbo converted
+- Warm overworld palette + Baloo 2 font (PR #7) — also fixed a pre-existing contrast failure on the BET button (white-on-orange, 2.41:1)
+
+**Founder decisions this session:**
+- Approved the Stake look on Limbo → rolling out to the other 13 games
+- All 14 games are being KEPT — no cutting underperformers
+- Dragon Tower's 213.6% payout deferred to a later game-mechanics pass
+- Legal/compliance work paused entirely until a CLO agent exists
+- No timeline estimates — check-ins are the control
+- Art: AI-generated, $0 budget, games before overworld
+
+**In progress:**
+- Converting the remaining 13 games to the Stake look (also fixes them being wrongly warm — they share the palette that was warmed for the overworld)
+- Character rig foundation: one base character with swappable outfits, via the LPC generator. Code side is agent work; the art itself needs the founder (agents cannot generate images).
+
+**Known open items:**
+- Dragon Tower still returns 213.6% — deliberate, deferred
+- Overworld station name-tags and bench/hedge tints still cold blue — one-line fixes, were in a file under concurrent edit
+- Ground shadows and larger characters — the other two "free" visual wins from the art review, not yet done
+- Coin Kiosk still to be extracted from OverworldScene (Leg 2, second half)
