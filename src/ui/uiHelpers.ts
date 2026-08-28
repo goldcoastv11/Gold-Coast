@@ -804,6 +804,62 @@ export function drawCabinetFrame(
 }
 
 /**
+ * The sidebar balance line, worded and spaced identically in all 14 games.
+ *
+ * GC and TICKETS are separate ledgers (see CLAUDE.md's economy rules), so
+ * they are shown as two named figures and never summed into one total.
+ * Spelling both names out - rather than the coin/ticket emoji pair the
+ * games used to print - is part of the outstanding display-copy pass, and
+ * having exactly one function produce this string is what stops the
+ * fourteen copies of it drifting apart again.
+ */
+export function formatBalance(goldCoins: number, tickets: number): string {
+  return `${goldCoins} Gold Coins  ·  ${tickets} Tickets`;
+}
+
+/**
+ * The four states a playing-card rectangle can be in, for the four games
+ * that deal cards (Blackjack, Baccarat, Hi-Lo, Video Poker).
+ *
+ * - `empty`  an un-dealt slot: a recessed well, same as any other inset
+ * - `back`   a face-down card: just a raised surface, i.e. a control
+ * - `face`   a dealt card: the one light surface in the system (Tokens.card)
+ * - `held`   a dealt card the player has locked in (Video Poker only)
+ *
+ * Note there is no stroke on the first three. Every one of these used to be
+ * drawn as fill + a 1-2px outline; in this system a card separates from the
+ * board by BEING a different surface (direction note 3), and the only
+ * survivor is `held`'s accent ring, which marks a real player choice rather
+ * than decorating an edge.
+ */
+export type CardSurface = "empty" | "back" | "face" | "held";
+
+export function drawCardSurface(
+  g: Phaser.GameObjects.Graphics,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  surface: CardSurface,
+  radius: number = Tokens.radius.sm
+) {
+  const fill =
+    surface === "empty"
+      ? Tokens.color.inset
+      : surface === "back"
+        ? Tokens.card.back
+        : Tokens.card.face;
+
+  g.fillStyle(fill, 1);
+  g.fillRoundedRect(x - w / 2, y - h / 2, w, h, radius);
+
+  if (surface === "held") {
+    g.lineStyle(2, Tokens.color.accent, 1);
+    g.strokeRoundedRect(x - w / 2, y - h / 2, w, h, radius);
+  }
+}
+
+/**
  * Result-reveal pop. Kept much quieter than the old 0.4 -> 1 spring: this
  * is the one place the emphasis ease is allowed (direction note 5), and it
  * now reads as a confident settle rather than a cartoon bounce.

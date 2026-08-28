@@ -9,6 +9,7 @@ import { TxClient } from "./economy/ledger";
 import { getBalance } from "./economy/ledger";
 import { listOwnedSkins, getEquippedSkin } from "./economy/skinShop";
 import { listOwnedItems, getEquippedItem } from "./economy/itemShop";
+import { getProgressionForDisplay } from "./progression/progress";
 import { prisma } from "./db";
 
 export interface MeResponse {
@@ -35,6 +36,16 @@ export interface MeResponse {
    * without needing to have remembered which game/round it was.
    */
   activeRound: { game: string; roundId: string } | null;
+  /**
+   * The player's level ("prestige number") and total XP - see
+   * progression/levels.ts. Included here rather than left to GET
+   * /progression so the level can be shown anywhere the player is shown
+   * without a second round trip. Read defensively (see
+   * getProgressionForDisplay) - degrades to level 1 rather than breaking
+   * every authenticated response on an environment where the progression
+   * migration hasn't been applied yet.
+   */
+  progression: { level: number; xp: number };
 }
 
 /**
@@ -110,7 +121,8 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     lastPosition,
     attendantClaim,
     adRewardLastClaimedAt,
-    activeRound
+    activeRound,
+    progression
   ] = await Promise.all([
     getBalance(tx, userId, "GC"),
     getBalance(tx, userId, "TICKETS"),
@@ -120,7 +132,8 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     tx.lastPosition.findUnique({ where: { userId } }),
     tx.attendantClaim.findUnique({ where: { userId } }),
     getAdRewardLastClaimedAt(userId),
-    tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } })
+    tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } }),
+    getProgressionForDisplay(userId)
   ]);
 
   return {
@@ -139,6 +152,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     adReward: {
       lastClaimedAt: adRewardLastClaimedAt
     },
-    activeRound: activeRound ? { game: activeRound.game, roundId: activeRound.id } : null
+    activeRound: activeRound ? { game: activeRound.game, roundId: activeRound.id } : null,
+    progression
   };
 }

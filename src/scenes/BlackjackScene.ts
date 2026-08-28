@@ -1,11 +1,15 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeButton,
-  makeInset,
+  makeText,
+  makeDivider,
   makeGameShell,
+  formatBalance,
+  drawCabinetFrame,
+  drawCardSurface,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -45,17 +49,50 @@ function displayCard(rank: number): Card {
 
 const CARD_W = 40;
 const CARD_H = 56;
-const CARD_GAP = 8;
+const CARD_GAP = Tokens.space.sm;
 
-// Stake-style layout: table/dealer/hands/action buttons centered in the
-// shell's right-side display area (see ui/uiHelpers.ts's makeGameShell) -
-// the sidebar now occupies the left third of the screen. The table image
-// and dealer/player hand rows keep the same vertical offsets they had from
-// the old canvas center (400,300) since the display area has plenty of
-// height; only horizontal spacing (table width, dealer sprite, action
-// buttons) was narrowed to fit the ~430px-wide display area.
+/**
+ * BLACKJACK, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * The gold trim frame is gone - the board is the same flat surface every
+ * other converted game sits on - and the two hands are separated by one
+ * hairline instead of by a stack of boxes. Cards come from the shared card
+ * surfaces (uiHelpers' drawCardSurface).
+ *
+ * PARTIALLY CONVERTED, deliberately: `blackjack_table` is a fixed felt
+ * image asset and `dealer_sheet` is a fixed sprite sheet. Neither can be
+ * re-toned from tokens without redrawing the art, so the felt is dropped to
+ * a low alpha where it reads as texture over the token surface rather than
+ * as its own warm colour, and the dealer is left exactly as drawn.
+ *
+ * This pass also fixed a real layout bug rather than just a colour one: HIT
+ * and STAND used to sit at y=540, and the dealer's speech bubble at y=100,
+ * both well outside the mobile-landscape safe zone (uiHelpers.ts's
+ * SAFE_ZONE_TOP/BOTTOM = 130/470) - i.e. croppable on a real phone. Every
+ * element now sits inside the band, and the bubble's instruction moved to
+ * the shell's message line, which is where every other converted game puts
+ * its "here's what to do" copy.
+ */
 const DX = GAME_SHELL_DISPLAY_CENTER_X;
 const DY = GAME_SHELL_DISPLAY_CENTER_Y;
+const BOARD_W = 410;
+const BOARD_H = 330;
+const BOARD_LEFT = DX - BOARD_W / 2 + Tokens.space.xxl;
+const BOARD_RIGHT = DX + BOARD_W / 2 - Tokens.space.xxl;
+
+const DEALER_TOTAL_Y = 162;
+const DEALER_CARDS_Y = 214;
+const DIVIDER_Y = 262;
+const PLAYER_CARDS_Y = 314;
+const PLAYER_TOTAL_Y = 366;
+const ACTION_BTN_Y = 412;
+const ACTION_BTN_H = 40;
+const ACTION_BTN_W = (BOARD_RIGHT - BOARD_LEFT - Tokens.space.sm) / 2;
+const DEALER_SPRITE_X = DX - 168;
+const DEALER_SPRITE_Y = 190;
+const DEALER_SPRITE_SCALE = 2.4;
+/** The felt asset can't be re-toned from tokens, so it runs quiet enough to read as texture. */
+const TABLE_ART_ALPHA = 0.3;
 
 export class BlackjackScene extends Phaser.Scene {
   private playerHand: Card[] = [];
@@ -94,7 +131,7 @@ export class BlackjackScene extends Phaser.Scene {
     this.active = false;
     this.busy = false;
     this.roundId = null;
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. This game has no cash-out concept, so
@@ -114,46 +151,81 @@ export class BlackjackScene extends Phaser.Scene {
     this.walkAwayBtn = this.shell.walkAwayBtn;
     this.betControl = this.shell.betControl;
 
-    // Real table art as backdrop
-    this.add.image(DX, DY, "blackjack_table").setDisplaySize(410, 320).setAlpha(0.85);
+    // Flat board surface - the stroked gold trim frame is gone; the board is
+    // defined by where the surface ends (direction note 3).
+    drawCabinetFrame(this, DX, DY, BOARD_W, BOARD_H);
 
-    // Thin gold trim frame around the table, matching the "arcade cabinet"
-    // gold border every other game now has (see uiHelpers.ts's
-    // drawCabinetFrame) - stroke-only (no fill) so the felt table art
-    // underneath stays fully visible, just gives it a finished edge instead
-    // of fading into the plain dark background. Sized to the same 130-470
-    // safe-zone height every game respects (see SAFE_ZONE_TOP/BOTTOM).
-    this.add.graphics().lineStyle(4, Theme.gold, 1).strokeRoundedRect(DX - 215, DY - 170, 430, 340, 16);
+    // Real felt art as backdrop, over the token surface and under everything
+    // else. It's fixed art and can't be re-toned from tokens, so it runs
+    // quiet enough to read as texture rather than as its own warm colour.
+    this.add.image(DX, DY, "blackjack_table").setDisplaySize(BOARD_W, BOARD_H).setAlpha(TABLE_ART_ALPHA);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
-    const dealer = this.add.sprite(DX - 165, DY - 190, "dealer_sheet", 1).setScale(3.4);
+    // Was at DY-190 (=110), above SAFE_ZONE_TOP and croppable on a phone;
+    // now stands inside the band, in the board's own left gutter.
+    const dealer = this.add
+      .sprite(DEALER_SPRITE_X, DEALER_SPRITE_Y, "dealer_sheet", 1)
+      .setScale(DEALER_SPRITE_SCALE);
     dealer.play("dealer_walk_down");
 
-    makeInset(this, DX + 45, DY - 200, 170, 40, 12);
-    this.add
-      .text(DX + 45, DY - 200, "Get closer to 21 than\nme without busting!", {
-        fontSize: "10px",
-        color: Theme.textPrimary,
-        align: "center"
-      })
-      .setOrigin(0.5);
+    // --- Dealer hand ---------------------------------------------------
+    // The dealer's "Get closer to 21 than me without busting!" speech bubble
+    // is gone - that instruction now lives on the shell's message line,
+    // which is where every other converted game puts its "here's what to
+    // do" copy.
+    this.dealerTotalText = makeText(this, DX, DEALER_TOTAL_Y, "", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5
+    });
 
-    this.dealerTotalText = this.add
-      .text(DX, DY - 155, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
+    makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
 
-    this.playerTotalText = this.add
-      .text(DX, DY + 150, "", { fontSize: "14px", color: Theme.textGold, fontStyle: "bold" })
-      .setOrigin(0.5);
+    // --- Player hand ---------------------------------------------------
+    this.playerTotalText = makeText(this, DX, PLAYER_TOTAL_Y, "", {
+      size: Tokens.type.size.xl,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5
+    });
 
-    this.hitBtn = makeButton(this, DX - 80, DY + 240, 130, 44, "HIT", Theme.accent, Theme.accentHover, () =>
-      this.hit()
+    // HIT is the live action while a hand is in play, so it takes the accent
+    // - the shell's own DEAL button is hidden for exactly that stretch, so
+    // there is still only ever one accent on screen. STAND is the quiet
+    // alternative beside it.
+    this.hitBtn = makeButton(
+      this,
+      BOARD_LEFT + ACTION_BTN_W / 2,
+      ACTION_BTN_Y,
+      ACTION_BTN_W,
+      ACTION_BTN_H,
+      "HIT",
+      Tokens.color.accent,
+      Tokens.color.accentHover,
+      () => this.hit(),
+      Tokens.text.onAccent,
+      Tokens.radius.md
     );
-    this.standBtn = makeButton(this, DX + 80, DY + 240, 130, 44, "STAND", Theme.neutral, Theme.neutralHover, () =>
-      this.stand()
+    this.standBtn = makeButton(
+      this,
+      BOARD_RIGHT - ACTION_BTN_W / 2,
+      ACTION_BTN_Y,
+      ACTION_BTN_W,
+      ACTION_BTN_H,
+      "STAND",
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.stand(),
+      Tokens.text.secondary,
+      Tokens.radius.md
     );
 
-    this.messageText.setText("Press DEAL to start a hand");
+    this.messageText
+      .setText("Get closer to 21 than the dealer without busting.")
+      .setColor(Tokens.text.muted);
     this.setActionButtonsVisible(false);
     this.renderHands();
     this.updateBalance();
@@ -163,7 +235,7 @@ export class BlackjackScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -171,7 +243,7 @@ export class BlackjackScene extends Phaser.Scene {
     this.busy = true;
     this.newHandBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Dealing...").setColor(Theme.textMuted);
+    this.messageText.setText("Dealing...").setColor(Tokens.text.muted);
     playSfx(this, "cardShuffle");
     playSfx(this, "cardSlide");
 
@@ -223,7 +295,7 @@ export class BlackjackScene extends Phaser.Scene {
               this.betControl?.setEnabled(true);
               this.messageText
                 .setText("Couldn't recover an unfinished round - please try again.")
-                .setColor(Theme.textDanger);
+                .setColor(Tokens.text.negative);
             });
           return;
         }
@@ -276,7 +348,7 @@ export class BlackjackScene extends Phaser.Scene {
           this.active = false;
           this.dealerHand = this.revealDealerHand(res.state.dealerHand ?? []);
           this.dealerHoleHidden = false;
-          this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          this.messageText.setText("Bust! You lose your bet.").setColor(Tokens.text.negative);
           playSfx(this, "lose");
           this.updateBalance();
           this.endHand();
@@ -322,28 +394,28 @@ export class BlackjackScene extends Phaser.Scene {
 
   private resolveMessage(outcome: BlackjackOutcome | null, payout: number) {
     if (outcome === "win") {
-      this.messageText.setText(`You win! +${payout} Tickets`).setColor(Theme.textAccent);
+      this.messageText.setText(`You win! +${payout} Tickets`).setColor(Tokens.text.accent);
       popIn(this, this.messageText);
       showWinCelebration(this, payout);
     } else if (outcome === "push") {
       // A push still pays TICKETS = the GC bet amount (the GC wager itself
       // was already spent at start time) - no "bet returned" in this
       // currency, just a payout.
-      this.messageText.setText(`Push! +${payout} Tickets`).setColor(Theme.textMuted);
+      this.messageText.setText(`Push! +${payout} Tickets`).setColor(Tokens.text.muted);
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText("Dealer wins").setColor(Theme.textDanger);
+      this.messageText.setText("Dealer wins").setColor(Tokens.text.negative);
       playSfx(this, "lose");
     }
   }
 
   private showApiError(err: unknown, insufficientBalanceMessage: string) {
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+      this.messageText.setText(insufficientBalanceMessage).setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
@@ -364,11 +436,11 @@ export class BlackjackScene extends Phaser.Scene {
   }
 
   private renderHands() {
-    this.drawHand(this.dealerCardObjects, this.dealerHand, DX, DY - 110, this.dealerHoleHidden);
-    this.drawHand(this.playerCardObjects, this.playerHand, DX, DY + 100, false);
+    this.drawHand(this.dealerCardObjects, this.dealerHand, DX, DEALER_CARDS_Y, this.dealerHoleHidden);
+    this.drawHand(this.playerCardObjects, this.playerHand, DX, PLAYER_CARDS_Y, false);
 
-    this.dealerTotalText.setText(this.dealerHoleHidden ? "Dealer" : `Dealer: ${this.dealerTotal()}`);
-    this.playerTotalText.setText(this.playerHand.length > 0 ? `You: ${this.playerTotal()}` : "");
+    this.dealerTotalText.setText(this.dealerHoleHidden ? "DEALER" : `DEALER  ${this.dealerTotal()}`);
+    this.playerTotalText.setText(this.playerHand.length > 0 ? `You  ${this.playerTotal()}` : "");
   }
 
   /** Client-side display-only total (server always computes the authoritative one for payout) - fine here since suit never affects value and rank labels round-trip cleanly. */
@@ -403,31 +475,46 @@ export class BlackjackScene extends Phaser.Scene {
     });
   }
 
-  /** Draws a single playing-card visual (white rounded box + rank/suit), or a face-down back if card is null. */
+  /**
+   * Draws a single playing-card visual, or a face-down back if card is null.
+   *
+   * Both come from the shared card surfaces (uiHelpers' drawCardSurface), so
+   * all four card games in the project print the same card. Neither has an
+   * outline any more - a card separates from the board by BEING a different
+   * surface, and a face-down card is simply a raised surface, i.e. it reads
+   * as a control, which is exactly what it is.
+   */
   private drawCardVisual(x: number, y: number, card: Card | null): Phaser.GameObjects.GameObject[] {
+    const g = this.add.graphics();
+
     if (!card) {
-      const back = this.add
-        .rectangle(x, y, CARD_W, CARD_H, Theme.secondary)
-        .setStrokeStyle(2, Theme.cardBorder);
-      const pattern = this.add
-        .text(x, y, "?", { fontSize: "22px", color: Theme.textPrimary, fontStyle: "bold" })
-        .setOrigin(0.5);
-      return [back, pattern];
+      drawCardSurface(g, x, y, CARD_W, CARD_H, "back");
+      const pattern = makeText(this, x, y, "?", {
+        size: Tokens.type.glyph.md,
+        weight: Tokens.type.weight.semibold,
+        color: Tokens.text.secondary,
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
+      return [g, pattern];
     }
 
-    const bg = this.add.rectangle(x, y, CARD_W, CARD_H, Theme.cardFace).setStrokeStyle(2, Theme.cardBorder);
-    const color = isRed(card) ? Theme.cardTextRed : Theme.cardTextBlack;
-    const rankText = this.add
-      .text(x, y - 8, card.rank, { fontSize: "18px", color, fontStyle: "bold" })
-      .setOrigin(0.5);
-    const suitText = this.add
-      .text(x, y + 14, card.suit, { fontSize: "14px", color })
-      .setOrigin(0.5);
-    return [bg, rankText, suitText];
+    drawCardSurface(g, x, y, CARD_W, CARD_H, "face");
+    const color = isRed(card) ? Tokens.card.inkRed : Tokens.card.ink;
+    const label = makeText(this, x, y, `${card.rank}${card.suit}`, {
+      size: Tokens.type.glyph.xs,
+      weight: Tokens.type.weight.semibold,
+      color,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+    return [g, label];
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }
 

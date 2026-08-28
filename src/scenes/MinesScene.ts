@@ -1,9 +1,11 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
+  makeText,
   makeGameShell,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -24,7 +26,7 @@ const MINE_COUNT = 3;
 const SAFE_TILES = TOTAL_TILES - MINE_COUNT;
 
 const TILE_SIZE = 62;
-const TILE_GAP = 8;
+const TILE_GAP = Tokens.space.sm;
 // Stake-style layout: grid centered in the shell's right-side display area
 // (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
 // sidebar now occupies the left third of the screen.
@@ -36,6 +38,26 @@ interface TileVisual {
   bg: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text;
 }
+
+type TileState = "hidden" | "clickable" | "gem" | "mine";
+
+/**
+ * MINES tile states, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * Every tile used to be a fill PLUS a 2px coloured outline, so the grid read
+ * as 25 boxed cells. Here a tile is a bare surface and nothing else: an
+ * un-started tile is a recessed well, a playable tile is a raised control,
+ * and a resolved tile takes one of the two muted state tints. What a
+ * resolved tile MEANS is carried by its glyph and that glyph's colour - so
+ * the saturated accent stays reserved for the primary action and the win
+ * state (direction note 2), and no stroke boxes anything in (note 3).
+ */
+const TILE_FILL: Record<TileState, number> = {
+  hidden: Tokens.color.inset,
+  clickable: Tokens.color.surfaceRaised,
+  gem: Tokens.color.positiveMuted,
+  mine: Tokens.color.negativeMuted
+};
 
 export class MinesScene extends Phaser.Scene {
   private revealed: Set<number> = new Set();
@@ -70,7 +92,7 @@ export class MinesScene extends Phaser.Scene {
     this.roundId = null;
     this.revealed = new Set();
     this.tiles = [];
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     // Stake-style shell: left sidebar (title/balance/bet/multiplier/
     // message/Bet-Cashout/Walk Away) + open right-side display area for
@@ -94,7 +116,7 @@ export class MinesScene extends Phaser.Scene {
     // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM - so no vertical padding is added,
     // only horizontal, which has plenty of spare room).
     const gridSpan = GRID_SIZE * TILE_SIZE + (GRID_SIZE - 1) * TILE_GAP;
-    drawCabinetFrame(this, GRID_CENTER_X, GRID_CENTER_Y, gridSpan + 60, gridSpan);
+    drawCabinetFrame(this, GRID_CENTER_X, GRID_CENTER_Y, gridSpan + Tokens.space.huge, gridSpan);
 
     this.buildEmptyGridVisuals();
     this.updateBalance();
@@ -121,42 +143,29 @@ export class MinesScene extends Phaser.Scene {
   private makeTile(x: number, y: number): TileVisual {
     const container = this.add.container(x, y);
     const bg = this.add.graphics();
-    const label = this.add.text(0, 0, "", { fontSize: "18px" }).setOrigin(0.5);
+    const label = makeText(this, 0, 0, "", {
+      size: Tokens.type.glyph.sm,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
     container.add([bg, label]);
     this.paintTile(bg, label, "hidden");
     return { container, bg, label };
   }
 
-  private paintTile(
-    bg: Phaser.GameObjects.Graphics,
-    label: Phaser.GameObjects.Text,
-    state: "hidden" | "clickable" | "gem" | "mine"
-  ) {
-    bg.clear();
-    const colors = {
-      hidden: Theme.inset,
-      // Contrast sweep: was the same hardcoded 0xd9f5ec "very pale mint"
-      // leftover as DragonTowerScene's "active" tile (see its comment) -
-      // swapped to the same Theme.secondary for a consistent, dark-theme-
-      // appropriate "playable" highlight instead of another light literal.
-      clickable: Theme.secondary,
-      gem: Theme.winZone,
-      mine: Theme.loseZone
-    };
-    const border = {
-      hidden: Theme.panelBorder,
-      clickable: Theme.accent,
-      gem: Theme.accent,
-      mine: Theme.danger
-    };
-    bg.fillStyle(colors[state], 1);
-    bg.fillRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, 8);
-    bg.lineStyle(2, border[state], 1);
-    bg.strokeRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, 8);
+  private paintTile(bg: Phaser.GameObjects.Graphics, label: Phaser.GameObjects.Text, state: TileState) {
+    this.fillTile(bg, TILE_FILL[state]);
 
-    if (state === "gem") label.setText("💎").setColor(Theme.textAccent);
-    else if (state === "mine") label.setText("💣").setColor(Theme.textDanger);
-    else label.setText("").setColor(Theme.textMuted);
+    if (state === "gem") label.setText("💎").setColor(Tokens.text.accent);
+    else if (state === "mine") label.setText("💣").setColor(Tokens.text.negative);
+    else label.setText("").setColor(Tokens.text.muted);
+  }
+
+  private fillTile(bg: Phaser.GameObjects.Graphics, fill: number) {
+    bg.clear();
+    bg.fillStyle(fill, 1);
+    bg.fillRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, Tokens.radius.sm);
   }
 
   /**
@@ -171,7 +180,7 @@ export class MinesScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -179,7 +188,7 @@ export class MinesScene extends Phaser.Scene {
     this.busy = true;
     this.startBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Starting...").setColor(Theme.textMuted);
+    this.messageText.setText("Starting...").setColor(Tokens.text.muted);
 
     this.attemptStart(bet, true);
   }
@@ -205,7 +214,7 @@ export class MinesScene extends Phaser.Scene {
         this.picksMade = 0;
         this.revealed = new Set();
 
-        this.messageText.setText("Pick a tile - avoid the mines").setColor(Theme.textMuted);
+        this.messageText.setText("Pick a tile - avoid the mines").setColor(Tokens.text.muted);
         this.multiplierText.setText("Multiplier: 1.00x");
 
         this.startBtn?.container.setVisible(false);
@@ -230,7 +239,7 @@ export class MinesScene extends Phaser.Scene {
               this.betControl?.setEnabled(true);
               this.messageText
                 .setText("Couldn't recover an unfinished round - please try again.")
-                .setColor(Theme.textDanger);
+                .setColor(Tokens.text.negative);
             });
           return;
         }
@@ -279,6 +288,10 @@ export class MinesScene extends Phaser.Scene {
         this.paintTile(tile.bg, tile.label, "clickable");
         tile.container.setSize(TILE_SIZE, TILE_SIZE);
         tile.container.setInteractive({ useHandCursor: true });
+        // Hover lifts the tile one surface step, the same way every button
+        // in this system signals "you can press this" - no glow, no ring.
+        tile.container.on("pointerover", () => this.fillTile(tile.bg, Tokens.color.surfaceHover));
+        tile.container.on("pointerout", () => this.fillTile(tile.bg, TILE_FILL.clickable));
         tile.container.on("pointerdown", () => this.pickTile(index));
       } else {
         this.paintTile(tile.bg, tile.label, this.active ? "clickable" : "hidden");
@@ -317,7 +330,7 @@ export class MinesScene extends Phaser.Scene {
         if (res.hitMine) {
           this.active = false;
           this.revealMines(res.minePositions ?? []);
-          this.messageText.setText("💥 Boom! You lose your bet.").setColor(Theme.textDanger);
+          this.messageText.setText("💥 Boom! You lose your bet.").setColor(Tokens.text.negative);
           playSfx(this, "bust");
           playSfx(this, "lose");
           this.updateBalance();
@@ -343,14 +356,14 @@ export class MinesScene extends Phaser.Scene {
           // without the server needing to send them explicitly.
           const mines = Array.from({ length: TOTAL_TILES }, (_, i) => i).filter((i) => !this.revealed.has(i));
           this.revealMines(mines);
-          this.messageText.setText(`Board cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
+          this.messageText.setText(`Board cleared! +${res.payout ?? 0} Tickets`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
           this.endRound("win", res.payout ?? 0);
           return;
         }
 
-        this.messageText.setText("Cash out or keep picking").setColor(Theme.textMuted);
+        this.messageText.setText("Cash out or keep picking").setColor(Tokens.text.muted);
         this.cashOutBtn?.container.setVisible(true);
         this.cashOutBtn?.setEnabled(true);
         this.renderGridState();
@@ -376,7 +389,7 @@ export class MinesScene extends Phaser.Scene {
         this.busy = false;
         this.active = false;
         this.revealMines(res.minePositions);
-        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
+        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
         this.endRound("win", res.payout);
@@ -391,11 +404,11 @@ export class MinesScene extends Phaser.Scene {
 
   private showApiError(err: unknown, insufficientBalanceMessage: string) {
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+      this.messageText.setText(insufficientBalanceMessage).setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
@@ -431,6 +444,6 @@ export class MinesScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

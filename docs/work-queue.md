@@ -25,7 +25,7 @@ items half-done.
 
 ---
 
-## 1. Add the daily metrics script — STATUS: TODO
+## 1. Add the daily metrics script — STATUS: DONE (merged, main)
 
 Copy the reviewed script into `server/scripts/metrics.js` (the founder's session has it staged; if
 it is not already at `server/scripts/metrics.js`, it needs writing from scratch — see the spec
@@ -45,7 +45,7 @@ It powers the CTO's daily numbers rundown. Requirements:
 
 Verify by running it against the LOCAL database only. Do not run `--prod` unattended.
 
-## 2. Client display-copy pass — STATUS: TODO
+## 2. Client display-copy pass — STATUS: DONE (PR #4, merged & live)
 
 CLAUDE.md flags this as outstanding: on-screen wording never caught up to the GC/TICKETS currency
 split, so some text says "Tickets" where it means Gold Coins.
@@ -64,7 +64,7 @@ is genuinely ambiguous, leave it and note it in the PR rather than guessing.
 Note: Triple Chance is deliberately GC-in/GC-out (see CLAUDE.md) — its wording should say Gold
 Coins on both sides. Do not "fix" that to Tickets.
 
-## 3. Split the shop panels out of OverworldScene — STATUS: TODO
+## 3. Split the shop panels out of OverworldScene — STATUS: DONE (PR #6, merged)
 
 Roadmap Leg 2, first half. `src/scenes/OverworldScene.ts` is ~2,400 lines and is simultaneously the
 casino floor, the tutorial, the Coin Kiosk, the shuffle mini-game, the skin panel and the item
@@ -89,7 +89,7 @@ Same rule — pure move, no behaviour change. Be especially careful with Triple 
 deliberate GC-in/GC-out exception settled through its own ledger calls in
 `server/src/routes/games.ts`, NOT through the shared helpers. Moving code must not change that.
 
-## 5. Stake-style visual overhaul — foundation + one game — STATUS: TODO
+## 5. Stake-style visual overhaul — foundation + one game — STATUS: DONE (PR #5, merged & live; founder approved the direction, rollout to the other 13 games in progress)
 
 The founder wants the whole product moved off its current 8-bit/pixel look. Two target styles, and
 this item is **only the first**:

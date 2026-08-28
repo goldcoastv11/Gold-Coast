@@ -1,10 +1,12 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeButton,
+  makeText,
   makeGameShell,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -21,14 +23,44 @@ import { playSfx, playMusic } from "../ui/SoundManager";
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
 
-// Stake-style layout: wheel centered in the shell's right-side display
-// area (see ui/uiHelpers.ts's makeGameShell), not the old canvas center -
-// the sidebar now occupies the left third of the screen. The display area
-// is ~430px wide (x: 360-790), comfortably wider than the wheel's 216px
-// diameter, so no scale-down is needed here.
-const WHEEL_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
-const WHEEL_CENTER_Y = GAME_SHELL_DISPLAY_CENTER_Y - 8;
+/**
+ * WHEEL, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * The wheel is one flat surface with no outer ring and no gold trim: it is
+ * defined by where its slices end, and the slices are separated by a cut of
+ * the page ground rather than by a stroked border (direction note 3). The
+ * segment colours are the surface ladder with exactly one accent tier - see
+ * Tokens.game.wheel for why - so a high-risk wheel reads as a dark disc
+ * with a single bright jackpot slice instead of a carnival colour wheel.
+ * Risk selection is marked by a lighter SURFACE and brighter text, the same
+ * way Limbo/Baccarat mark a selection, so the accent stays on SPIN.
+ *
+ * The risk row deliberately carries no micro-label above it: Low/Medium/High
+ * describe themselves, and the whole board has to fit the 130-470 mobile
+ * safe zone (uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) around a 216px wheel.
+ *
+ * The display area is ~430px wide (x: 360-790), comfortably wider than the
+ * wheel's diameter, so no scale-down is needed here.
+ */
+const BOARD_CX = GAME_SHELL_DISPLAY_CENTER_X;
+const BOARD_CY = GAME_SHELL_DISPLAY_CENTER_Y;
+const BOARD_W = 410;
+/** Fills the safe zone exactly: 300 +/- 170 = 130-470. */
+const BOARD_H = 340;
+const BOARD_LEFT = BOARD_CX - BOARD_W / 2 + Tokens.space.xxl;
+const BOARD_RIGHT = BOARD_CX + BOARD_W / 2 - Tokens.space.xxl;
+
+const RISK_BTN_Y = 152;
+const RISK_BTN_H = 30;
+const RISK_BTN_W = (BOARD_RIGHT - BOARD_LEFT - Tokens.space.sm * 2) / 3;
+
+const WHEEL_CENTER_X = BOARD_CX;
+const WHEEL_CENTER_Y = 318;
 const WHEEL_RADIUS = 108;
+const WHEEL_HUB_RADIUS = 14;
+/** Gap between the wheel's top edge and the tip of the fixed pointer. */
+const POINTER_GAP = Tokens.space.lg;
+const LEGEND_Y = 448;
 
 type RiskKey = "low" | "medium" | "high";
 
@@ -122,11 +154,12 @@ function buildSegmentValues(cfg: RiskConfig): number[] {
   return result;
 }
 
+/** Slice fill for a segment's multiplier - see Tokens.game.wheel for why these four steps. */
 function colorForMultiplier(m: number): number {
-  if (m <= 0) return Theme.danger;
-  if (m >= 8) return Theme.gold;
-  if (m >= 2) return Theme.accent;
-  return Theme.neutral;
+  if (m <= 0) return Tokens.game.wheel.zero;
+  if (m >= 8) return Tokens.game.wheel.jackpot;
+  if (m >= 2) return Tokens.game.wheel.mid;
+  return Tokens.game.wheel.low;
 }
 
 export class WheelScene extends Phaser.Scene {
@@ -153,7 +186,7 @@ export class WheelScene extends Phaser.Scene {
     this.risk = "low";
     this.spinning = false;
     this.riskButtons = {};
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.tweens.killTweensOf(this.wheelContainer);
@@ -171,35 +204,37 @@ export class WheelScene extends Phaser.Scene {
     this.messageText = this.shell.messageText;
     this.betControl = this.shell.betControl;
     this.spinBtn = this.shell.startBtn;
-    this.messageText.setText("Pick a risk level and spin").setColor(Theme.textMuted);
+    this.messageText.setText("Pick a risk level and spin").setColor(Tokens.text.muted);
 
-    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, 292, 410, 320);
+    drawCabinetFrame(this, BOARD_CX, BOARD_CY, BOARD_W, BOARD_H);
 
     this.renderRiskButtons();
 
-    // Wheel visual: a rotating container of pie slices, plus a fixed pointer at the top
+    // Wheel visual: a rotating container of pie slices, plus a fixed pointer
+    // at the top. The pointer is plain white so it stays legible over every
+    // slice colour without claiming one of its own (same reasoning as Dice's
+    // marker and Plinko's ball).
     this.wheelContainer = this.add.container(WHEEL_CENTER_X, WHEEL_CENTER_Y);
     this.add
       .triangle(
         WHEEL_CENTER_X,
-        WHEEL_CENTER_Y - WHEEL_RADIUS - 14,
+        WHEEL_CENTER_Y - WHEEL_RADIUS - POINTER_GAP,
         -9,
         -12,
         9,
         -12,
         0,
         6,
-        Theme.outline
+        Tokens.color.textPrimary
       )
       .setDepth(10);
 
-    this.legendText = this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 128, "", {
-        fontSize: "11px",
-        color: Theme.textGold,
-        align: "center"
-      })
-      .setOrigin(0.5);
+    this.legendText = makeText(this, BOARD_CX, LEGEND_Y, "", {
+      size: Tokens.type.size.sm,
+      color: Tokens.text.muted,
+      align: "center",
+      originX: 0.5
+    });
 
     this.rebuildWheel();
     this.updateBalance();
@@ -209,29 +244,28 @@ export class WheelScene extends Phaser.Scene {
     Object.values(this.riskButtons).forEach((b) => b?.destroy());
     this.riskButtons = {};
 
-    const xs: Record<RiskKey, number> = {
-      low: GAME_SHELL_DISPLAY_CENTER_X - 120,
-      medium: GAME_SHELL_DISPLAY_CENTER_X,
-      high: GAME_SHELL_DISPLAY_CENTER_X + 120
-    };
-    (Object.keys(RISK_CONFIGS) as RiskKey[]).forEach((key) => {
+    (Object.keys(RISK_CONFIGS) as RiskKey[]).forEach((key, i) => {
       const cfg = RISK_CONFIGS[key];
       const selected = key === this.risk;
       this.riskButtons[key] = makeButton(
         this,
-        xs[key],
-        GAME_SHELL_DISPLAY_CENTER_Y - 166,
-        110,
-        30,
+        BOARD_LEFT + RISK_BTN_W / 2 + i * (RISK_BTN_W + Tokens.space.sm),
+        RISK_BTN_Y,
+        RISK_BTN_W,
+        RISK_BTN_H,
         cfg.label,
-        selected ? Theme.accent : Theme.neutral,
-        selected ? Theme.accentHover : Theme.neutralHover,
+        // Selection reads as a lighter surface plus brighter text - never as
+        // accent colour, which belongs to SPIN (direction note 2).
+        selected ? Tokens.color.surfaceHover : Tokens.color.surfaceRaised,
+        Tokens.color.surfaceHover,
         () => {
           if (this.spinning || this.risk === key) return;
           this.risk = key;
           this.renderRiskButtons();
           this.rebuildWheel();
-        }
+        },
+        selected ? Tokens.text.primary : Tokens.text.secondary,
+        Tokens.radius.sm
       );
     });
   }
@@ -262,18 +296,20 @@ export class WheelScene extends Phaser.Scene {
       g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
       g.closePath();
       g.fillPath();
-      g.lineStyle(1, Theme.outline, 1);
+      // A 1px cut of the page ground between slices, so adjacent same-tier
+      // slices still read as separate segments. Not a decorative border -
+      // there is deliberately no ring drawn around the wheel any more.
+      g.lineStyle(1, Tokens.game.wheel.divider, 1);
       g.beginPath();
       g.moveTo(0, 0);
       g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
       g.closePath();
       g.strokePath();
     }
-    g.lineStyle(3, Theme.panelBorder, 1);
-    g.strokeCircle(0, 0, WHEEL_RADIUS);
     this.wheelContainer.add(g);
 
-    const hub = this.add.circle(0, 0, 14, Theme.outline).setStrokeStyle(2, Theme.panelBorder);
+    // Hub reads as a hole punched through the middle, so it drops to ground.
+    const hub = this.add.circle(0, 0, WHEEL_HUB_RADIUS, Tokens.game.wheel.hub);
     this.wheelContainer.add(hub);
   }
 
@@ -290,7 +326,7 @@ export class WheelScene extends Phaser.Scene {
     if (this.spinning) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -299,7 +335,7 @@ export class WheelScene extends Phaser.Scene {
     this.spinBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
     Object.values(this.riskButtons).forEach((b) => b?.setEnabled(false));
-    this.messageText.setText("Spinning...").setColor(Theme.textMuted);
+    this.messageText.setText("Spinning...").setColor(Tokens.text.muted);
 
     api
       .playWheel(bet, "GC", this.risk)
@@ -316,8 +352,8 @@ export class WheelScene extends Phaser.Scene {
         this.tweens.add({
           targets: this.wheelContainer,
           angle: targetAngle,
-          duration: 2600,
-          ease: "Cubic.Out",
+          duration: Tokens.motion.duration.spin,
+          ease: Tokens.motion.ease.out,
           onComplete: () => this.resolveSpin(res)
         });
       })
@@ -330,11 +366,11 @@ export class WheelScene extends Phaser.Scene {
     const { multiplier, payout } = res.result;
 
     if (payout > 0) {
-      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Theme.textAccent);
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Tokens.text.accent);
       popIn(this, this.legendText);
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText("Landed on 0x - you lose").setColor(Theme.textDanger);
+      this.messageText.setText("Landed on 0x - you lose").setColor(Tokens.text.negative);
       playSfx(this, "lose");
     }
 
@@ -352,15 +388,15 @@ export class WheelScene extends Phaser.Scene {
     Object.values(this.riskButtons).forEach((b) => b?.setEnabled(true));
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

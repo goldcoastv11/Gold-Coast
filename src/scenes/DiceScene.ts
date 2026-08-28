@@ -1,9 +1,12 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeButton,
+  makeText,
+  makeDivider,
   makeGameShell,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -25,12 +28,39 @@ const TARGET_STEP = 5;
 const DEFAULT_TARGET = 50;
 const HOUSE_EDGE_NUMERATOR = 99; // 99 instead of 100 -> ~1% house edge baked into the multiplier - mirrors server/src/games/dice.ts exactly, used here only for the live win-chance/multiplier preview before rolling
 
-const BAR_WIDTH = 340;
-// Stake-style layout: bar centered in the shell's right-side display area
-// (see ui/uiHelpers.ts's makeGameShell), not the old canvas center - the
-// sidebar now occupies the left third of the screen.
-const BAR_X = GAME_SHELL_DISPLAY_CENTER_X;
-const BAR_Y = GAME_SHELL_DISPLAY_CENTER_Y - 10;
+/**
+ * DICE, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * The board is one flat surface. A micro-label sits above the hero roll
+ * number, a single hairline separates the result from the controls, and the
+ * win/lose bar is the one place two saturated colours are allowed on this
+ * screen - the green run IS the win state and the red run IS the losing
+ * range, which is exactly the pair direction note 2 permits. The bar has no
+ * outline any more: it is defined by where its two fills meet.
+ */
+const BOARD_CX = GAME_SHELL_DISPLAY_CENTER_X;
+const BOARD_CY = GAME_SHELL_DISPLAY_CENTER_Y;
+const BOARD_W = 410;
+const BOARD_H = 300;
+/** Board content column, inset from the board surface by one token pad - same rule as Limbo. */
+const BOARD_LEFT = BOARD_CX - BOARD_W / 2 + Tokens.space.xxl;
+const BOARD_RIGHT = BOARD_CX + BOARD_W / 2 - Tokens.space.xxl;
+
+const BAR_X = BOARD_CX;
+const BAR_WIDTH = BOARD_RIGHT - BOARD_LEFT;
+const BAR_H = Tokens.space.md;
+
+/** Vertical rhythm, on the same label-above-value / hairline / controls stack Limbo uses. */
+const HERO_LABEL_Y = 210;
+const HERO_Y = 254;
+const DIVIDER_Y = 300;
+const SECTION_LABEL_Y = 320;
+const BAR_Y = 348;
+const TARGET_ROW_Y = 388;
+const STATS_Y = 424;
+
+const STEP_BTN_W = 44;
+const STEP_BTN_H = 32;
 
 /**
  * Client-side preview only, for the live "Win Chance / Multiplier" readout
@@ -73,7 +103,7 @@ export class DiceScene extends Phaser.Scene {
     this.rolling = false;
     this.rollTimer = undefined;
     this.lastRoll = null;
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.rollTimer) {
@@ -82,9 +112,6 @@ export class DiceScene extends Phaser.Scene {
       }
     });
 
-    // Stake-style shell: left sidebar (title/balance/bet/message/Roll/
-    // Walk Away) + open right-side display area for the roll number/zone
-    // bar/target - see ui/uiHelpers.ts's makeGameShell doc comment.
     this.shell = makeGameShell(this, "DICE", "ROLL", {
       onStart: () => this.roll(),
       onCashOut: () => {},
@@ -94,60 +121,82 @@ export class DiceScene extends Phaser.Scene {
     this.messageText = this.shell.messageText;
     this.betControl = this.shell.betControl;
     this.rollBtn = this.shell.startBtn;
-    this.messageText.setText("Roll under your target to win").setColor(Theme.textMuted);
+    this.messageText.setText("Roll under your target to win.").setColor(Tokens.text.muted);
 
-    drawCabinetFrame(this, GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y, 410, 300);
+    drawCabinetFrame(this, BOARD_CX, BOARD_CY, BOARD_W, BOARD_H);
 
-    this.rollText = this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y - 60, "--", {
-        fontSize: "44px",
-        color: Theme.textPrimary,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
+    // --- Hero result --------------------------------------------------
+    makeText(this, BOARD_CX, HERO_LABEL_Y, "ROLL", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5
+    });
+    this.rollText = makeText(this, BOARD_CX, HERO_Y, "--", {
+      size: Tokens.type.size.display,
+      weight: Tokens.type.weight.bold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5
+    });
 
-    // Win/lose zone bar with a marker for the last roll
+    makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
+
+    // --- Target picker ------------------------------------------------
+    makeText(this, BOARD_LEFT, SECTION_LABEL_Y, "ROLL UNDER", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps
+    });
+
     this.zoneBar = this.add.graphics();
+    // Marker for the last roll. Plain white so it reads against BOTH halves
+    // of the bar without needing a second colour of its own.
     this.marker = this.add
-      .triangle(BAR_X, BAR_Y - 16, -6, 8, 6, 8, 0, -6, Theme.outline)
+      .triangle(BAR_X, BAR_Y - BAR_H, -5, 7, 5, 7, 0, -5, Tokens.color.textPrimary)
       .setVisible(false);
 
     this.minusBtn = makeButton(
       this,
-      GAME_SHELL_DISPLAY_CENTER_X - 100,
-      GAME_SHELL_DISPLAY_CENTER_Y + 30,
-      44,
-      36,
-      "-5",
-      Theme.neutral,
-      Theme.neutralHover,
-      () => this.adjustTarget(-TARGET_STEP)
+      BOARD_LEFT + STEP_BTN_W / 2,
+      TARGET_ROW_Y,
+      STEP_BTN_W,
+      STEP_BTN_H,
+      `−${TARGET_STEP}`,
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.adjustTarget(-TARGET_STEP),
+      Tokens.text.secondary,
+      Tokens.radius.sm
     );
-    this.targetLabel = this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 30, "", {
-        fontSize: "15px",
-        color: Theme.textPrimary,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5);
+    this.targetLabel = makeText(this, BOARD_CX, TARGET_ROW_Y, "", {
+      size: Tokens.type.size.xl,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5
+    });
     this.plusBtn = makeButton(
       this,
-      GAME_SHELL_DISPLAY_CENTER_X + 100,
-      GAME_SHELL_DISPLAY_CENTER_Y + 30,
-      44,
-      36,
-      "+5",
-      Theme.neutral,
-      Theme.neutralHover,
-      () => this.adjustTarget(TARGET_STEP)
+      BOARD_RIGHT - STEP_BTN_W / 2,
+      TARGET_ROW_Y,
+      STEP_BTN_W,
+      STEP_BTN_H,
+      `+${TARGET_STEP}`,
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.adjustTarget(TARGET_STEP),
+      Tokens.text.secondary,
+      Tokens.radius.sm
     );
 
-    this.statsText = this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, GAME_SHELL_DISPLAY_CENTER_Y + 62, "", {
-        fontSize: "13px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
+    this.statsText = makeText(this, BOARD_CX, STATS_Y, "", {
+      size: Tokens.type.size.sm,
+      color: Tokens.text.muted,
+      align: "center",
+      originX: 0.5
+    });
 
     this.redrawZoneBar();
     this.updateTargetLabel();
@@ -162,27 +211,31 @@ export class DiceScene extends Phaser.Scene {
   }
 
   private updateTargetLabel() {
-    this.targetLabel.setText(`Roll Under: ${this.target}`);
+    this.targetLabel.setText(String(this.target));
     const mult = multiplierFor(this.target);
-    this.statsText.setText(`Win Chance: ${this.target}%      Multiplier: ${mult.toFixed(2)}x`);
+    this.statsText.setText(`Win chance ${this.target}%   ·   Pays ${mult.toFixed(2)}x`);
   }
 
-  /** Draws the green (win) / red (lose) zone bar for the current target. */
+  /** Draws the win (accent) / lose (negative) zone bar for the current target. */
   private redrawZoneBar() {
     const left = BAR_X - BAR_WIDTH / 2;
     const winWidth = (this.target / 100) * BAR_WIDTH;
 
     this.zoneBar.clear();
-    this.zoneBar.fillStyle(Theme.winZone, 1);
-    this.zoneBar.fillRoundedRect(left, BAR_Y - 9, winWidth, 18, 6);
-    this.zoneBar.fillStyle(Theme.loseZone, 1);
-    this.zoneBar.fillRoundedRect(left + winWidth, BAR_Y - 9, BAR_WIDTH - winWidth, 18, 6);
-    this.zoneBar.lineStyle(2, Theme.panelBorder, 1);
-    this.zoneBar.strokeRoundedRect(left, BAR_Y - 9, BAR_WIDTH, 18, 6);
+    this.zoneBar.fillStyle(Tokens.color.accent, 1);
+    this.zoneBar.fillRoundedRect(left, BAR_Y - BAR_H / 2, winWidth, BAR_H, Tokens.radius.xs);
+    this.zoneBar.fillStyle(Tokens.color.negative, 1);
+    this.zoneBar.fillRoundedRect(
+      left + winWidth,
+      BAR_Y - BAR_H / 2,
+      BAR_WIDTH - winWidth,
+      BAR_H,
+      Tokens.radius.xs
+    );
 
     if (this.lastRoll !== null) {
       const markerX = left + (this.lastRoll / 99) * BAR_WIDTH;
-      this.marker.setPosition(markerX, BAR_Y - 16).setVisible(true);
+      this.marker.setPosition(markerX, BAR_Y - BAR_H).setVisible(true);
     }
   }
 
@@ -199,7 +252,7 @@ export class DiceScene extends Phaser.Scene {
     if (this.rolling) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins.").setColor(Tokens.text.negative);
       return;
     }
 
@@ -210,11 +263,12 @@ export class DiceScene extends Phaser.Scene {
     this.minusBtn?.setEnabled(false);
     this.plusBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Rolling...").setColor(Theme.textMuted);
+    this.rollText.setColor(Tokens.text.primary);
+    this.messageText.setText("Rolling...").setColor(Tokens.text.muted);
     playSfx(this, "diceThrow");
 
     this.rollTimer = this.time.addEvent({
-      delay: 70,
+      delay: Tokens.motion.duration.instant,
       loop: true,
       callback: () => {
         if (this.rollText.active) {
@@ -251,13 +305,13 @@ export class DiceScene extends Phaser.Scene {
     this.redrawZoneBar();
 
     if (won) {
-      this.rollText.setColor(Theme.textAccent);
-      this.messageText.setText(`${roll} - under ${target}! +${payout} Tickets`).setColor(Theme.textAccent);
+      this.rollText.setColor(Tokens.text.accent);
+      this.messageText.setText(`Under ${target} - you win ${payout} Tickets.`).setColor(Tokens.text.accent);
       popIn(this, this.rollText);
       showWinCelebration(this, payout);
     } else {
-      this.rollText.setColor(Theme.textDanger);
-      this.messageText.setText(`${roll} - not under ${target}, you lose`).setColor(Theme.textDanger);
+      this.rollText.setColor(Tokens.text.negative);
+      this.messageText.setText(`Not under ${target}. No win this round.`).setColor(Tokens.text.secondary);
       playSfx(this, "lose");
     }
 
@@ -272,14 +326,14 @@ export class DiceScene extends Phaser.Scene {
   private handleRollError(err: unknown) {
     this.rollTimer?.remove(false);
     this.rollTimer = undefined;
-    this.rollText.setText("--");
+    this.rollText.setText("--").setColor(Tokens.text.primary);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins.").setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
 
     this.rolling = false;
@@ -290,6 +344,6 @@ export class DiceScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }
