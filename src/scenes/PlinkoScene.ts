@@ -1,9 +1,11 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeGameShell,
+  makeText,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   makeInset,
@@ -27,17 +29,34 @@ const BOARD_TOP_Y = 182;
 const BOARD_CENTER_X = GAME_SHELL_DISPLAY_CENTER_X;
 const SLOTS_Y = 402;
 
+/** Board surface, sized around the peg triangle + the slot row beneath it. */
+const BOARD_CY = 292;
+const BOARD_W = 410;
+const BOARD_H = 280;
+
+/** Peg radius, and the slot buckets under the board. */
+const PEG_RADIUS = 3;
+const BALL_RADIUS = 6;
+const SLOT_H = 26;
+
 // Symmetric payout table, one entry per slot (index = number of "right" bounces) - mirrors server/src/games/plinko.ts's PLINKO_MULTIPLIERS exactly (display/preview only; the server is what actually resolves a drop, see drop()).
 const MULTIPLIERS = [16, 5, 1.2, 0.5, 0.2, 0.5, 1.2, 5, 16];
 
-// Bands re-cut alongside the 2026-08-27 rebalance: the multipliers all moved down, so the old
-// thresholds (>=9 gold, >=2 accent, >=1 neutral) would have painted every slot but the two edges
-// as a loss. These keep the same visual story - jackpot edges, good, break-even-ish, loss.
-function colorForMultiplier(m: number): number {
-  if (m >= 16) return Theme.gold;
-  if (m >= 5) return Theme.accent;
-  if (m >= 1) return Theme.neutral;
-  return Theme.danger;
+/**
+ * Slot label colour, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * The buckets used to be four saturated fills deep (gold / orange / slate /
+ * red), which put four competing hues across nine slots. Every bucket is now
+ * the same recessed well and only its NUMBER carries the tier, as a ramp of
+ * text emphasis: the two jackpot edges take the one accent (they are the win
+ * state), anything that at least returns the stake is plain bright text, and
+ * the sub-1x middle simply recedes to muted. Bands unchanged from the
+ * 2026-08-27 rebalance - same visual story, no extra hues.
+ */
+function textColorForMultiplier(m: number): string {
+  if (m >= 16) return Tokens.text.accent;
+  if (m >= 1) return Tokens.text.primary;
+  return Tokens.text.muted;
 }
 
 export class PlinkoScene extends Phaser.Scene {
@@ -59,7 +78,7 @@ export class PlinkoScene extends Phaser.Scene {
     playMusic(this, "flowingRocks");
     this.dropping = false;
     this.slotTexts = [];
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.tweens.killTweensOf(this.ball);
@@ -77,35 +96,42 @@ export class PlinkoScene extends Phaser.Scene {
     this.messageText = this.shell.messageText;
     this.dropBtn = this.shell.startBtn;
     this.betControl = this.shell.betControl;
-    this.messageText.setText("Drop a ball and watch it bounce").setColor(Theme.textMuted);
+    this.messageText.setText("Drop a ball and watch it bounce").setColor(Tokens.text.muted);
 
-    // Cabinet frame - the peg board itself is narrower than most other
-    // games' content, so this widens out to the same ~410px family width
-    // used elsewhere (Slots/Dragon Tower/Dice/etc.) purely for a consistent
-    // "arcade cabinet" look, rather than hugging the board tightly.
-    drawCabinetFrame(this, BOARD_CENTER_X, 292, 410, 280);
+    // Flat board surface - no frame, no trim. The peg board is narrower than
+    // most other games' content, so the surface stays at the same ~410px
+    // family width used elsewhere (Slots/Dragon Tower/Dice) so the whole set
+    // reads as one system rather than hugging the pegs tightly.
+    drawCabinetFrame(this, BOARD_CENTER_X, BOARD_CY, BOARD_W, BOARD_H);
 
     this.drawPegs();
     this.drawSlots();
 
-    this.ball = this.add.circle(BOARD_CENTER_X, BOARD_TOP_Y - 16, 6, Theme.gold);
+    // Plain white ball, for the same reason Dice's marker is plain white: it
+    // has to read against every slot it can land on without claiming a
+    // colour of its own.
+    this.ball = this.add.circle(
+      BOARD_CENTER_X,
+      BOARD_TOP_Y - Tokens.space.lg,
+      BALL_RADIUS,
+      Tokens.color.textPrimary
+    );
 
     this.updateBalance();
   }
 
   /**
-   * Static triangular peg grid - row r has r+1 pegs. Pegs are drawn in
-   * Theme.cardFace (near-white) with a dark outline stroke, not
-   * Theme.outline fill - the board sits directly on Theme.bgDark (near-
-   * black), and a near-black peg on a near-black background was
-   * effectively invisible (both hover around #05070c/#0e0f14).
+   * Static triangular peg grid - row r has r+1 pegs. A peg is now a single
+   * flat muted dot with no outline (direction note 3): it used to be a
+   * near-white disc with a dark stroke around it, which read as 36 little
+   * outlined boxes rather than as the quiet obstacle field it is.
    */
   private drawPegs() {
     for (let r = 0; r < ROWS; r++) {
       const y = BOARD_TOP_Y + r * ROW_SPACING;
       for (let p = 0; p <= r; p++) {
         const x = BOARD_CENTER_X + (2 * p - r) * (PEG_SPACING / 2);
-        this.add.circle(x, y, 3, Theme.cardFace).setStrokeStyle(1, Theme.outline, 1);
+        this.add.circle(x, y, PEG_RADIUS, Tokens.color.textMuted);
       }
     }
   }
@@ -115,11 +141,15 @@ export class PlinkoScene extends Phaser.Scene {
     const slotWidth = PEG_SPACING;
     MULTIPLIERS.forEach((mult, i) => {
       const x = BOARD_CENTER_X + (2 * i - ROWS) * (PEG_SPACING / 2);
-      const color = colorForMultiplier(mult);
-      makeInset(this, x, SLOTS_Y, slotWidth - 2, 26, 5);
-      const label = this.add
-        .text(x, SLOTS_Y, `${mult}x`, { fontSize: "10px", color: Phaser.Display.Color.IntegerToColor(color).rgba, fontStyle: "bold" })
-        .setOrigin(0.5);
+      makeInset(this, x, SLOTS_Y, slotWidth - Tokens.space.xxs, SLOT_H, Tokens.radius.xs);
+      const label = makeText(this, x, SLOTS_Y, `${mult}x`, {
+        size: Tokens.type.size.xs,
+        weight: Tokens.type.weight.semibold,
+        color: textColorForMultiplier(mult),
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
       this.slotTexts.push(label);
     });
   }
@@ -129,7 +159,7 @@ export class PlinkoScene extends Phaser.Scene {
     if (this.dropping) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -137,7 +167,7 @@ export class PlinkoScene extends Phaser.Scene {
     this.dropping = true;
     this.dropBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Dropping...").setColor(Theme.textMuted);
+    this.messageText.setText("Dropping...").setColor(Tokens.text.muted);
 
     api
       .playPlinko(bet, "GC")
@@ -146,7 +176,7 @@ export class PlinkoScene extends Phaser.Scene {
           x: BOARD_CENTER_X + (2 * rightCount - (step + 1)) * (PEG_SPACING / 2),
           y: BOARD_TOP_Y + (step + 1) * ROW_SPACING
         }));
-        this.ball.setPosition(BOARD_CENTER_X, BOARD_TOP_Y - 16);
+        this.ball.setPosition(BOARD_CENTER_X, BOARD_TOP_Y - Tokens.space.lg);
         playSfx(this, "ballDrop");
         this.animateStep(waypoints, 0, () => this.resolveDrop(res));
       })
@@ -155,11 +185,11 @@ export class PlinkoScene extends Phaser.Scene {
         this.dropBtn?.setEnabled(true);
         this.betControl?.setEnabled(true);
         if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-          this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+          this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
         } else if (err instanceof NetworkError) {
-          this.messageText.setText(err.message).setColor(Theme.textDanger);
+          this.messageText.setText(err.message).setColor(Tokens.text.negative);
         } else {
-          this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+          this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
         }
       });
   }
@@ -169,6 +199,10 @@ export class PlinkoScene extends Phaser.Scene {
       onDone();
       return;
     }
+    // Per-peg fall timing is the game's own physics, not UI chrome - a
+    // falling ball accelerates, so this keeps its ease-IN and its own
+    // hand-tuned cadence rather than borrowing a token transition duration
+    // (same reasoning as Limbo's hand-tuned climb tween).
     this.tweens.add({
       targets: this.ball,
       x: waypoints[index].x,
@@ -187,10 +221,10 @@ export class PlinkoScene extends Phaser.Scene {
     popIn(this, label);
 
     if (multiplier >= 1) {
-      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Theme.textAccent);
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Tokens.text.accent);
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} Tickets`).setColor(Theme.textDanger);
+      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} Tickets`).setColor(Tokens.text.negative);
       playSfx(this, "lose");
     }
 
@@ -201,6 +235,6 @@ export class PlinkoScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

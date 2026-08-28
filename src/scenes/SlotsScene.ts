@@ -1,13 +1,18 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
   makeGameShell,
+  makeText,
+  makeDivider,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
   makeInset,
   popIn,
+  drawCabinetFrame,
   BetControl,
   UIButton
 } from "../ui/uiHelpers";
@@ -37,16 +42,57 @@ function randomEmoji(): string {
   return SYMBOL_EMOJI[SYMBOL_KEYS[Phaser.Math.Between(0, SYMBOL_KEYS.length - 1)]];
 }
 
-// Reel cabinet layout - shared by create()'s cabinet/payline drawing and the
-// reel-cell positions below, so the frame always fits exactly around the 3
-// cells regardless of future tuning.
-const REEL_Y = 230;
+/**
+ * SLOTS, on the Stake-style direction (see ui/DesignTokens.ts).
+ *
+ * This screen had the most chrome to unwind: a gold-trimmed cabinet with a
+ * second inner gold border, nine gold marquee bulbs, a gold payline and an
+ * orange lever knob with a dark outline around it. The cabinet is now the
+ * same flat raised surface every other converted game sits on, and the trim
+ * is simply gone (direction note 3 - a board is defined by where its surface
+ * ends, not by a frame drawn around it).
+ *
+ * The machine's IDENTITY is kept, though, because it is what makes this
+ * screen a slot machine rather than a third grid game: the marquee chase
+ * still runs, the payline still crosses all three reels with its inward
+ * arrows, and the lever still yanks on every spin. All three are simply
+ * re-toned to muted text-grey, so they read as quiet machine detail instead
+ * of competing with the accent. The one accent left on the board is the
+ * winning-cell ring, which is the win state (direction note 2).
+ *
+ * This also fixed a real layout bug: the paytable caption used to sit at
+ * y=560, well below SAFE_ZONE_BOTTOM (470), i.e. cropped on a real phone.
+ * Every element now sits inside the 130-470 band.
+ */
+const DX = GAME_SHELL_DISPLAY_CENTER_X;
+const CABINET_CY = GAME_SHELL_DISPLAY_CENTER_Y - 8;
 const CELL_SIZE = 110;
-const CELL_GAP = 20;
-const CABINET_W = CELL_SIZE * 3 + CELL_GAP * 2 + 40; // 3 cells + 2 gaps + side padding
-const CABINET_H = CELL_SIZE + 70; // room above/below the cells for the marquee lights and breathing room
+const CELL_GAP = Tokens.space.xl;
+/** 3 cells + 2 gaps + side padding - lands on the same ~410px width the rest of the family uses. */
+const CABINET_W = CELL_SIZE * 3 + CELL_GAP * 2 + Tokens.space.huge;
+const CABINET_H = 280;
+const CABINET_TOP = CABINET_CY - CABINET_H / 2;
+const CABINET_BOTTOM = CABINET_CY + CABINET_H / 2;
+const CABINET_LEFT = DX - CABINET_W / 2 + Tokens.space.xxl;
+const CABINET_RIGHT = DX + CABINET_W / 2 - Tokens.space.xxl;
+
+const REEL_Y = 256;
+const MARQUEE_Y = CABINET_TOP + Tokens.space.xl;
+const DIVIDER_Y = 356;
+const CAPTION_Y = 384;
+
 const MARQUEE_LIGHT_COUNT = 9;
-const REEL_REVEAL_DELAY = 280; // ms between each reel's staggered stop - see resolveSpin()
+const MARQUEE_LIGHT_RADIUS = 3;
+/** Dim state for an unlit bulb in the chase - see startMarqueeLights(). */
+const MARQUEE_DIM_ALPHA = 0.2;
+const PAYLINE_ALPHA = 0.5;
+const PAYLINE_OVERHANG = Tokens.space.md;
+const PAYLINE_ARROW_H = 7;
+const LEVER_KNOB_RADIUS = 8;
+const LEVER_TRACK_W = 4;
+const WIN_RING_RADIUS = 62;
+/** ms between each reel's staggered stop - see resolveSpin(). The token exists for exactly this: a rhythm the player watches, not a transition. */
+const REEL_REVEAL_DELAY = Tokens.motion.duration.stagger;
 
 export class SlotsScene extends Phaser.Scene {
   private reelTexts: Phaser.GameObjects.Text[] = [];
@@ -76,7 +122,7 @@ export class SlotsScene extends Phaser.Scene {
     this.spinTimer = undefined;
     this.reelTexts = [];
     this.cabinetLights = [];
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.spinTimer) {
@@ -101,104 +147,126 @@ export class SlotsScene extends Phaser.Scene {
     this.messageText = this.shell.messageText;
     this.spinButton = this.shell.startBtn;
     this.betControl = this.shell.betControl;
-    this.messageText.setText("Press SPIN to play").setColor(Theme.textMuted);
+    this.messageText.setText("Press SPIN to play").setColor(Tokens.text.muted);
 
-    // Arcade-cabinet frame behind the reels - gold trim, marquee chase
-    // lights, and a pull lever, so this reads as a real slot machine instead
-    // of 3 bare inset squares floating on the display area.
-    this.drawCabinet(GAME_SHELL_DISPLAY_CENTER_X, REEL_Y);
+    // Flat cabinet body behind the reels, plus the machine detail that keeps
+    // this reading as a slot machine rather than 3 bare squares: marquee
+    // chase, payline, pull lever.
+    this.drawCabinet(DX, CABINET_CY);
     this.startMarqueeLights();
 
-    // Reel cells - centered in the shell's right-side display area, same
-    // relative layout the old center-panel version used. Insets are drawn
-    // first (so the payline below renders over them, and the reel symbols
-    // render over the payline).
-    const startX = GAME_SHELL_DISPLAY_CENTER_X - CELL_SIZE - CELL_GAP;
+    // Reel cells - centered in the shell's right-side display area. Insets
+    // are drawn first (so the payline below renders over them, and the reel
+    // symbols render over the payline).
+    const startX = DX - CELL_SIZE - CELL_GAP;
     const cellXs: number[] = [];
     for (let i = 0; i < 3; i++) {
       const x = startX + i * (CELL_SIZE + CELL_GAP);
       cellXs.push(x);
-      makeInset(this, x, REEL_Y, CELL_SIZE, CELL_SIZE, 14);
+      makeInset(this, x, REEL_Y, CELL_SIZE, CELL_SIZE, Tokens.radius.md);
     }
 
     this.drawPayline(startX, REEL_Y);
 
     for (const x of cellXs) {
-      const t = this.add.text(x, REEL_Y, "❔", { fontSize: "52px" }).setOrigin(0.5);
+      const t = makeText(this, x, REEL_Y, "❔", {
+        size: Tokens.type.glyph.xl,
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
       this.reelTexts.push(t);
     }
 
-    this.add
-      .text(GAME_SHELL_DISPLAY_CENTER_X, 560, "3-of-a-kind pays big • 2-of-a-kind pays too", {
-        fontSize: "11px",
-        color: Theme.textMuted
-      })
-      .setOrigin(0.5);
+    makeDivider(this, CABINET_LEFT, DIVIDER_Y, CABINET_RIGHT);
+
+    makeText(this, DX, CAPTION_Y, "3 OF A KIND PAYS BIG  ·  2 OF A KIND PAYS TOO", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5
+    });
 
     this.updateBalance();
   }
 
-  /** Rounded gold-trimmed cabinet body behind the 3 reel insets - drawn at depth -1 so every reel/payline/light element (all default depth 0) always renders in front of it regardless of creation order. Also lays out (but doesn't animate) the marquee light positions and the lever track/knob. */
+  /**
+   * Flat cabinet body behind the 3 reel insets - the same raised surface
+   * every other converted board uses, with no trim and no inner border. Also
+   * lays out (but doesn't animate) the marquee light positions and the lever
+   * track/knob.
+   */
   private drawCabinet(cx: number, cy: number) {
-    const g = this.add.graphics().setDepth(-1);
-    g.fillStyle(Theme.outline, 1);
-    g.fillRoundedRect(cx - CABINET_W / 2, cy - CABINET_H / 2, CABINET_W, CABINET_H, 20);
-    g.lineStyle(5, Theme.gold, 1);
-    g.strokeRoundedRect(cx - CABINET_W / 2, cy - CABINET_H / 2, CABINET_W, CABINET_H, 20);
-    g.lineStyle(2, Theme.panelBorder, 1);
-    g.strokeRoundedRect(cx - CABINET_W / 2 + 8, cy - CABINET_H / 2 + 8, CABINET_W - 16, CABINET_H - 16, 14);
+    drawCabinetFrame(this, cx, cy, CABINET_W, CABINET_H);
 
-    // Marquee chase lights along the top edge - see startMarqueeLights() for the blink pattern.
-    const lightSpan = CABINET_W - 50;
-    const lightY = cy - CABINET_H / 2;
+    // Marquee chase lights along the top - see startMarqueeLights() for the
+    // blink pattern. Muted text-grey rather than gold: the chase is machine
+    // detail, not a signal, so it should never compete with the accent.
+    const lightSpan = CABINET_W - Tokens.space.huge;
     for (let i = 0; i < MARQUEE_LIGHT_COUNT; i++) {
       const x = cx - lightSpan / 2 + (lightSpan / (MARQUEE_LIGHT_COUNT - 1)) * i;
-      this.cabinetLights.push(this.add.circle(x, lightY, 4, Theme.gold));
+      this.cabinetLights.push(
+        this.add.circle(x, MARQUEE_Y, MARQUEE_LIGHT_RADIUS, Tokens.color.textMuted)
+      );
     }
 
     // Pull lever - a small vertical track tucked into the cabinet's own
     // right-edge gutter (between the rightmost reel cell and the cabinet's
-    // outer border), NOT bolted on beyond the cabinet body, with a knob
-    // that yanks down and springs back up on spin (see pullLever()). Sized
-    // to fit that gutter with margin on both sides - a first version placed
-    // this 20px beyond the cabinet's right edge instead, which put the
-    // knob's own radius 8px past the canvas's actual right edge (800) on
-    // every platform, not just mobile; there's no documented safe-zone
-    // constant for X the way SAFE_ZONE_TOP/BOTTOM covers Y, but every other
-    // game empirically keeps its rightmost real content at/under ~x=775
-    // (Roulette's GREEN button, Baccarat's TIE button, etc.), which this
-    // now respects too (cabinet's own outer edge lands at 775).
-    const leverX = cx + CABINET_W / 2 - 10;
-    this.leverTop = cy - CABINET_H / 2 + 24;
-    this.leverBottom = cy + CABINET_H / 2 - 24;
-    this.add.rectangle(leverX, (this.leverTop + this.leverBottom) / 2, 4, this.leverBottom - this.leverTop, Theme.panelBorder);
-    this.leverKnob = this.add.circle(leverX, this.leverTop, 8, Theme.accent).setStrokeStyle(2, Theme.outline);
+    // outer edge), NOT bolted on beyond the cabinet body, with a knob that
+    // yanks down and springs back up on spin (see pullLever()). Sized to fit
+    // that gutter with margin on both sides - a first version placed this
+    // 20px beyond the cabinet's right edge instead, which put the knob's own
+    // radius 8px past the canvas's actual right edge (800) on every platform,
+    // not just mobile; there's no documented safe-zone constant for X the way
+    // SAFE_ZONE_TOP/BOTTOM covers Y, but every other game empirically keeps
+    // its rightmost real content at/under ~x=775 (Roulette's GREEN button,
+    // Baccarat's TIE button, etc.), which this now respects too (cabinet's
+    // own outer edge lands at 775).
+    const leverX = cx + CABINET_W / 2 - Tokens.space.md;
+    this.leverTop = CABINET_TOP + Tokens.space.xxl;
+    this.leverBottom = CABINET_BOTTOM - Tokens.space.xxl;
+    this.add.rectangle(
+      leverX,
+      (this.leverTop + this.leverBottom) / 2,
+      LEVER_TRACK_W,
+      this.leverBottom - this.leverTop,
+      Tokens.color.surfaceHover
+    );
+    this.leverKnob = this.add.circle(
+      leverX,
+      this.leverTop,
+      LEVER_KNOB_RADIUS,
+      Tokens.color.textMuted
+    );
   }
 
-  /** Thin gold payline crossing the middle of all 3 cells, with small inward-pointing arrow markers at each end - the classic "this row pays" indicator. */
+  /** Thin payline crossing the middle of all 3 cells, with small inward-pointing arrow markers at each end - the classic "this row pays" indicator, now in muted grey rather than gold. */
   private drawPayline(startX: number, y: number) {
-    const left = startX - CELL_SIZE / 2 - 10;
-    const right = startX + 2 * (CELL_SIZE + CELL_GAP) + CELL_SIZE / 2 + 10;
+    const left = startX - CELL_SIZE / 2 - PAYLINE_OVERHANG;
+    const right = startX + 2 * (CELL_SIZE + CELL_GAP) + CELL_SIZE / 2 + PAYLINE_OVERHANG;
     const line = this.add.graphics();
-    line.lineStyle(3, Theme.gold, 0.55);
+    line.lineStyle(1, Tokens.color.textMuted, PAYLINE_ALPHA);
     line.beginPath();
     line.moveTo(left, y);
     line.lineTo(right, y);
     line.strokePath();
-    line.fillStyle(Theme.gold, 0.8);
-    line.fillTriangle(left, y - 7, left, y + 7, left + 10, y);
-    line.fillTriangle(right, y - 7, right, y + 7, right - 10, y);
+    line.fillStyle(Tokens.color.textMuted, 1);
+    line.fillTriangle(left, y - PAYLINE_ARROW_H, left, y + PAYLINE_ARROW_H, left + Tokens.space.sm, y);
+    line.fillTriangle(right, y - PAYLINE_ARROW_H, right, y + PAYLINE_ARROW_H, right - Tokens.space.sm, y);
   }
 
   /** Classic marquee "chase" blink - cycles which third of the lights is lit every tick. */
   private startMarqueeLights() {
     let offset = 0;
     this.marqueeTimer = this.time.addEvent({
-      delay: 150,
+      delay: Tokens.motion.duration.base,
       loop: true,
       callback: () => {
         offset = (offset + 1) % 3;
-        this.cabinetLights.forEach((dot, i) => dot.setAlpha((i + offset) % 3 === 0 ? 1 : 0.25));
+        this.cabinetLights.forEach((dot, i) =>
+          dot.setAlpha((i + offset) % 3 === 0 ? 1 : MARQUEE_DIM_ALPHA)
+        );
       }
     });
   }
@@ -209,25 +277,41 @@ export class SlotsScene extends Phaser.Scene {
     this.tweens.chain({
       targets: this.leverKnob,
       tweens: [
-        { y: this.leverBottom, duration: 180, ease: "Quad.In" },
-        { y: this.leverTop, duration: 260, ease: "Back.Out", delay: 80 }
+        // Down accelerates (a yank is physics, so it keeps its ease-IN),
+        // back up settles on the token emphasis ease.
+        { y: this.leverBottom, duration: Tokens.motion.duration.base, ease: "Quad.In" },
+        {
+          y: this.leverTop,
+          duration: Tokens.motion.duration.slow,
+          ease: Tokens.motion.ease.emphasis,
+          delay: Tokens.motion.duration.instant
+        }
       ]
     });
   }
 
-  /** Pulsing gold ring on each reel cell that landed on the winning symbol - reels.indexOf-style lookup against winKey, not just "the first winCount cells", since a 2-of-3 win can land in any 2 of the 3 positions. */
+  /**
+   * Pulsing ring on each reel cell that landed on the winning symbol -
+   * reels.indexOf-style lookup against winKey, not just "the first winCount
+   * cells", since a 2-of-3 win can land in any 2 of the 3 positions.
+   *
+   * This is the ONE accent-coloured thing on the board (direction note 2):
+   * it marks the win state, which is exactly what the accent is for.
+   */
   private highlightWinningCells(indices: number[]) {
     for (const i of indices) {
       const t = this.reelTexts[i];
       if (!t) continue;
-      const ring = this.add.circle(t.x, t.y, 62).setStrokeStyle(4, Theme.gold, 1);
+      const ring = this.add
+        .circle(t.x, t.y, WIN_RING_RADIUS)
+        .setStrokeStyle(2, Tokens.color.accent, 1);
       this.tweens.add({
         targets: ring,
         scale: { from: 0.9, to: 1.08 },
         alpha: { from: 1, to: 0.3 },
         yoyo: true,
         repeat: 3,
-        duration: 260,
+        duration: Tokens.motion.duration.slow,
         onComplete: () => ring.destroy()
       });
     }
@@ -238,7 +322,7 @@ export class SlotsScene extends Phaser.Scene {
     if (this.spinning) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -246,12 +330,12 @@ export class SlotsScene extends Phaser.Scene {
     this.spinning = true;
     this.spinButton?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Spinning...").setColor(Theme.textMuted);
+    this.messageText.setText("Spinning...").setColor(Tokens.text.muted);
     playSfx(this, "reelSpin");
     this.pullLever();
 
     this.spinTimer = this.time.addEvent({
-      delay: 80,
+      delay: Tokens.motion.duration.instant,
       loop: true,
       callback: () => {
         const allActive = this.reelTexts.every((t) => t && t.active);
@@ -270,7 +354,7 @@ export class SlotsScene extends Phaser.Scene {
   }
 
   /**
-   * Reveals the 3 reels one at a time (280ms apart) instead of snapping all
+   * Reveals the 3 reels one at a time (REEL_REVEAL_DELAY apart) instead of snapping all
    * 3 at once - each stop gets its own `reelStop` sfx + pop, a classic
    * slot-machine "clunk clunk clunk" instead of one instant flat reveal.
    * The win/lose message, payout, and highlight only appear after the last
@@ -321,12 +405,12 @@ export class SlotsScene extends Phaser.Scene {
   ) {
     if (payout > 0 && winKey) {
       const label = winCount === 3 ? `3x ${SYMBOL_EMOJI[winKey]} — JACKPOT!` : `2x ${SYMBOL_EMOJI[winKey]}`;
-      this.messageText.setText(`${label}  +${payout} Tickets`).setColor(Theme.textAccent);
+      this.messageText.setText(`${label}  +${payout} Tickets`).setColor(Tokens.text.accent);
       popIn(this, this.messageText);
       this.highlightWinningCells(reels.reduce<number[]>((acc, key, i) => (key === winKey ? [...acc, i] : acc), []));
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText("No match, try again").setColor(Theme.textMuted);
+      this.messageText.setText("No match, try again").setColor(Tokens.text.muted);
       playSfx(this, "lose");
     }
 
@@ -341,11 +425,11 @@ export class SlotsScene extends Phaser.Scene {
     this.spinTimer = undefined;
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
 
     this.spinning = false;
@@ -354,6 +438,6 @@ export class SlotsScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

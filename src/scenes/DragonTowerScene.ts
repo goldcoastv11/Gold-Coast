@@ -1,9 +1,11 @@
 import Phaser from "phaser";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
-import { Theme } from "../ui/Theme";
+import { Tokens } from "../ui/DesignTokens";
 import {
+  makeText,
   makeGameShell,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -23,8 +25,10 @@ const TILES_PER_ROW = 4;
 const MULTIPLIERS = [1.3, 1.8, 2.7, 4, 7, 12];
 
 const TILE_SIZE = 46;
-const TILE_GAP = 10;
+const TILE_GAP = Tokens.space.sm;
 const ROW_SPACING = 56;
+/** Horizontal breathing room either side of the 4-wide tower, on the token scale. */
+const BOARD_SIDE_PAD = Tokens.space.huge * 4;
 // Stake-style layout: tower centered in the shell's right-side display
 // area (see ui/uiHelpers.ts's makeGameShell) - the sidebar now occupies
 // the left third of the screen, so this is no longer the canvas center.
@@ -36,6 +40,22 @@ interface TileVisual {
   bg: Phaser.GameObjects.Graphics;
   label: Phaser.GameObjects.Text;
 }
+
+type TileState = "locked" | "active" | "safe" | "bad";
+
+/**
+ * DRAGON TOWER step states, on the Stake-style direction - the same
+ * surface-only treatment MinesScene uses, so the two grid games read as one
+ * family. A locked step is a recessed well, the live row is a raised
+ * control, and a resolved step takes one of the two muted state tints; the
+ * outcome is spoken by the glyph, not by a coloured border.
+ */
+const TILE_FILL: Record<TileState, number> = {
+  locked: Tokens.color.inset,
+  active: Tokens.color.surfaceRaised,
+  safe: Tokens.color.positiveMuted,
+  bad: Tokens.color.negativeMuted
+};
 
 export class DragonTowerScene extends Phaser.Scene {
   private currentRow = 0;
@@ -69,7 +89,7 @@ export class DragonTowerScene extends Phaser.Scene {
     this.roundId = null;
     this.pickedColPerRow = [];
     this.tiles = [];
-    this.cameras.main.setBackgroundColor(Theme.bgDark);
+    this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment.
@@ -94,7 +114,13 @@ export class DragonTowerScene extends Phaser.Scene {
     // SAFE_ZONE_TOP/BOTTOM).
     const towerW = TILES_PER_ROW * TILE_SIZE + (TILES_PER_ROW - 1) * TILE_GAP;
     const towerH = (ROWS - 1) * ROW_SPACING + TILE_SIZE;
-    drawCabinetFrame(this, TOWER_CENTER_X, BOTTOM_ROW_Y - (ROWS - 1) * (ROW_SPACING / 2), towerW + 160, towerH + 6);
+    drawCabinetFrame(
+      this,
+      TOWER_CENTER_X,
+      BOTTOM_ROW_Y - (ROWS - 1) * (ROW_SPACING / 2),
+      towerW + BOARD_SIDE_PAD,
+      towerH + Tokens.space.sm
+    );
 
     this.buildEmptyTowerVisuals();
     this.updateBalance();
@@ -119,52 +145,33 @@ export class DragonTowerScene extends Phaser.Scene {
     }
   }
 
-  private makeTile(
-    x: number,
-    y: number,
-    state: "locked" | "active" | "safe" | "bad"
-  ): TileVisual {
+  private makeTile(x: number, y: number, state: TileState): TileVisual {
     const container = this.add.container(x, y);
     const bg = this.add.graphics();
-    const label = this.add.text(0, 0, "", { fontSize: "18px" }).setOrigin(0.5);
+    const label = makeText(this, 0, 0, "", {
+      size: Tokens.type.glyph.sm,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
     container.add([bg, label]);
     this.paintTile(bg, label, state);
     return { container, bg, label };
   }
 
-  private paintTile(
-    bg: Phaser.GameObjects.Graphics,
-    label: Phaser.GameObjects.Text,
-    state: "locked" | "active" | "safe" | "bad"
-  ) {
-    bg.clear();
-    const colors = {
-      locked: Theme.inset,
-      // Contrast sweep: was a hardcoded 0xd9f5ec "very pale mint" left over
-      // from the old light theme - the "?" label painted on top uses
-      // Theme.textPrimary (near-white), which read as low-contrast
-      // white-on-pale-mint. Theme.secondary (electric dark blue) keeps the
-      // "distinct from locked" highlight while giving that white "?" real
-      // contrast, and still pairs cleanly with the Theme.accent border below.
-      active: Theme.secondary,
-      safe: Theme.winZone,
-      bad: Theme.loseZone
-    };
-    const border = {
-      locked: Theme.panelBorder,
-      active: Theme.accent,
-      safe: Theme.accent,
-      bad: Theme.danger
-    };
-    bg.fillStyle(colors[state], 1);
-    bg.fillRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, 8);
-    bg.lineStyle(2, border[state], 1);
-    bg.strokeRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, 8);
+  private paintTile(bg: Phaser.GameObjects.Graphics, label: Phaser.GameObjects.Text, state: TileState) {
+    this.fillTile(bg, TILE_FILL[state]);
 
-    if (state === "safe") label.setText("✓").setColor(Theme.textAccent);
-    else if (state === "bad") label.setText("💥").setColor(Theme.textDanger);
-    else if (state === "active") label.setText("?").setColor(Theme.textPrimary);
-    else label.setText("").setColor(Theme.textMuted);
+    if (state === "safe") label.setText("✓").setColor(Tokens.text.accent);
+    else if (state === "bad") label.setText("💥").setColor(Tokens.text.negative);
+    else if (state === "active") label.setText("?").setColor(Tokens.text.primary);
+    else label.setText("").setColor(Tokens.text.muted);
+  }
+
+  private fillTile(bg: Phaser.GameObjects.Graphics, fill: number) {
+    bg.clear();
+    bg.fillStyle(fill, 1);
+    bg.fillRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, Tokens.radius.sm);
   }
 
   /**
@@ -177,7 +184,7 @@ export class DragonTowerScene extends Phaser.Scene {
     if (this.active || this.busy) return;
 
     if (gameState.goldCoins < gameState.betAmount) {
-      this.messageText.setText("Not enough Gold Coins!").setColor(Theme.textDanger);
+      this.messageText.setText("Not enough Gold Coins!").setColor(Tokens.text.negative);
       return;
     }
 
@@ -185,7 +192,7 @@ export class DragonTowerScene extends Phaser.Scene {
     this.busy = true;
     this.startBtn?.setEnabled(false);
     this.betControl?.setEnabled(false);
-    this.messageText.setText("Starting...").setColor(Theme.textMuted);
+    this.messageText.setText("Starting...").setColor(Tokens.text.muted);
 
     this.attemptStart(bet, true);
   }
@@ -202,7 +209,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.currentRow = 0;
         this.pickedColPerRow = [];
 
-        this.messageText.setText("Pick a tile in the glowing row").setColor(Theme.textMuted);
+        this.messageText.setText("Pick a tile in the glowing row").setColor(Tokens.text.muted);
         this.multiplierText.setText("Multiplier: 1.0x");
 
         this.startBtn?.container.setVisible(false);
@@ -227,7 +234,7 @@ export class DragonTowerScene extends Phaser.Scene {
               this.betControl?.setEnabled(true);
               this.messageText
                 .setText("Couldn't recover an unfinished round - please try again.")
-                .setColor(Theme.textDanger);
+                .setColor(Tokens.text.negative);
             });
           return;
         }
@@ -270,6 +277,9 @@ export class DragonTowerScene extends Phaser.Scene {
           this.paintTile(tile.bg, tile.label, "active");
           tile.container.setSize(TILE_SIZE, TILE_SIZE);
           tile.container.setInteractive({ useHandCursor: true });
+          // Hover lifts one surface step - same affordance as every button.
+          tile.container.on("pointerover", () => this.fillTile(tile.bg, Tokens.color.surfaceHover));
+          tile.container.on("pointerout", () => this.fillTile(tile.bg, TILE_FILL.active));
           tile.container.on("pointerdown", () => this.pickTile(col));
         } else if (row === this.currentRow && this.active) {
           this.paintTile(tile.bg, tile.label, "active");
@@ -315,7 +325,7 @@ export class DragonTowerScene extends Phaser.Scene {
         if (res.isBad) {
           this.active = false;
           this.revealTower(res.badIndexPerRow ?? [], this.currentRow);
-          this.messageText.setText("Bust! You lose your bet.").setColor(Theme.textDanger);
+          this.messageText.setText("Bust! You lose your bet.").setColor(Tokens.text.negative);
           playSfx(this, "bust");
           playSfx(this, "lose");
           this.updateBalance();
@@ -339,14 +349,14 @@ export class DragonTowerScene extends Phaser.Scene {
         if (res.reachedTop) {
           this.active = false;
           this.revealTower(res.badIndexPerRow ?? [], null);
-          this.messageText.setText(`Reached the top! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
+          this.messageText.setText(`Reached the top! +${res.payout ?? 0} Tickets`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
           this.endRun();
           return;
         }
 
-        this.messageText.setText("Cash out or keep climbing").setColor(Theme.textMuted);
+        this.messageText.setText("Cash out or keep climbing").setColor(Tokens.text.muted);
         this.cashOutBtn?.container.setVisible(true);
         this.cashOutBtn?.setEnabled(true);
         this.renderTowerState();
@@ -372,7 +382,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.busy = false;
         this.active = false;
         this.revealTower(res.badIndexPerRow, null);
-        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
+        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
         this.endRun();
@@ -387,11 +397,11 @@ export class DragonTowerScene extends Phaser.Scene {
 
   private showApiError(err: unknown, insufficientBalanceMessage: string) {
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
-      this.messageText.setText(insufficientBalanceMessage).setColor(Theme.textDanger);
+      this.messageText.setText(insufficientBalanceMessage).setColor(Tokens.text.negative);
     } else if (err instanceof NetworkError) {
-      this.messageText.setText(err.message).setColor(Theme.textDanger);
+      this.messageText.setText(err.message).setColor(Tokens.text.negative);
     } else {
-      this.messageText.setText("Something went wrong - please try again.").setColor(Theme.textDanger);
+      this.messageText.setText("Something went wrong - please try again.").setColor(Tokens.text.negative);
     }
   }
 
@@ -413,6 +423,6 @@ export class DragonTowerScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }

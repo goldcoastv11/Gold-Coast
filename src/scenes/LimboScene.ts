@@ -7,6 +7,7 @@ import {
   makeText,
   makeDivider,
   makeGameShell,
+  formatBalance,
   GameShellHandle,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
@@ -271,12 +272,8 @@ export class LimboScene extends Phaser.Scene {
     this.presetButtons.forEach((b) => b.setEnabled(true));
   }
 
-  /**
-   * GC and TICKETS are separate ledgers (CLAUDE.md), so they are shown as
-   * two named figures rather than one merged total. Spelling both names out
-   * is part of the outstanding display-copy pass.
-   */
+  /** Shared across all 14 games now - see uiHelpers.ts's formatBalance. */
   private updateBalance() {
-    this.balanceText.setText(`${gameState.goldCoins} Gold Coins  ·  ${gameState.tickets} Tickets`);
+    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
   }
 }
