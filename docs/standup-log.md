@@ -110,3 +110,22 @@ See `docs/legal/open-questions.md` for the full list.
 - Overworld station name-tags and bench/hedge tints still cold blue — one-line fixes, were in a file under concurrent edit
 - Ground shadows and larger characters — the other two "free" visual wins from the art review, not yet done
 - Coin Kiosk still to be extracted from OverworldScene (Leg 2, second half)
+
+## Session continued — 2026-08-28 (late)
+
+**Also merged and live:**
+- All 14 games converted to the Stake look (PR #8). Also fixed three real bugs found on the way: Slots' paytable text and Roulette's/Blackjack's dealer sprites sat outside the mobile safe zone and were cropped on a phone.
+- Challenges, XP and 50 levels — backend (PR #9) and UI (PR #11). Migration deployed to production and verified serving.
+- Character rig foundation (PR #10) — explicit rig descriptors replacing frame-height guessing, LPC 64x64 format supported alongside the three existing rigs.
+
+**Challenge system as shipped:** 14 starter challenges (daily, weekly, permanent achievements), all paying Gold Coins + XP and never Tickets. 50 levels, GC at each, free cosmetics at 8 milestones. Progress is recorded from server-side game settlement, never from client-reported events — a test forges 100 fake wins and asserts nothing moves.
+
+**Waiting on the founder:** `docs/character-art-spec.md` — a few minutes at the LPC generator to produce the outfit sheets. All code is ready for them.
+
+**Known open items:**
+- Nothing has been visually confirmed on a real screen. Screenshots do not work in this environment (the Browser pane cannot composite this canvas game), so every visual change this session was verified structurally — scenes load, colours resolve to tokens, nothing outside the safe zone — never by looking. Worth a pass on a phone.
+- `OverworldScene.ts` still guesses character rig from frame height. An LPC sheet will load and animate but must NOT be equipped as the player skin until that is pointed at the rig descriptors.
+- Dragon Tower still returns 213.6% — deferred by founder decision.
+- Coin Kiosk still to be extracted from OverworldScene.
+- Overworld station name-tags and bench/hedge tints still cold blue.
+- Ground shadows and larger characters — the remaining two "free" visual wins from the art review.
