@@ -15,9 +15,19 @@ import { GC_MULTIPLIERS } from "../economy/gcMultiplier";
  * set of possible multipliers is imported from economy/gcMultiplier.ts
  * (#27's GC_MULTIPLIERS = [0.5, 1, 2]) rather than redefined here, so the
  * two sides can't drift - but this component still only ever *reads* that
- * constant and computes a generic `baseAmount * multiplier`; it has no
- * opinion on GC vs SC and never calls resolveGcAmount or any ledger
- * function itself.
+ * constant and computes a generic `baseAmount * multiplier`, and never
+ * calls resolveGcAmount or any ledger function itself.
+ *
+ * Currency wording: the status text names "Gold Coins" outright rather
+ * than showing a bare number. Every call site of this component pays GOLD
+ * COINS and only Gold Coins - the signup bonus (SIGNUP_BONUS_GC, see
+ * economy/signupBonus.ts), the Coin Kiosk claim (AD_REWARD_GC, see
+ * economy/attendantClaim.ts), and Triple Chance (WAGER_GC/PAYOUT_GC, the
+ * deliberate GC-in/GC-out exception in server/src/routes/games.ts) - so a
+ * bare "You got 1000!" was ambiguous between the game's two real,
+ * displayed currencies. It is NOT a TICKETS reveal and must never be
+ * reused as one without threading a currency label through first; TICKETS
+ * are only ever credited by a game win via GAME_WIN_TICKETS.
  *
  * Mechanics: 3 cups, each secretly assigned one of MULTIPLIERS (fixed set,
  * one cup per value - always exactly one 0.5x, one 1x, one 2x). A fast
@@ -329,7 +339,14 @@ export function createShuffleCupReveal(
    * understand what's about to happen, on their own timing.
    */
   function showExplainAndShuffleButton() {
-    statusText.setText("These are the 3 possible prizes. Tap Shuffle, then pick a cup to reveal yours!");
+    // Deliberately kept SHORTER than the pre-wording-pass string it
+    // replaced ("These are the 3 possible prizes. Tap Shuffle, then pick a
+    // cup to reveal yours!") even though it now names the currency: this
+    // text wraps at 360px and sits directly under the caller's own title
+    // (LoginScene's "New Profile Bonus", TripleChanceOffer's "Triple
+    // Chance"), and an extra wrapped line here has previously collided
+    // with that title - see TripleChanceOffer.ts's y-110 comment.
+    statusText.setText("These are the 3 possible Gold Coin prizes. Tap Shuffle, then pick one!");
     cups.forEach((cup, cupId) => {
       paintRevealedCup(cup.bg, MULTIPLIERS[cupId], false);
       cup.label.setText(formatAmount(MULTIPLIERS[cupId])).setColor(colorForMultiplier(MULTIPLIERS[cupId]).text).setVisible(true);
@@ -382,7 +399,7 @@ export function createShuffleCupReveal(
       return others[otherCupIds.indexOf(cupId)] ?? forcedMultiplier;
     };
 
-    statusText.setText(`You got ${formatAmount(multiplier)}!`);
+    statusText.setText(`You got ${formatAmount(multiplier)} Gold Coins!`);
 
     // Reveal every cup - the chosen one full-bright, the other two dimmed -
     // so the player can see what the road not taken would have been. Shows

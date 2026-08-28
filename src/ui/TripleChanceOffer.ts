@@ -99,7 +99,14 @@ function showOffer(
     .setScrollFactor(0)
     .setDepth(401);
   const sub = scene.add
-    .text(x, y - 44, `Risk your ${amount} GC for a 1-in-3 shot at ${amount * 3} GC - lose it all otherwise.`, {
+    // "Gold Coins", not the internal "GC" abbreviation - this is the
+    // player-facing name of the currency (see repo-root CLAUDE.md). Gold
+    // Coins on BOTH sides is correct and deliberate: Triple Chance is the
+    // one GC-in/GC-out exception (server/src/routes/games.ts's
+    // /games/triplechance/play debits WAGER_GC and credits PAYOUT_GC, and
+    // never goes through games/shared.ts's GC-wager/TICKETS-payout split),
+    // so it must NOT say "Tickets" on the win side like the 14 games do.
+    .text(x, y - 44, `Risk your ${amount} Gold Coins for a 1-in-3 shot at ${amount * 3} Gold Coins - lose it all otherwise.`, {
       fontSize: "12px",
       color: Theme.textMuted,
       align: "center",
