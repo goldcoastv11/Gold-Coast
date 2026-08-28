@@ -227,6 +227,21 @@ class GameState {
   /** Username of the currently logged-in profile, or null before login. */
   activeUsername: string | null = null;
 
+  /**
+   * The player's level and total XP (see server/src/progression/levels.ts).
+   * Server-hydrated only, like ownedItems above - there is no local ledger
+   * equivalent and there must never be one: XP is granted solely by claiming
+   * a challenge server-side, and a client-writable level would be a
+   * "type your own Gold Coins" path (each level pays GC).
+   *
+   * Read-only display state. Anything that needs the full level breakdown
+   * (progress into the level, what the next one pays, the cosmetic ladder)
+   * calls GET /progression instead of deriving it from these two numbers -
+   * the XP curve lives on the server and stays there.
+   */
+  playerLevel = 1;
+  playerXp = 0;
+
   get goldCoins() {
     return getBalance(this._ledger, "GC");
   }
@@ -560,6 +575,11 @@ class GameState {
       ? Date.parse(me.attendantClaim.lastClaimedAt)
       : null;
     this._adRewardClaimedAt = me.adReward.lastClaimedAt ? Date.parse(me.adReward.lastClaimedAt) : null;
+    // Defensive `??` even though the server always sends this: an older
+    // deployed backend (or one whose progression migration hasn't been run)
+    // must degrade to level 1, not to `undefined` printed in the HUD.
+    this.playerLevel = me.progression?.level ?? 1;
+    this.playerXp = me.progression?.xp ?? 0;
   }
 
   /** Clears the active session (including the stored JWT - see src/api/client.ts). Local profile data in localStorage is untouched. */

@@ -208,7 +208,10 @@ import type {
   VideoPokerDealResponse,
   VideoPokerDrawResponse,
   AbandonRoundResponse,
-  TripleChancePlayResponse
+  TripleChancePlayResponse,
+  ChallengeBoardResponse,
+  ClaimChallengeResponse,
+  ProgressionResponse
 } from "./types";
 
 export function signup(username: string, password: string, email?: string): Promise<SignupResponse> {
@@ -385,4 +388,27 @@ export function abandonRound(): Promise<AbandonRoundResponse> {
 
 export function playTripleChance(betAmount: number): Promise<TripleChancePlayResponse> {
   return request<TripleChancePlayResponse>("/games/triplechance/play", { method: "POST", body: { betAmount } });
+}
+
+// ---- Challenges, XP and levels ----
+// Read-and-claim only. There is deliberately no "report my progress"
+// endpoint to call: progress is recorded server-side from real game
+// settlement (see server/src/progression/progress.ts's TRUST BOUNDARY note),
+// because completing a challenge pays real Gold Coins.
+
+export function getChallenges(): Promise<ChallengeBoardResponse> {
+  return request<ChallengeBoardResponse>("/challenges", { method: "GET" });
+}
+
+/**
+ * Claims one completed challenge. Idempotent server-side (a second claim
+ * returns 409 ALREADY_CLAIMED rather than paying twice), but callers should
+ * still disable the button while this is in flight - see ChallengesPanel.ts.
+ */
+export function claimChallenge(challengeId: string): Promise<ClaimChallengeResponse> {
+  return request<ClaimChallengeResponse>("/challenges/claim", { method: "POST", body: { challengeId } });
+}
+
+export function getProgression(): Promise<ProgressionResponse> {
+  return request<ProgressionResponse>("/progression", { method: "GET" });
 }

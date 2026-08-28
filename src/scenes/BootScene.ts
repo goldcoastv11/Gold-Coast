@@ -219,6 +219,7 @@ export class BootScene extends Phaser.Scene {
     this.createVideoPokerTexture();
     this.createCoinKioskTexture();
     this.createItemShopTexture();
+    this.createChallengeBoardTexture();
     this.createComingSoonTexture();
     this.createPlantTexture();
     this.createRouletteTableTexture();
@@ -781,6 +782,52 @@ export class BootScene extends Phaser.Scene {
 
     this.drawCabinetBase(g, w, h);
     g.generateTexture("item_shop_booth", w, h);
+    g.destroy();
+  }
+
+  /**
+   * The overworld Challenge Board - the walk-up station for challenges, XP
+   * and levels (see OverworldScene's registerStation call and
+   * ui/ChallengesPanel.ts). Same 48x64 cabinet construction as the Coin
+   * Kiosk and Item Shop so it belongs to the same floor furniture family,
+   * with a pinboard read: a gold-trimmed board on the screen panel carrying
+   * three "pinned notice" rows and a star finial on top, since what this
+   * station shows is a list of things to do plus a prestige number.
+   */
+  private createChallengeBoardTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    this.drawCabinetBody(g, w, h);
+
+    // Star finial on top - the "achievement" read, and the one thing that
+    // distinguishes this silhouette from the Coin Kiosk's antenna at a
+    // glance when walking past.
+    g.fillStyle(PALETTE.gold, 1);
+    const cx = w / 2;
+    g.fillTriangle(cx, 1, cx - 6, 12, cx + 6, 12);
+    g.fillTriangle(cx, 13, cx - 6, 3, cx + 6, 3);
+
+    g.fillStyle(PALETTE.screen, 1);
+    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+
+    // Gold-trimmed notice board inset into the screen panel.
+    g.lineStyle(1.5, PALETTE.gold, 1);
+    g.strokeRoundedRect(12, 19, w - 24, 24, 3);
+
+    // Three pinned notice rows, the shortest last so it reads as a list
+    // rather than a solid block.
+    g.fillStyle(PALETTE.cream, 1);
+    g.fillRect(15, 23, w - 30, 3);
+    g.fillRect(15, 30, w - 30, 3);
+    g.fillRect(15, 37, w - 38, 3);
+    // A single filled pin on the top row - the "one of these is ready"
+    // note the panel itself makes so much of.
+    g.fillStyle(PALETTE.mint, 1);
+    g.fillCircle(w - 15, 24, 2.4);
+
+    this.drawCabinetBase(g, w, h);
+    g.generateTexture("challenge_board", w, h);
     g.destroy();
   }
 

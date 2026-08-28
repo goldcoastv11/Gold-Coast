@@ -58,7 +58,15 @@ export const EVENTS = {
   /** A skin purchase. Props: { skinId, price }. */
   SKIN_PURCHASED: "shop.skin_purchased",
   /** An owned cosmetic was equipped. Props: { itemId } or { skinId }. */
-  ITEM_EQUIPPED: "shop.item_equipped"
+  ITEM_EQUIPPED: "shop.item_equipped",
+  /**
+   * A completed challenge's reward was claimed. Props: { challengeId,
+   * period, rewardGc, rewardXp } - all catalog facts, nothing a player
+   * typed. This is the "does the challenge system actually bring people
+   * back" signal, and it's fired on the server's confirmed success, never
+   * on the optimistic click.
+   */
+  CHALLENGE_CLAIMED: "challenge.claimed"
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
