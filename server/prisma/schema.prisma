@@ -65,6 +65,8 @@ model User {
   attendantClaim      AttendantClaim?
   adRewardClaim       AdRewardClaim?
   gameRounds          GameRound[]
+  playerProgress      PlayerProgress?
+  challengeProgress   ChallengeProgress[]
 
   @@map("users")
 }
@@ -104,6 +106,15 @@ enum TransactionType {
   GAME_WIN_TICKETS
   // The only way TICKETS are ever debited - an Item Shop purchase.
   SKIN_PURCHASE_TICKETS
+  // Challenges & levels (see src/progression/*). Both are GC-ONLY grants -
+  // deliberately NOT TICKETS, because TICKETS may only ever be credited by
+  // GAME_WIN_TICKETS (a real game win); see repo-root CLAUDE.md and
+  // economy/ledger.ts's applyTransaction, which enforces that at runtime.
+  // Distinct from AD_REWARD_GC rather than reusing it so a challenge/level
+  // payout is separable from a Coin Kiosk claim in the ledger and in any
+  // metrics query.
+  CHALLENGE_REWARD_GC
+  LEVEL_REWARD_GC
   // A GC payout - NOT retired, still used by Triple Chance
   // (routes/games.ts), which is GC-in/GC-out (double-or-nothing on GC just
   // received from the Coin Kiosk), not one of the 14 GC-wager/TICKETS-
@@ -357,4 +368,76 @@ model Event {
   // end to end when debugging a funnel drop-off.
   @@index([sessionId, createdAt])
   @@map("events")
+}
+
+// Retention Leg 2: XP / levelling. One row per user, created lazily the
+// first time they earn XP.
+//
+// `level` is deliberately NOT stored - it's derived from `xp` by
+// src/progression/levels.ts's levelForXp(). Storing only the raw XP means
+// the curve can be retuned later by editing one function, with no data
+// migration and no risk of a stored level disagreeing with the XP that
+// produced it.
+//
+// `rewardedLevel` is the double-claim guard for level-up rewards (which
+// pay real GC). It records the highest level whose reward has ACTUALLY
+// been paid; the grant path only ever pays the half-open range
+// (rewardedLevel, currentLevel] and advances the column in the same DB
+// transaction with a conditional update, so a level's GC can be paid at
+// most once no matter how many concurrent claims race.
+model PlayerProgress {
+  userId        String   @id @map("user_id")
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xp            Int      @default(0)
+  rewardedLevel Int      @default(1) @map("rewarded_level")
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("player_progress")
+}
+
+// Retention Leg 2: per-player progress against one challenge, for one
+// period.
+//
+// HOW DAILY/WEEKLY RESET WITH NO CRON JOB (the central design decision -
+// this project has no job scheduler and adding one for this would be a new
+// piece of always-on infrastructure to keep alive): they don't "reset" at
+// all. `periodKey` is DERIVED from the current UTC date every time
+// progress is read or written - "2026-08-28" for a daily, "2026-W35" for a
+// weekly, the literal "all" for a lifetime achievement (see
+// src/progression/periods.ts). When the UTC day rolls over, a daily
+// challenge simply starts addressing a different row, which doesn't exist
+// yet and therefore reads as zero progress. Yesterday's row is left alone
+// as inert history. Nothing has to run on a schedule, nothing can be missed
+// because a scheduled job didn't fire, and a server that was down over
+// midnight comes back correct on its own.
+//
+// `counter` covers count/sum metrics (rounds played, wins, GC wagered,
+// TICKETS won). `seen` covers distinct-set metrics ("play 5 different
+// games") - progress there is the array's length, so re-playing the same
+// game can't inflate it.
+//
+// `claimedAt` is both the "has this been claimed" record and the
+// idempotency latch: the claim path is a conditional UPDATE ... WHERE
+// claimed_at IS NULL AND counter >= target, so a second claim updates zero
+// rows and pays nothing.
+model ChallengeProgress {
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Catalog id from src/progression/challengeCatalog.ts. A plain String,
+  // not an enum or a DB-side definitions table: challenge definitions are
+  // code (same call as skinCatalog.ts/itemCatalog.ts), so adding, retiring
+  // or retuning a challenge is a code change and a deploy, never a
+  // destructive enum migration or a seed script.
+  challengeId String    @map("challenge_id")
+  periodKey   String    @map("period_key")
+  counter     Int       @default(0)
+  /// Distinct tokens seen this period, for DISTINCT_GAMES-style metrics.
+  seen        String[]  @default([])
+  claimedAt   DateTime? @map("claimed_at") @db.Timestamptz(3)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@id([userId, challengeId, periodKey])
+  // "This player's active challenges right now" - the GET /challenges read.
+  @@index([userId, periodKey])
+  @@map("challenge_progress")
 }

@@ -15,6 +15,7 @@ import positionRoutes from "./routes/position";
 import gamesRoutes from "./routes/games";
 import adsRoutes from "./routes/ads";
 import eventsRoutes from "./routes/events";
+import progressionRoutes from "./routes/progression";
 import { InsufficientBalanceError } from "./economy/ledger";
 
 export const app = express();
@@ -37,6 +38,7 @@ app.use(positionRoutes);
 app.use(gamesRoutes);
 app.use(adsRoutes);
 app.use(eventsRoutes);
+app.use(progressionRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not found", code: "NOT_FOUND" });
