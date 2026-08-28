@@ -114,6 +114,52 @@ function drawButtonSurface(
 }
 
 /**
+ * Relative luminance (WCAG) of a packed 0xRRGGBB color, 0 (black) to 1 (white).
+ */
+function relativeLuminance(color: number): number {
+  const channel = (c: number) => {
+    const v = c / 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  };
+  const r = channel((color >> 16) & 0xff);
+  const g = channel((color >> 8) & 0xff);
+  const b = channel(color & 0xff);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Picks a button label color that is actually readable on `fill`, used as
+ * makeButton's default when a caller doesn't name one explicitly.
+ *
+ * Every button used to default to the near-white Theme.textPrimary
+ * regardless of what it was sitting on, which was fine while every button
+ * fill was dark but was already failing on the brightest one: white on the
+ * orange Theme.accent measured 2.41:1 under the old "Arcade Nights" palette -
+ * i.e. the game's single most important button, the BET/START CTA, was the
+ * least legible label in the UI, and had been for some time. Warming the
+ * palette doesn't cause that (the equivalent new pairing measures 2.32:1,
+ * essentially unchanged) but it's not worth carrying forward either.
+ *
+ * Choosing by measured luminance rather than hardcoding "accent and gold get
+ * dark text" is deliberate: this file's whole design is that re-pointing a
+ * token in Theme.ts cascades everywhere without editing call sites, and a
+ * hardcoded list silently goes stale the moment someone lightens a fill -
+ * which is exactly the failure this project has already hit twice with the
+ * duplicated fade color in ui/sceneTransition.ts. This rule can't go stale;
+ * it re-derives itself from whatever the token currently is.
+ *
+ * The 0.3 threshold sits in a wide empty gap in the current palette, not
+ * near any fill: accent (0.37) and gold (0.54) are above it and take the
+ * dark label; danger (0.22), secondary (0.15) and neutral (0.15) are below
+ * it and keep the near-white one. Measured pairings after this change are
+ * 6.25:1 on accent and 8.75:1 on gold, up from 2.32:1 and (already dark, via
+ * an explicit argument) unchanged respectively.
+ */
+export function readableLabelOn(fill: number): string {
+  return relativeLuminance(fill) > 0.3 ? Tokens.text.onAccent : Tokens.text.primary;
+}
+
+/**
  * Creates a flat button. Pass baseColor/hoverColor to theme it (e.g.
  * `Tokens.color.accent` for the one primary action on a screen,
  * `Tokens.color.surfaceRaised` for everything secondary).
@@ -122,6 +168,11 @@ function drawButtonSurface(
  * 14 game scenes, the overworld and the shops keep working untouched - only
  * the drawn form changed. `radius` is optional and defaults to the token
  * button radius.
+ *
+ * `textColor` defaults to whichever token text colour is actually readable on
+ * `baseColor` (see readableLabelOn) rather than always the light one - pass a
+ * colour explicitly only to override that, as the CASH OUT button in
+ * makeGameShell does.
  */
 export function makeButton(
   scene: Phaser.Scene,
@@ -133,7 +184,7 @@ export function makeButton(
   baseColor: number,
   hoverColor: number,
   onClick: () => void,
-  textColor = Tokens.text.primary,
+  textColor = readableLabelOn(baseColor),
   radius: number = Tokens.radius.sm
 ): UIButton {
   const container = scene.add.container(x, y);
@@ -390,6 +441,9 @@ export function makeBetControl(
     fontSize: "14px",
     fontFamily: Tokens.type.family,
     fontWeight: Tokens.type.weight.semibold,
+    // Was a hardcoded 0xf5f6fa - a duplicate of whatever the text colour
+    // happened to be at the time, which silently went stale when the palette
+    // pass warmed it. Points at the token now.
     color: Tokens.text.primary,
     background: "transparent",
     border: "none",

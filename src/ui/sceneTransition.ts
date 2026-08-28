@@ -22,18 +22,23 @@ import Phaser from "phaser";
  */
 
 const FADE_MS = 220;
-// Near-black, matching Theme.bgDark (#0E0F14, the world/panel backdrop
-// color under the "Arcade Nights" dark palette). This used to be a warm
-// cream (#FFF6E9) matching the OLD "Bright Social-Hub" light theme - a
-// leftover missed when Theme.ts was remapped to the dark palette, so every
-// scene transition was fading through a bright cream flash against an
-// otherwise all-dark game (reported as "the screen goes white and you
-// can't click anything" - the fade itself was fine, it was just fading to
-// completely the wrong color, which read as the game breaking). Keep this
-// in sync with Theme.bgDark if that ever changes again.
-const FADE_R = 0x0e;
-const FADE_G = 0x0f;
-const FADE_B = 0x14;
+// Warm dark cocoa, matching Theme.bgDark (#2B211B, the world/panel backdrop
+// color under the "Warm Daylight" palette). Updated in that pass from the
+// "Arcade Nights" near-black #0E0F14.
+//
+// This value has now been the wrong one TWICE, in both directions, each time
+// because Theme.bgDark moved and this copy didn't: it was originally a warm
+// cream (#FFF6E9) from the "Bright Social-Hub" light theme and got missed
+// when the palette went dark, so every transition flashed bright cream
+// against an all-dark game (reported as "the screen goes white and you can't
+// click anything" - the fade worked fine, it was just fading to completely
+// the wrong color, which read as the game breaking). Keep it in sync with
+// Theme.bgDark. It is a split-out numeric copy rather than an import purely
+// because Camera.fadeOut takes three separate 0-255 channels, not a packed
+// 0xRRGGBB int like every other color in the project.
+const FADE_R = 0x2b;
+const FADE_G = 0x21;
+const FADE_B = 0x1b;
 
 /**
  * Fades `scene`'s camera out, then starts `key` (with optional `data`) once

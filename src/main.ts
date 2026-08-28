@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { Theme } from "./ui/Theme";
+import { Theme, DISPLAY_FONT } from "./ui/Theme";
 import { BootScene } from "./scenes/BootScene";
 import { LoginScene } from "./scenes/LoginScene";
 import { StartMenuScene } from "./scenes/StartMenuScene";
@@ -31,6 +31,56 @@ import { isTouchDevice } from "./ui/TouchControls";
 // Cannot throw and never blocks boot - see track.ts's header.
 startTracking();
 track(EVENTS.SESSION_START, { touch: isTouchDevice() });
+
+/**
+ * Makes DISPLAY_FONT (see ui/Theme.ts) the default for every `scene.add.text()`
+ * in the game, in one place.
+ *
+ * Phaser has no global text-style config - `TextStyle` hardcodes its own
+ * fallback of `'Courier'` when a style object omits `fontFamily`, and every
+ * one of the ~100 `add.text()` call sites in this project omitted it, so the
+ * entire game was rendering in a cold monospace by accident rather than by
+ * choice. The alternatives were both worse: adding `fontFamily` to all ~100
+ * call sites is a huge diff that the next new `add.text()` immediately starts
+ * drifting from, and it would additionally require editing
+ * OverworldScene.ts (23 of those call sites), which is off-limits here -
+ * it's being restructured under a separate change. Wrapping the factory once
+ * covers every call site including those, and covers future ones for free.
+ *
+ * `remove()` before `register()` is required, not defensive: Phaser's
+ * `GameObjectFactory.register` is a no-op if the type is already registered
+ * (`if (!prototype.hasOwnProperty(factoryType))`), and core registers "text"
+ * at import time - so registering without removing first would silently do
+ * nothing at all. The pair is Phaser's own supported way to replace a
+ * built-in factory.
+ *
+ * A call site that passes its own `fontFamily` (or the `font` shorthand,
+ * which sets family too) still wins - this only fills in a default. Runs at
+ * module scope, before `new Phaser.Game()` below, so it is in place long
+ * before any scene's create() runs.
+ */
+type PhaserTextFactory = (
+  x: number,
+  y: number,
+  text: string | string[],
+  style?: Phaser.Types.GameObjects.Text.TextStyle
+) => Phaser.GameObjects.Text;
+
+const basePhaserTextFactory = Phaser.GameObjects.GameObjectFactory.prototype.text as PhaserTextFactory;
+
+Phaser.GameObjects.GameObjectFactory.remove("text");
+Phaser.GameObjects.GameObjectFactory.register("text", function (
+  this: Phaser.GameObjects.GameObjectFactory,
+  x: number,
+  y: number,
+  text: string | string[],
+  style?: Phaser.Types.GameObjects.Text.TextStyle
+) {
+  const stylesOwnFamily =
+    style !== undefined && (style.fontFamily !== undefined || style.font !== undefined);
+  const withDefaultFont = stylesOwnFamily ? style : { ...style, fontFamily: DISPLAY_FONT };
+  return basePhaserTextFactory.call(this, x, y, text, withDefaultFont);
+});
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,

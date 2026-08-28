@@ -2,60 +2,91 @@ import Phaser from "phaser";
 import { SKIN_CATALOG } from "../GameState";
 import { fadeToScene } from "../ui/sceneTransition";
 import { preloadSounds, preloadMusic } from "../ui/SoundManager";
+import { whenDisplayFontReady } from "../ui/Theme";
 
 /**
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
  * character spritesheets and every purchasable skin.
  *
- * "Arcade Nights" reskin (Gold Coast Arcade rebrand): every procedurally-
- * drawn game cabinet/table texture below moved off the old "Bright
- * Social-Hub" pastel palette onto a dark charcoal-navy body with orange/
- * gold/white accents, per direction ("look more like Dave and Busters").
+ * "Warm Daylight" reskin (this pass): every procedurally-drawn ground, wall
+ * and cabinet/table texture below moves off the previous "Arcade Nights"
+ * dark charcoal-navy body onto a warm, sunlit brown/sand/amber register, per
+ * direction - the target reference is Adventure Academy (warm, rounded,
+ * soft-lit, inviting) rather than the dark night-time arcade the old palette
+ * produced. Supersedes the "Arcade Nights" direction, which itself replaced
+ * the "Bright Social-Hub" pastel palette in STYLE_GUIDE.md.
+ *
  * Key names are kept stable (cabinet, felt, mint, coral, cream, etc.) even
  * though most no longer literally match their old color - every
  * create*Texture() method below references PALETTE by name, so re-pointing
  * the values here is what makes the new look cascade everywhere without
- * touching each drawing method. The floor/wall/carpet ground tiles (below,
- * in preload()/create()) used to be pre-cut PNGs from the old Kenney
- * "RPG Urban Pack" - that pack is a bright town/plaza kit with no dark
- * equivalent, so those four are now drawn procedurally too (createFloorTan
- * Texture/createCarpetRedTexture/createCarpetBlueTexture/createWallTexture),
- * same technique as the furniture, instead of hunting for pre-made dark
- * tile art. Theme.ts/uiHelpers.ts (chrome UI palette) is a separate token
- * set with its own new dark values, kept in sync by hand (not literally
- * shared) since this file has no import relationship to it.
+ * touching each drawing method. As part of this pass the four ground/wall
+ * tiles were brought INTO that scheme: createFloorTanTexture/
+ * createCarpetBlueTexture/createCarpetRedTexture/createWallTexture used to
+ * hardcode their own inline hex literals, which made them the one set of
+ * textures a PALETTE re-point could NOT reach - they now reference the
+ * ground tokens below like everything else, so PALETTE is finally the single
+ * chokepoint this comment always claimed it was. (Those four are drawn
+ * procedurally, not loaded: the Kenney "RPG Urban Pack" they came from had
+ * no dark equivalent when "Arcade Nights" landed, and they've stayed
+ * procedural since.)
+ *
+ * Theme.ts/uiHelpers.ts (chrome UI palette) is a separate token set, kept in
+ * sync by hand (not literally shared) since this file has no import
+ * relationship to it. Note the two are deliberately NOT the same lightness:
+ * nothing in this file has text drawn on top of it, so these surfaces are
+ * free to go genuinely light/sunlit, whereas Theme.ts's surfaces have to stay
+ * dark enough to carry near-white text - see Theme.ts's "Contrast contract".
  */
 const PALETTE = {
-  /** Near-black outline used on every drawn shape. */
-  outline: 0x05070c,
-  /** White - "cabinet" furniture body (was terracotta, then dark navy) - per
-   * user direction, the game cabinets themselves need to read as white so
-   * they pop against the dark floor instead of blending into it. Paired
-   * with a still-dark `screen` fill below, this reads as a real arcade
-   * cabinet: light plastic shell, dark lit screen. */
-  cabinet: 0xf2f3f7,
-  /** Light gray - trim/base/plinth accents, a shade darker than `cabinet` for shape definition (was dark navy). */
-  cabinetDark: 0xc7cbd6,
-  /** Dark slate "screen" panel background, reads as a lit arcade-cabinet screen against the now-white cabinet body (was cream). */
-  screen: 0x131a2c,
-  /** Even darker alt panel (was pale sky blue). */
-  screenAlt: 0x0d1220,
-  /** Rich royal-blue felt for card/dice tables - saturated enough to read as "felt" against the near-black cabinet rail. */
-  felt: 0x1b3a6b,
-  /** Bright green - "positive/safe" grid-cell color (mines' safe cells, keno default cells, plant foliage) - kept as a green functional accent (universal win/safe signal), just repointed brighter for a dark bg (was mint-teal). */
-  mint: 0x2ecc71,
+  /** Deep warm brown outline used on every drawn shape - soft-lit line art rather than the previous near-black 0x05070c, which read as hard/inky against the new light surfaces. Still dark enough to hold every shape's silhouette. */
+  outline: 0x3d2a1e,
+  /** Warm ivory - "cabinet" furniture body (was terracotta, then dark navy, then cold white 0xf2f3f7). The white was chosen so cabinets would pop against a near-black floor; with the floor now light sand, separation instead comes from the cabinet being the LIGHTEST and least saturated thing on the floor, plus its full-strength `outline` stroke. */
+  cabinet: 0xfbf1de,
+  /** Warm tan - trim/base/plinth accents, a shade darker than `cabinet` for shape definition (was cold light gray). */
+  cabinetDark: 0xd8bd94,
+  /** Muted slate-teal "screen" panel background - still clearly a lit screen against the ivory cabinet body, but warmer and less inky than the old 0x131a2c so it reads as glass catching daylight rather than a black void. */
+  screen: 0x2f4a63,
+  /** Slightly deeper alt panel. */
+  screenAlt: 0x263c52,
+  /** Sunlit emerald felt for card/dice tables - classic table-felt green, which sits far warmer against the ivory cabinet rail than the old royal blue 0x1b3a6b did against a near-black one. */
+  felt: 0x37806a,
+  /** Green - "positive/safe" grid-cell color (mines' safe cells, keno default cells, plant foliage) - kept as a green functional accent (universal win/safe signal), softened off the previous neon 0x2ecc71 now that it no longer has to shout over a dark background. */
+  mint: 0x5cc47f,
   /** Lighter green variant. */
-  mintBright: 0x5eeba0,
-  /** Electric mid-blue - secondary accent (was sky blue). */
-  sky: 0x3d7fd9,
-  /** Vivid orange - primary brand accent, matches Theme.accent (was coral-orange). */
-  coral: 0xff7a29,
-  /** Amber-gold - jackpot/highlight accent, matches Theme.gold. */
-  gold: 0xffb347,
-  /** Red - danger/loss accent, matches Theme.danger. */
-  danger: 0xe0473f,
-  /** Near-white - card faces / light UI elements on dark furniture (was warm cream). */
-  cream: 0xf5f6fa
+  mintBright: 0x8ade9f,
+  /** Soft sky blue - secondary accent, and the flat player character's body color (see createFlatCharacterSheet). Softened from the old electric 0x3d7fd9; still the most saturated cool note on the floor, which is what keeps the player readable against warm sand. */
+  sky: 0x5b9fd6,
+  /** Warm sunlit orange - primary brand accent, matches Theme.accent. */
+  coral: 0xef8b3f,
+  /** Warm honey - jackpot/highlight accent, matches Theme.gold. */
+  gold: 0xf0b95e,
+  /** Warmer, less shrill red - danger/loss accent, matches Theme.danger. */
+  danger: 0xd9564a,
+  /** Warm ivory - card faces / light elements on furniture (matches Theme.cardFace). */
+  cream: 0xfdf6e8,
+
+  // --- Ground & walls (new tokens this pass - previously inline hex
+  // literals inside the four create*Texture methods below, see the class
+  // comment). These are the largest surfaces in the overworld by area and
+  // therefore the single biggest lever on how the world reads; they carry no
+  // text, so they're free to be genuinely light. ---
+  /** Warm sunlit sand - the main plaza floor (was near-black charcoal 0x1c1e24, the single darkest and largest surface in the game). */
+  floor: 0xd9c39b,
+  /** Slightly deeper sand fleck for plaza floor texture. NOTE the polarity is inverted from the old palette on purpose: the flecks used to be LIGHTER than their base because the base was near-black and a darker fleck was invisible on it. The rule being preserved is "a fleck has to be visible," which on a light floor means going darker, not lighter. */
+  floorFleck: 0xc6a97e,
+  /** Warm terracotta - the gaming-floor "rug" tile. Reads as a clay/kilim rug laid over the sand plaza, and stays clearly distinct from it in both hue and value (the old pairing relied on a dark-grey vs dark-blue distinction that was nearly invisible in practice). */
+  rug: 0xb9724c,
+  /** Deeper terracotta fleck for the rug. */
+  rugFleck: 0xa9633f,
+  /** Deep warm red - the unused-but-kept `carpet_red` tile (see createCarpetRedTexture). */
+  rugRed: 0x9e4a3a,
+  /** Deeper fleck for the red rug variant. */
+  rugRedFleck: 0x8c3f30,
+  /** Warm sandstone plaster - the perimeter wall (was dark navy brick 0x161c30). */
+  wall: 0xc9a27a,
+  /** Mortar/course line on the wall, a shade deeper than `wall` (was a near-black 0x0a0e1a seam). */
+  wallLine: 0xa8825d
 } as const;
 
 export class BootScene extends Phaser.Scene {
@@ -198,70 +229,98 @@ export class BootScene extends Phaser.Scene {
     this.createTutorialGuideTexture();
     this.createAccessoryTextures();
 
+    void this.handOffWhenFontReady();
+  }
+
+  /**
+   * Waits for the display font before handing off to LoginScene - the first
+   * scene in the game that draws any text at all (BootScene itself draws
+   * none, which is exactly why this is the right place to wait: the wait
+   * costs nothing visually here, and every later scene inherits the benefit).
+   *
+   * Without this, the whole first screen renders in the fallback stack and
+   * stays there - see whenDisplayFontReady's comment in ui/Theme.ts for why
+   * a Phaser canvas can't re-flow into a late-arriving webfont the way a DOM
+   * page can. In practice the font is usually already in the browser's HTTP
+   * cache or has finished downloading during the texture generation above, so
+   * this resolves immediately and adds no perceptible delay on a warm load.
+   *
+   * Fire-and-forget (`void`) rather than making create() itself async:
+   * Phaser calls create() and ignores its return value, so an async create()
+   * would not actually be awaited by anything - it would just look like it
+   * was. Failure/timeout still hands off (whenDisplayFontReady resolves
+   * `false` rather than rejecting), so boot can't get stuck here.
+   */
+  private async handOffWhenFontReady() {
+    await whenDisplayFontReady();
     fadeToScene(this, "LoginScene");
   }
 
   /**
-   * Main plaza floor tile, 16x16 - flat near-black charcoal with a faint
-   * darker fleck pattern so it doesn't read as a dead flat void. Drawn
+   * Main plaza floor tile, 16x16 - warm sunlit sand with a faint deeper
+   * fleck pattern so it doesn't read as a dead flat field. Drawn
    * procedurally (see class doc comment) instead of a loaded PNG.
    *
-   * Palette per user direction ("dark greys, dark blues, orange and
-   * white... not super vibrant but has a little contrast"): the outer
-   * plaza reads as dark GREY (neutral, no blue cast) so it's tonally
-   * distinct from the rug's dark BLUE, and each tile's fleck is now
-   * LIGHTER than its base fill (visible contrast/sparkle) instead of the
-   * previous same-hue-but-darker flecks, which were nearly invisible - a
-   * deliberate middle ground between the original busy version and the
-   * later fully-flat "quieter" pass, still low-saturation/no loud pattern,
-   * just not textureless.
+   * "Warm Daylight" pass: this is the single largest surface in the game by
+   * area, so it's the main reason the world used to read as night-time - it
+   * was a near-black charcoal (0x1c1e24). It's now PALETTE.floor, a warm
+   * sand. The previous direction's "flecks must be LIGHTER than the base"
+   * rule is inverted here (PALETTE.floorFleck is darker than PALETTE.floor);
+   * see floorFleck's own comment - the underlying rule being kept is "the
+   * fleck has to actually be visible," which flips with the base's lightness.
+   * Still low-contrast and small, so it stays texture rather than pattern.
    */
   private createFloorTanTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(0x1c1e24, 1);
+    g.fillStyle(PALETTE.floor, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x2a2d35, 1);
+    g.fillStyle(PALETTE.floorFleck, 1);
     g.fillCircle(4, 4, 0.9);
     g.fillCircle(11, 9, 0.9);
-    g.fillStyle(PALETTE.cream, 0.1);
+    // Third speck: was `cream at 0.1`, i.e. a near-white dot, which was a
+    // visible sparkle on a near-black floor and is completely invisible on a
+    // light sand one. Flipped to a very faint warm-brown speck for the same
+    // reason the flecks above flipped.
+    g.fillStyle(PALETTE.outline, 0.06);
     g.fillCircle(8, 13, 0.8);
     g.generateTexture("floor_tan", s, s);
     g.destroy();
   }
 
   /**
-   * Gaming-floor "rug" tile, 16x16 - dark blue, tonally distinct from the
-   * plaza's dark grey (see createFloorTanTexture's doc comment for the
-   * full palette direction). A lighter blue fleck gives it a little
-   * contrast/texture, plus a small orange fleck and a faint white one -
-   * the full "dark greys, dark blues, orange and white" set, all kept
-   * low-alpha/small so none of it reads as a loud repeating pattern
-   * (an earlier full-tile orange border was too loud - see git history).
+   * Gaming-floor "rug" tile, 16x16 - warm terracotta, reading as a clay/kilim
+   * rug laid over the sand plaza. Distinct from the plaza in BOTH hue and
+   * value, which is a real improvement on the old pairing: that one asked a
+   * dark grey and a dark navy to be told apart, and at those lightnesses they
+   * largely weren't. A deeper terracotta fleck gives it texture, plus a small
+   * orange speck and a faint ivory one, all kept low-alpha/small so none of
+   * it reads as a loud repeating pattern (an earlier full-tile orange border
+   * was too loud - see git history).
    */
   private createCarpetBlueTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(0x131c34, 1);
+    g.fillStyle(PALETTE.rug, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x203158, 1);
+    g.fillStyle(PALETTE.rugFleck, 1);
     g.fillCircle(4, 4, 0.9);
     g.fillCircle(12, 12, 0.9);
     g.fillStyle(PALETTE.coral, 0.22);
     g.fillCircle(9, 5, 0.9);
-    g.fillStyle(PALETTE.cream, 0.12);
+    g.fillStyle(PALETTE.cream, 0.16);
     g.fillCircle(13, 8, 0.7);
     g.generateTexture("carpet_blue", s, s);
     g.destroy();
   }
 
-  /** Same treatment as createCarpetBlueTexture (dark-grey plaza / lighter-fleck contrast direction), unused key kept for parity/future use - see that method's doc comment. */
+  /** Same treatment as createCarpetBlueTexture, unused key kept for parity/future use - see that method's doc comment. */
   private createCarpetRedTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(0x2a0f10, 1);
+    g.fillStyle(PALETTE.rugRed, 1);
     g.fillRect(0, 0, s, s);
-    g.fillStyle(0x3c1618, 1);
+    g.fillStyle(PALETTE.rugRedFleck, 1);
     g.fillCircle(4, 4, 0.9);
     g.fillCircle(12, 12, 0.9);
     g.generateTexture("carpet_red", s, s);
@@ -269,16 +328,18 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Perimeter wall tile, 16x16 - dark navy brick with a thin glowing-orange
-   * baseboard trim line, the "neon strip along the wall" touch real arcades
-   * use (was a terracotta-brick Kenney tile).
+   * Perimeter wall tile, 16x16 - warm sandstone plaster with a deeper mortar
+   * course line and a warm-orange baseboard trim. The trim used to be an
+   * explicitly "glowing neon strip" against a dark navy brick; at these
+   * lightnesses it stops reading as neon and instead reads as a painted
+   * skirting board, which is the intent under the daylight direction.
    */
   private createWallTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(0x161c30, 1);
+    g.fillStyle(PALETTE.wall, 1);
     g.fillRect(0, 0, s, s);
-    g.lineStyle(1, 0x0a0e1a, 1);
+    g.lineStyle(1, PALETTE.wallLine, 1);
     g.strokeRect(0, 0, s, 8);
     g.strokeRect(0, 8, s, 8);
     g.fillStyle(PALETTE.coral, 1);
@@ -1138,7 +1199,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(PALETTE.outline, 1);
     g.fillRoundedRect(0, 8, w, 3, 1.5);
     // Crown (cylinder body)
-    g.fillStyle(0x1a1d24, 1); // near-black, matches Theme.cardTextBlack rather than pure PALETTE.outline so the band below actually reads against it
+    g.fillStyle(0x2e211a, 1); // warm near-black, matches Theme.cardTextBlack rather than pure PALETTE.outline so the band below actually reads against it
     g.fillRoundedRect(3, 0, w - 6, 9, 1.5);
     // Gold band
     g.fillStyle(PALETTE.gold, 1);
@@ -1162,7 +1223,7 @@ export class BootScene extends Phaser.Scene {
     g.fillRoundedRect(0, 0, 5.5, 5, 1.5);
     g.fillRoundedRect(w - 5.5, 0, 5.5, 5, 1.5);
     // Lens shine (small highlight so they don't read as two flat blobs)
-    g.fillStyle(0x4a7ad9, 0.7); // Theme.secondaryHover-ish blue glint
+    g.fillStyle(0x5a8cc9, 0.7); // Theme.secondaryHover-ish blue glint
     g.fillCircle(1.8, 1.6, 0.9);
     g.fillCircle(w - 3.7, 1.6, 0.9);
 
@@ -1246,7 +1307,7 @@ export class BootScene extends Phaser.Scene {
     g.fillStyle(PALETTE.danger, 1);
     g.fillTriangle(w / 2, h / 2, 0, 0, 0, h);
     g.fillTriangle(w / 2, h / 2, w, 0, w, h);
-    g.fillStyle(0xf06860, 1); // Theme.dangerHover - lighter center knot, distinct from the two wings
+    g.fillStyle(0xef7a6d, 1); // Theme.dangerHover - lighter center knot, distinct from the two wings
     g.fillCircle(w / 2, h / 2, 2);
     g.lineStyle(1, PALETTE.outline, 1);
     g.strokeTriangle(w / 2, h / 2, 0, 0, 0, h);
@@ -1287,8 +1348,8 @@ export class BootScene extends Phaser.Scene {
     const h = FRAME * ROWS;
     const g = this.add.graphics();
 
-    const BODY = PALETTE.sky; // electric mid-blue - matches this game's own accent family, not a sourced character's color
-    const BODY_DARK = 0x2a5a9e;
+    const BODY = PALETTE.sky; // soft sky blue - matches this game's own accent family, not a sourced character's color
+    const BODY_DARK = 0x3a6fa0; // shading/feet - re-darkened to stay a clear step below the softened PALETTE.sky above
     const SKIN = 0xffc999; // character skin tone - same reference value STYLE_GUIDE.md's own palette table already uses
     const EYE = PALETTE.outline;
 
