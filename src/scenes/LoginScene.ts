@@ -142,7 +142,10 @@ export class LoginScene extends Phaser.Scene {
       padding: "0 10px",
       fontSize: "15px",
       fontFamily: "inherit",
-      color: cssHex(0xf5f6fa),
+      // Was a hardcoded 0xf5f6fa - a duplicate of what Theme.textPrimary
+      // happened to be at the time, which silently went stale when the
+      // "Warm Daylight" pass warmed that token. Points at the token now.
+      color: Theme.textPrimary,
       background: cssHex(Theme.inset),
       border: `2px solid ${cssHex(Theme.panelBorder)}`,
       borderRadius: "8px",

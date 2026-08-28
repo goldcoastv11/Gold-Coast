@@ -17,13 +17,39 @@
        either platform - nothing left to "auto-hide", so this sidesteps
        the vh/svh/dvh tradeoff entirely rather than trying to out-clever it. -->
   <link rel="manifest" href="/manifest.json" />
-  <meta name="theme-color" content="#0e0f14" />
+  <meta name="theme-color" content="#2b211b" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="Gold Coast" />
   <link rel="icon" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+
+  <!-- Display typeface: Baloo 2 (Google Fonts, SIL Open Font License 1.1 -
+       commercial use permitted, no attribution required). A warm, rounded
+       display face chosen to match the "Warm Daylight" palette direction
+       (see src/ui/Theme.ts). Before this, nothing in the project set a font
+       at all, so every Phaser text object fell back to Phaser's own built-in
+       default of "Courier" - a cold monospace.
+
+       The two preconnects are load-bearing, not boilerplate: the CSS lives on
+       fonts.googleapis.com but the actual .woff2 files it points at live on
+       the separate fonts.gstatic.com origin, so without the second
+       preconnect the browser can't even start the DNS/TLS handshake for the
+       font files until it has finished parsing the stylesheet. `crossorigin`
+       on that one is required because font fetches are always CORS requests -
+       a preconnect without it opens a connection the font request then can't
+       reuse. Weights: 400 for body/label text, 700 for the `fontStyle:
+       "bold"` headings and button labels.
+
+       This <link> only STARTS the download. Phaser measures and rasterizes
+       each text object once, at creation, and never re-measures when a
+       webfont lands later - so BootScene additionally waits on
+       document.fonts before handing off to the first scene that draws text.
+       See BootScene.create(). -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@400;700&display=swap" rel="stylesheet" />
   <style>
     /* Used by any scene that needs to hide a Phaser DOM Element input
        (LoginScene's username/password fields, uiHelpers.ts's bet-amount
@@ -56,13 +82,13 @@
        fade is a platform default, not specific to one field. */
     input:disabled {
       opacity: 1 !important;
-      -webkit-text-fill-color: #f5f6fa !important;
-      color: #f5f6fa !important;
+      -webkit-text-fill-color: #fff6e9 !important;
+      color: #fff6e9 !important;
     }
     html, body {
       margin: 0;
       padding: 0;
-      background: #0e0f14;
+      background: #2b211b;
       width: 100%;
       /* 100vh on mobile browsers is measured against the LARGEST possible
          viewport (as if the address bar/toolbar were hidden), not what's
@@ -90,6 +116,15 @@
          (movement joystick, game buttons, etc.). */
       touch-action: none;
       overscroll-behavior: none;
+      /* Sets the inherited default for the real DOM elements the game
+         overlays on the canvas - LoginScene's username/password fields and
+         uiHelpers.ts's bet-amount input all style themselves with
+         `fontFamily: "inherit"`, so this one declaration is what actually
+         gives those three inputs the display face. Kept byte-identical to
+         DISPLAY_FONT in src/ui/Theme.ts (which covers the canvas side); the
+         two can't literally share a value across the HTML/TS boundary, so
+         change both together. */
+      font-family: "Baloo 2", "Trebuchet MS", Verdana, sans-serif;
     }
     #game-container {
       /* NOT display:flex/align-items/justify-content - this used to
@@ -136,14 +171,14 @@
       position: fixed;
       inset: 0;
       z-index: 9999;
-      background: #0e0f14;
-      color: #f5f6fa;
+      background: #2b211b;
+      color: #fff6e9;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       text-align: center;
       padding: 24px;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-family: "Baloo 2", "Trebuchet MS", Verdana, sans-serif;
     }
     #rotate-prompt .icon {
       font-size: 56px;
@@ -153,12 +188,12 @@
     #rotate-prompt .title {
       font-size: 18px;
       font-weight: bold;
-      color: #ff8a3d;
+      color: #ffa763;
       margin-bottom: 8px;
     }
     #rotate-prompt .subtitle {
       font-size: 13px;
-      color: #9aa3bd;
+      color: #efdcc4;
       max-width: 280px;
     }
     @keyframes rotate-hint {
@@ -197,9 +232,9 @@
          ring) instead of the original muted steel-blue - the low-contrast
          version blended into the game's own dark chrome enough that it
          went unspotted; this reads as a distinct, brand-colored control. */
-      border: 2px solid #ff7a29;
+      border: 2px solid #ef8b3f;
       background: rgba(26, 33, 56, 0.95);
-      color: #f5f6fa;
+      color: #fff6e9;
       font-size: 18px;
       line-height: 1;
       cursor: pointer;
@@ -226,16 +261,16 @@
       max-width: 240px;
       padding: 10px 12px;
       border-radius: 8px;
-      border: 2px solid #ff7a29;
-      background: rgba(14, 15, 20, 0.97);
-      color: #f5f6fa;
+      border: 2px solid #ef8b3f;
+      background: rgba(43, 33, 27, 0.97);
+      color: #fff6e9;
       font-size: 12px;
       line-height: 1.4;
-      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-family: "Baloo 2", "Trebuchet MS", Verdana, sans-serif;
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
     }
     #install-hint strong {
-      color: #ffb347;
+      color: #ffcc7a;
     }
     /* body.portrait-ok (toggled by main.ts's updateMobileLayoutMode(),
        true while BootScene/LoginScene is active) exempts login from the
