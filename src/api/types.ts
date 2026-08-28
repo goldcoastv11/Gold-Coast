@@ -31,6 +31,15 @@ export interface MeResponse {
    * post-hydration reconciliation.
    */
   activeRound: { game: string; roundId: string } | null;
+  /**
+   * The player's level ("prestige number") and total XP - mirrors
+   * server/src/serializers.ts, which embeds it on every authenticated
+   * response rather than leaving it to GET /progression so the level can be
+   * shown anywhere the player is shown (e.g. the overworld HUD) without a
+   * second request. Degrades to `{ level: 1, xp: 0 }` server-side on an
+   * environment that has not had the progression migration applied.
+   */
+  progression: { level: number; xp: number };
 }
 
 /** The closed set of GC multipliers the shuffle-cup mini-game can land on (server-resolved). */
@@ -414,4 +423,83 @@ export interface AbandonRoundResponse {
 export interface AbandonRoundNotFoundError {
   error: string;
   code: "NO_ACTIVE_ROUND";
+}
+
+// ---- Challenges, XP and levels ----
+// Mirrors server/src/progression/* and server/src/routes/progression.ts.
+// ECONOMY: every reward below is GOLD COINS plus XP, never Tickets - the
+// ledger hard-enforces that TICKETS can only ever be credited by a real game
+// win (see repo-root CLAUDE.md). Nothing in this section should ever grow a
+// Tickets field.
+
+export type ChallengePeriod = "DAILY" | "WEEKLY" | "LIFETIME";
+
+/** One challenge as the player sees it - see server/src/progression/progress.ts's ChallengeView. */
+export interface ChallengeView {
+  id: string;
+  period: ChallengePeriod;
+  name: string;
+  description: string;
+  /** Already clamped to `target` server-side. */
+  progress: number;
+  target: number;
+  complete: boolean;
+  claimed: boolean;
+  /** Gold Coins paid on claim. Never Tickets. */
+  rewardGc: number;
+  rewardXp: number;
+  /** ISO instant this challenge's period rolls over, or null for lifetime achievements. */
+  periodEndsAt: string | null;
+}
+
+/** GET /challenges */
+export interface ChallengeBoardResponse {
+  /** False on an environment that has not had the progression migration applied - render an unavailable state, not an error. */
+  available: boolean;
+  daily: ChallengeView[];
+  weekly: ChallengeView[];
+  achievements: ChallengeView[];
+}
+
+/** The level/XP block returned inside a claim response (server: ProgressionState). */
+export interface ProgressionState {
+  xp: number;
+  level: number;
+  /** XP earned since reaching the current level. */
+  xpIntoLevel: number;
+  /** XP the current level costs in total, or 0 at max level. */
+  xpForNextLevel: number;
+  atMaxLevel: boolean;
+  /** Highest level already paid out - exposed for QA/debugging. */
+  rewardedLevel: number;
+}
+
+/**
+ * GET /progression - the claim response's `ProgressionState` plus the ladder
+ * facts the client needs to render "what's next" without re-deriving the XP
+ * curve or the unlock table locally (both live on the server and stay there).
+ */
+export interface ProgressionResponse extends ProgressionState {
+  maxLevel: number;
+  /** Gold Coins the NEXT level pays, or 0 at max level. */
+  nextLevelRewardGc: number;
+  /** Level -> itemCatalog id granted at that level. JSON object keys are strings even though the server's are numbers. */
+  cosmeticUnlocks: Record<string, string>;
+}
+
+/** One level's payout, returned when a claim's XP pushed the player over a level boundary. */
+export interface LevelGrant {
+  level: number;
+  rewardGc: number;
+  /** Item granted outright at this level (see server/src/progression/levels.ts), if any. */
+  cosmeticItemId: string | null;
+}
+
+/** POST /challenges/claim (200) */
+export interface ClaimChallengeResponse {
+  claimed: { challengeId: string; rewardGc: number; rewardXp: number };
+  progression: ProgressionState;
+  /** Empty unless this claim's XP crossed one or more level boundaries. */
+  levelsGained: LevelGrant[];
+  user: MeResponse;
 }

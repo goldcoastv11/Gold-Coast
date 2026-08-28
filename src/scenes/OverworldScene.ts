@@ -11,6 +11,8 @@ import {
   openSkinPanel,
   ShopPanelHost
 } from "../ui/ShopPanel";
+import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel";
+import { claimableCount } from "../ui/challengeDisplay";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { offerCoinKiosk } from "../ui/CoinKioskOffer";
@@ -403,6 +405,9 @@ export class OverworldScene extends Phaser.Scene {
   /** The pet's own facing, tracked separately from the player's lastDir since the pet lags behind and can be moving in a different direction than the player at any given moment. */
   private petLastDir: "down" | "left" | "right" | "up" = "down";
 
+  /** The Challenge Board station's floating name label, so refreshChallengeBadge() can append a "N ready!" badge to it. */
+  private challengeStationLabel?: Phaser.GameObjects.Text;
+
   /** The onboarding tutorial's currently-showing "go do this for real" highlight ring + instruction bubble, if any - see runHandsOnStep/clearTutorialHighlight. */
   private activeTutorialHighlight?: HighlightHandle;
   private activeTutorialInstruction?: InstructionHandle;
@@ -584,6 +589,29 @@ export class OverworldScene extends Phaser.Scene {
       "Press E to browse the Item Shop",
       () => this.openShopCategoryMenu("shop")
     );
+
+    // Challenge Board - daily/weekly challenges, achievements, and the
+    // player's level/XP (see ui/ChallengesPanel.ts). Wired exactly like the
+    // Item Shop above: a static cabinet-scale sprite, a collider, and a
+    // registerStation walk-up handler that opens a panel.
+    //
+    // Placed at (34,48), just off the bottom entrance where the player
+    // spawns (40,46) and returns from every game, so the first thing anyone
+    // sees on walking in is whether something is waiting to be claimed.
+    // Clear of the tree at (28,46), the lamp posts at (36,44)/(44,44) and
+    // the exit door at (40,51) - the nearest station centre is ~107px away,
+    // well beyond this station's own 48px interaction radius.
+    const challengeBoard = this.physics.add.staticSprite(34 * TILE, 48 * TILE, "challenge_board");
+    if (isTouchDevice()) challengeBoard.setScale(MOBILE_FURNITURE_SCALE_BOOST);
+    challengeBoard.refreshBody();
+    this.physics.add.collider(this.player, challengeBoard);
+    this.challengeStationLabel = this.registerStation(
+      challengeBoard,
+      "Challenges",
+      "Press E to check your Challenges",
+      () => this.openChallengesPanel()
+    );
+    this.refreshChallengeBadge();
 
     // (67,38), the standalone "Ad Kiosk" station's old spot, is now empty -
     // that station was retired and consolidated into the Coin Kiosk above.
@@ -1292,18 +1320,23 @@ export class OverworldScene extends Phaser.Scene {
    * own on-screen size (so big furniture like the blackjack table doesn't
    * require standing on its exact center), and adds a floating name label
    * above it so players can tell what it is before walking over.
+   *
+   * Returns that label so a caller can update it later - the Challenge Board
+   * uses this to append a "N ready!" badge once its (asynchronous) board
+   * fetch comes back. Every other call site simply ignores the return value,
+   * exactly as before.
    */
   private registerStation(
     sprite: Phaser.Physics.Arcade.Sprite,
     label: string,
     prompt: string,
     onInteract: () => void
-  ) {
+  ): Phaser.GameObjects.Text {
     const radius = Math.max(sprite.displayWidth, sprite.displayHeight) / 2 + INTERACT_PADDING;
 
     this.interactables.push({ sprite, prompt, radius, onInteract });
 
-    this.add
+    return this.add
       .text(sprite.x, sprite.y - sprite.displayHeight / 2 - 8, label, {
         fontSize: "12px",
         color: Theme.textPrimary,
@@ -1703,7 +1736,45 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private updateHud() {
-    this.hudText.setText(`🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}`);
+    // Level rides along with the two balances: it's the "visible prestige
+    // number" half of what a level is for (see server/src/progression/
+    // levels.ts), and it arrives on every authenticated response already,
+    // so showing it here costs no extra request.
+    this.hudText.setText(
+      `🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}   ⭐ Lv ${gameState.playerLevel}`
+    );
+  }
+
+  /**
+   * Appends a "N ready!" badge to the Challenge Board's floating label when
+   * the player has completed challenges they haven't claimed.
+   *
+   * This is the thing that pulls someone back tomorrow, so it has to be
+   * visible from across the floor rather than only once you walk up and open
+   * the panel. Fire-and-forget and silent on failure - a station label that
+   * simply doesn't gain a badge is a far better outcome than an error toast
+   * on entering the overworld, and the panel itself re-reads the board (and
+   * reports its own failures) the moment anyone opens it.
+   */
+  private refreshChallengeBadge() {
+    const label = this.challengeStationLabel;
+    if (!label) return;
+    api
+      .getChallenges()
+      .then((board) => {
+        // The scene can be torn down (a game entered, the title screen)
+        // while this is in flight; a destroyed Text has no `scene`.
+        if (!label.scene) return;
+        if (!board.available) return;
+        const ready = claimableCount(board.daily, board.weekly, board.achievements);
+        // Reset as well as set: claiming everything while the panel is open
+        // must not leave the floor still advertising banked rewards.
+        label.setText(ready > 0 ? `Challenges · ${ready} ready!` : "Challenges");
+        label.setColor(ready > 0 ? Theme.textGold : Theme.textPrimary);
+      })
+      .catch(() => {
+        // Silent by design - see this method's doc comment.
+      });
   }
 
   private activeToast?: TextChip;
@@ -1792,6 +1863,37 @@ export class OverworldScene extends Phaser.Scene {
         this.applyPlayerBody();
         this.applyPlayerScale();
       }
+    };
+  }
+
+  /**
+   * The Challenge Board station's handler - the same shape as the Item
+   * Shop's openShopCategoryMenu() wrapper above: the panel itself lives in
+   * ui/ChallengesPanel.ts, this is just the named seam.
+   *
+   * Re-reads the station badge on close, so claiming everything while the
+   * panel is open leaves the floor label correct instead of still
+   * advertising rewards that are already banked.
+   */
+  private openChallengesPanel() {
+    openChallengesPanel({
+      ...this.challengesPanelHost,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+        if (!open) this.refreshChallengeBadge();
+      }
+    });
+  }
+
+  /** Everything ui/ChallengesPanel.ts needs back from this scene - a subset of shopPanelHost's members. */
+  private get challengesPanelHost(): ChallengesPanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      },
+      updateHud: () => this.updateHud(),
+      showToast: (message, color) => this.showToast(message, color)
     };
   }
 
