@@ -11,10 +11,14 @@ export function colorOf(n: number): RouletteColor {
   return RED_NUMBERS.has(n) ? "red" : "black";
 }
 
+// Rebalance (2026-08-27): green was 20x, which returned only 20/37 = 54.1% - roughly half of
+// red/black's 36/37 = 97.3%. 36x matches a real single-zero wheel's straight-up number bet and
+// lands green on the same 97.3% as the other two bets.
+// Client twin: src/scenes/RouletteScene.ts's "GREEN (36x)" button label.
 export const ROULETTE_PAYOUTS: Record<RouletteColor, number> = {
   red: 2,
   black: 2,
-  green: 20
+  green: 36
 };
 
 export interface RouletteResult {

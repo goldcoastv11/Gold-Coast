@@ -163,7 +163,9 @@ export class RouletteScene extends Phaser.Scene {
       405,
       130,
       50,
-      "GREEN (20x)",
+      // Must match server/src/games/roulette.ts's ROULETTE_PAYOUTS.green (rebalanced from 20x to
+      // 36x on 2026-08-27 so green returns the same 97.3% as red/black).
+      "GREEN (36x)",
       COLOR_NUM.green,
       COLOR_NUM_HOVER.green,
       () => this.spin("green")
