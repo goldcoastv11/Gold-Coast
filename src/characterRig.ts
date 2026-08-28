@@ -18,10 +18,36 @@
  *
  * Adding the LPC rig (64x64, 13 columns, 54 rows) breaks that heuristic
  * outright, so the guess is replaced here by an explicit declaration: each
- * sheet says what it is, and every consumer reads the answer instead of
- * re-deriving it. The three existing rigs are declared exactly as they
- * already were, so nothing about them changes - see the per-rig comments,
- * which record the value each field is reproducing.
+ * sheet says what it is. The three existing rigs are declared exactly as
+ * they already were, so nothing about them changes - see the per-rig
+ * comments, which record the value each field is reproducing, and
+ * src/characterRig.test.ts, which pins every one of those values against a
+ * literal copied from the pre-refactor code.
+ *
+ * ## Migration status - READ THIS BEFORE ASSUMING A CONSUMER IS WIRED UP
+ *
+ * BootScene is fully migrated: it loads every sheet at its rig's declared
+ * frame size and builds every walk animation from the rig's frame indices.
+ *
+ * OverworldScene is NOT yet migrated and still carries its own `height <= 16`
+ * guess in idleFrameForDir / applyPlayerBody / applyPlayerScale, plus the
+ * duplicate layout knowledge in AMBIENT_IDLE_FRAME_FOR_DIR and
+ * updatePetFollow, and the `displayHeight`-derived accessory/label anchoring.
+ * That is deliberate and temporary - that file was being edited concurrently
+ * by another workstream when this landed, and a 1800-line merge conflict was
+ * not worth the risk for a change with no art to test against yet.
+ *
+ * Everything that swap needs already exists below and is tested:
+ *   idleFrameForDir  -> idleFrame(rig, dir)
+ *   AMBIENT_IDLE_... -> idleFrame(rig, dir) / firstWalkFrame(rig, dir)
+ *   applyPlayerBody  -> bodyBox(rig)
+ *   applyPlayerScale -> rig.displayScale
+ *   accessory anchor -> accessoryY(rig, y, displayHeight) / accessoryScale(...)
+ *   pet follow/scale -> petTrailOffset(rig) / petScale(rig)
+ * with the rig itself coming from resolveRig(sprite.texture.key,
+ * sprite.height). Until that swap happens an LPC sheet will load and animate
+ * correctly but must not be made the player's equipped skin - the positioning
+ * code would size its body and hat as if it were a 32px-tall legacy frame.
  *
  * ## Frame numbering
  *
@@ -357,4 +383,68 @@ export function headTopY(rig: CharacterRig, spriteY: number, displayHeight: numb
 /** How far behind the player the pet trails, in world px. See PET_TRAIL_OFFSET_FRAC. */
 export function petTrailOffset(rig: CharacterRig): number {
   return PET_TRAIL_OFFSET_FRAC * rig.frameHeight * rig.displayScale;
+}
+
+/** The idle/standing frame index for a direction. Replaces OverworldScene's idleFrameForDir() `height <= 16` branch and its duplicate copies in AMBIENT_IDLE_FRAME_FOR_DIR / updatePetFollow. */
+export function idleFrame(rig: CharacterRig, dir: Direction): number {
+  return rig.idleFrames[dir];
+}
+
+/** First walk frame of a direction - what the ambient-bystander code wants, read off the rig instead of its own duplicate table. */
+export function firstWalkFrame(rig: CharacterRig, dir: Direction): number {
+  return rig.walkFrames[dir][0];
+}
+
+/**
+ * The "feet" physics box in NATIVE frame pixels, ready to hand to
+ * `sprite.setSize(...)` / `sprite.setOffset(...)`.
+ *
+ * Phaser's setSize/setOffset are in native (unscaled) frame space, which is
+ * why these come off the rig's own frameWidth/frameHeight rather than off
+ * displayWidth/displayHeight. For all three legacy rigs this returns exactly
+ * the numbers applyPlayerBody's inline `player.width * 14/21` math already
+ * produced - the values are bit-identical, only the source of truth moved.
+ */
+export function bodyBox(rig: CharacterRig): {
+  width: number;
+  height: number;
+  offsetX: number;
+  offsetY: number;
+} {
+  return {
+    width: rig.frameWidth * rig.body.widthFrac,
+    height: rig.frameHeight * rig.body.heightFrac,
+    offsetX: rig.frameWidth * rig.body.offsetXFrac,
+    offsetY: rig.frameHeight * rig.body.offsetYFrac
+  };
+}
+
+/** Gap in world px between the top of the head and the worn accessory badge - the `- 6` applyEquippedAccessory has always used. */
+export const ACCESSORY_HEAD_GAP = 6;
+
+/**
+ * World Y at which to draw the worn accessory badge.
+ *
+ * Derives from the rig's headTopFrac, NOT from `displayHeight / 2` alone -
+ * this is the fix for "a 64x64 character wears its hat through its chest":
+ * an LPC frame has ~12px of empty headroom above the head, so the old
+ * frame-top assumption would float the hat well clear of the character.
+ */
+export function accessoryY(rig: CharacterRig, spriteY: number, displayHeight: number): number {
+  return headTopY(rig, spriteY, displayHeight) - ACCESSORY_HEAD_GAP;
+}
+
+/**
+ * Scale to draw a worn accessory at, given the sprite's own current scale.
+ *
+ * Legacy rigs declare accessoryScaleMul 1, so this returns `spriteScale`
+ * unchanged - exactly what `setScale(this.player.scaleX)` does today.
+ */
+export function accessoryScale(rig: CharacterRig, spriteScale: number): number {
+  return spriteScale * rig.accessoryScaleMul;
+}
+
+/** The scale a pet sprite of `rig` is drawn at - reproduces the hardcoded setScale(1.4) for the Kenney pet rig. */
+export function petScale(rig: CharacterRig): number {
+  return rig.displayScale * PET_SCALE_OF_RIG;
 }

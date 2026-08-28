@@ -1347,7 +1347,7 @@ export class BootScene extends Phaser.Scene {
    * cycle spritesheet was sourced/drawn frame-by-frame either - the 3
    * "frames" per direction are just a 1px foot-offset wiggle, procedurally
    * varied per row below, reusing the exact same anim-key wiring
-   * (createKenneyWalkAnims, `${skin}_walk_${dir}`) the old rig used.
+   * (createWalkAnims, `${skin}_walk_${dir}`) the old rig used.
    */
   private createFlatCharacterSheet() {
     const FRAME = FLAT_RIG.frameHeight;
@@ -1418,7 +1418,7 @@ export class BootScene extends Phaser.Scene {
     // exactly ONE frame covering the whole packed image - it does NOT auto-
     // slice into a grid the way a loaded spritesheet does. Verified live:
     // without this, the texture had frameTotal 1, so every numeric frame
-    // index createKenneyWalkAnims()/idleFrameForDir() ask for (0-11) missed
+    // index createWalkAnims()/idleFrameForDir() ask for (0-11) missed
     // and fell back to rendering the ENTIRE 64x48 packed sheet wherever a
     // single 16x16 frame was expected - which is exactly why the reported
     // screenshot showed a dense grid of tiny repeated characters instead of
@@ -1426,7 +1426,7 @@ export class BootScene extends Phaser.Scene {
     // generated procedurally (every earlier createXTexture() - furniture,
     // accessories - is single-frame, so this gap never came up before).
     // Manually registering each 16x16 region as frame 0..11 (row*4+col,
-    // matching DIRECTION_FRAMES' own numbering) makes it addressable
+    // matching FLAT_RIG.walkFrames' own numbering) makes it addressable
     // exactly like a loaded spritesheet's frames.
     const texture = this.textures.get("player_flat_sheet");
     let frameIndex = 0;
