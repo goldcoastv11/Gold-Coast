@@ -1,5 +1,14 @@
 import Phaser from "phaser";
 import { SKIN_CATALOG } from "../GameState";
+import {
+  CharacterRig,
+  DIRECTIONS,
+  FLAT_RIG,
+  KENNEY_RIG,
+  LEGACY_SKIN_RIG,
+  LPC_CHARACTER_SHEETS,
+  LPC_RIG
+} from "../characterRig";
 import { fadeToScene } from "../ui/sceneTransition";
 import { preloadSounds, preloadMusic } from "../ui/SoundManager";
 import { whenDisplayFontReady } from "../ui/Theme";
@@ -127,56 +136,51 @@ export class BootScene extends Phaser.Scene {
 
     // Base character spritesheets: task #21/STYLE_GUIDE.md "Bright Social-Hub"
     // reskin, Kenney "RPG Urban Pack" (CC0). 16x16 frames, 4 columns
-    // (direction) x 3 rows (walk frame) - see createKenneyWalkAnims below.
+    // (direction) x 3 rows (walk frame) - declared as KENNEY_RIG in
+    // src/characterRig.ts.
     // Mapping per STYLE_GUIDE.md's suggestion: player=green, dealer=lavender
     // (reads distinct/formal), NPC=gray (reads as "staff").
-    this.load.spritesheet("player_sheet", "assets/characters/kenney/char_a_green.png", {
-      frameWidth: 16,
-      frameHeight: 16
-    });
-    this.load.spritesheet("npc_sheet", "assets/characters/kenney/char_e_gray.png", {
-      frameWidth: 16,
-      frameHeight: 16
-    });
-    this.load.spritesheet("dealer_sheet", "assets/characters/kenney/char_c_lavender.png", {
-      frameWidth: 16,
-      frameHeight: 16
-    });
+    this.loadCharacterSheet("player_sheet", "assets/characters/kenney/char_a_green.png", KENNEY_RIG);
+    this.loadCharacterSheet("npc_sheet", "assets/characters/kenney/char_e_gray.png", KENNEY_RIG);
+    this.loadCharacterSheet("dealer_sheet", "assets/characters/kenney/char_c_lavender.png", KENNEY_RIG);
 
     // Ambient background bystanders (OverworldScene's addAmbientNpc) - the
     // 3 Kenney variants STYLE_GUIDE.md flagged as sitting completely unused
     // (char_b_brick/char_d_hardhat/char_f_dark), put to work as decorative
     // "social hub" flavor per direction note 4 rather than static dead
     // weight. Same 16x16/4x3 layout as player/npc/dealer above, so they
-    // reuse createKenneyWalkAnims below - no new loader logic needed.
-    this.load.spritesheet("npc2_sheet", "assets/characters/kenney/char_b_brick.png", {
-      frameWidth: 16,
-      frameHeight: 16
-    });
-    this.load.spritesheet("npc3_sheet", "assets/characters/kenney/char_d_hardhat.png", {
-      frameWidth: 16,
-      frameHeight: 16
-    });
-    this.load.spritesheet("npc4_sheet", "assets/characters/kenney/char_f_dark.png", {
-      frameWidth: 16,
-      frameHeight: 16
-    });
+    // declare the same KENNEY_RIG - no new loader logic needed.
+    this.loadCharacterSheet("npc2_sheet", "assets/characters/kenney/char_b_brick.png", KENNEY_RIG);
+    this.loadCharacterSheet("npc3_sheet", "assets/characters/kenney/char_d_hardhat.png", KENNEY_RIG);
+    this.loadCharacterSheet("npc4_sheet", "assets/characters/kenney/char_f_dark.png", KENNEY_RIG);
 
     // Every purchasable skin (SKIN_CATALOG) - STILL the old Jephed-pack rig,
     // 21x32, 3 cols (walk frame) x 4 rows (direction). STYLE_GUIDE.md's scope
     // note is explicit: the new Kenney pack has no equivalent for these 17
     // skins, so per art-director they're deliberately left on the old rig
     // for now rather than being silently dropped or faked - see task #24
-    // report to main for the tradeoff/options. This means these files use
-    // createLegacySkinWalkAnims (old row-major layout), not
-    // createKenneyWalkAnims (new layout, used only for player/npc/dealer
-    // above).
+    // report to main for the tradeoff/options. This means these files
+    // declare LEGACY_SKIN_RIG (old row-major layout), not KENNEY_RIG (used
+    // only for player/npc/dealer above). The LPC loop below is ADDITIVE -
+    // these 17 sheets are untouched and keep working exactly as they do
+    // today.
     for (const skin of SKIN_CATALOG) {
       if (skin.id === "player") continue; // already loaded above as player_sheet
-      this.load.spritesheet(skin.textureKey, `assets/characters/skins/${skin.textureKey}.png`, {
-        frameWidth: 21,
-        frameHeight: 32
-      });
+      this.loadCharacterSheet(
+        skin.textureKey,
+        `assets/characters/skins/${skin.textureKey}.png`,
+        LEGACY_SKIN_RIG
+      );
+    }
+
+    // LPC (Universal LPC Spritesheet Generator) outfit sheets - the fourth
+    // rig, 64x64 frames on a 13-column sheet. This list is EMPTY until the
+    // founder exports real art (see docs/character-art-spec.md); the loop is
+    // here so that dropping a PNG into public/assets/characters/lpc/ and
+    // adding one line to LPC_CHARACTER_SHEETS is the entire integration -
+    // loading, animation building and rig registration all follow from it.
+    for (const sheet of LPC_CHARACTER_SHEETS) {
+      this.loadCharacterSheet(sheet.textureKey, `assets/characters/lpc/${sheet.file}`, LPC_RIG);
     }
 
     // Sound effects (see ui/SoundManager.ts) - loaded once here, played from
@@ -193,15 +197,18 @@ export class BootScene extends Phaser.Scene {
     // design" + "like the Wii" - away from the old chibi-pixel-art Kenney
     // look). Must exist before the anim below references its frames.
     this.createFlatCharacterSheet();
-    this.createKenneyWalkAnims("player_flat_sheet", "player");
-    this.createKenneyWalkAnims("npc_sheet", "npc");
-    this.createKenneyWalkAnims("dealer_sheet", "dealer");
-    this.createKenneyWalkAnims("npc2_sheet", "npc2");
-    this.createKenneyWalkAnims("npc3_sheet", "npc3");
-    this.createKenneyWalkAnims("npc4_sheet", "npc4");
+    this.createWalkAnims("player_flat_sheet", "player", FLAT_RIG);
+    this.createWalkAnims("npc_sheet", "npc", KENNEY_RIG);
+    this.createWalkAnims("dealer_sheet", "dealer", KENNEY_RIG);
+    this.createWalkAnims("npc2_sheet", "npc2", KENNEY_RIG);
+    this.createWalkAnims("npc3_sheet", "npc3", KENNEY_RIG);
+    this.createWalkAnims("npc4_sheet", "npc4", KENNEY_RIG);
     for (const skin of SKIN_CATALOG) {
       if (skin.id === "player") continue;
-      this.createLegacySkinWalkAnims(skin.textureKey, skin.id);
+      this.createWalkAnims(skin.textureKey, skin.id, LEGACY_SKIN_RIG);
+    }
+    for (const sheet of LPC_CHARACTER_SHEETS) {
+      this.createWalkAnims(sheet.textureKey, sheet.textureKey, LPC_RIG);
     }
     this.createFloorTanTexture();
     this.createCarpetRedTexture();
@@ -1326,12 +1333,14 @@ export class BootScene extends Phaser.Scene {
    * touched here.
    *
    * Deliberately kept at the SAME 16x16-frame, 4-col [left,down,up,right] x
-   * 3-row layout as the Kenney rig it replaces (see createKenneyWalkAnims's
-   * DIRECTION_FRAMES) - a bigger frame size would need touching
-   * applyPlayerBody/applyPlayerScale/idleFrameForDir's existing
-   * `height <= 16` rig-detection branch in OverworldScene.ts, which every
-   * legacy-rig skin AND every accessory/pet positioning calculation added
-   * this pass also depends on. Same frame size means this is purely a new
+   * 3-row layout as the Kenney rig it replaces - which is why FLAT_RIG in
+   * src/characterRig.ts is literally KENNEY_RIG with a different id. (At the
+   * time this was written a bigger frame size would have meant touching the
+   * `height <= 16` rig-detection branch OverworldScene's applyPlayerBody /
+   * applyPlayerScale / idleFrameForDir all shared; that guess is gone now -
+   * a rig declares its own frame size - so a future redraw of this sheet is
+   * no longer pinned to 16x16 by anything but its own generation code
+   * below.) Same frame size means this is purely a new
    * texture, zero changes needed anywhere else - the style change (flat
    * rounded shapes, solid fills, no pixel-art dithering/outline-per-pixel
    * detail) happens entirely within that unchanged budget instead. No walk-
@@ -1341,8 +1350,8 @@ export class BootScene extends Phaser.Scene {
    * (createKenneyWalkAnims, `${skin}_walk_${dir}`) the old rig used.
    */
   private createFlatCharacterSheet() {
-    const FRAME = 16;
-    const COLS = 4; // left, down, up, right - matches DIRECTION_FRAMES column order
+    const FRAME = FLAT_RIG.frameHeight;
+    const COLS = FLAT_RIG.columns; // left, down, up, right - matches FLAT_RIG.walkFrames' column order
     const ROWS = 3;
     const w = FRAME * COLS;
     const h = FRAME * ROWS;
@@ -1443,57 +1452,39 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Base character rig (player/npc/dealer) - Kenney "RPG Urban Pack" layout
-   * per STYLE_GUIDE.md "Character sheet layout": 16x16 frames, 4 columns
-   * (direction) x 3 rows (walk frame), columns = [left, down, up, right].
-   * Frame = row * 4 + col (Phaser generateFrameNumbers/spritesheet indexing
-   * is row-major over columnsPerRow=4 here), so each direction's 3 frames
-   * are 4 apart, NOT contiguous - explicit frame arrays instead of the old
-   * start/end range logic, straight from STYLE_GUIDE.md's sample code.
+   * Loads a character spritesheet at whatever frame size its rig declares.
+   *
+   * Replaces four near-identical `load.spritesheet(key, path, {frameWidth:
+   * 16, frameHeight: 16})` blocks plus the 21x32 skin loop - the frame size
+   * is now read off the rig descriptor rather than repeated as a literal at
+   * every call site, which is what makes a fourth rig (LPC's 64x64) a
+   * one-argument change instead of a new copy of the loader.
    */
-  private createKenneyWalkAnims(sheetKey: string, prefix: string) {
-    const DIRECTION_FRAMES: Record<string, number[]> = {
-      left: [0, 4, 8],
-      down: [1, 5, 9],
-      up: [2, 6, 10],
-      right: [3, 7, 11]
-    };
-
-    for (const [dir, frames] of Object.entries(DIRECTION_FRAMES)) {
-      this.anims.create({
-        key: `${prefix}_walk_${dir}`,
-        frames: frames.map((frame) => ({ key: sheetKey, frame })),
-        frameRate: 8,
-        repeat: -1
-      });
-    }
+  private loadCharacterSheet(key: string, path: string, rig: CharacterRig) {
+    this.load.spritesheet(key, path, {
+      frameWidth: rig.frameWidth,
+      frameHeight: rig.frameHeight
+    });
   }
 
   /**
-   * Old Jephed-pack rig, still used by every purchasable skin in
-   * SKIN_CATALOG (see the preload() comment above - STYLE_GUIDE.md's scope
-   * note explicitly leaves these on the old rig for now). 21x32 frames, 3
-   * columns (walk frame) x 4 rows (direction), row order down/left/right/up
-   * - this is the *original* createWalkAnims logic, kept as-is and renamed
-   * only to distinguish it from createKenneyWalkAnims above. Do not point
-   * this at a Kenney sheet (wrong frame size/layout) or vice versa.
+   * Builds the four `${prefix}_walk_${dir}` animations for a sheet, from its
+   * rig descriptor's explicit frame indices (see src/characterRig.ts).
+   *
+   * This is the merge of the two former builders - createKenneyWalkAnims
+   * (16x16, 4 direction-columns x 3 frame-rows, explicit frame arrays) and
+   * createLegacySkinWalkAnims (21x32, 3 frame-columns x 4 direction-rows,
+   * generateFrameNumbers ranges). Both produced exactly the frame sequences
+   * KENNEY_RIG.walkFrames / LEGACY_SKIN_RIG.walkFrames now declare, so this
+   * is a like-for-like replacement - but unlike the old pair, it cannot be
+   * pointed at the wrong sheet, because the layout travels with the rig
+   * instead of with the method name.
    */
-  private createLegacySkinWalkAnims(sheetKey: string, prefix: string) {
-    const rows: Array<{ dir: string; row: number }> = [
-      { dir: "down", row: 0 },
-      { dir: "left", row: 1 },
-      { dir: "right", row: 2 },
-      { dir: "up", row: 3 }
-    ];
-
-    for (const { dir, row } of rows) {
-      const start = row * 3;
+  private createWalkAnims(sheetKey: string, prefix: string, rig: CharacterRig) {
+    for (const dir of DIRECTIONS) {
       this.anims.create({
         key: `${prefix}_walk_${dir}`,
-        frames: this.anims.generateFrameNumbers(sheetKey, {
-          start,
-          end: start + 2
-        }),
+        frames: rig.walkFrames[dir].map((frame) => ({ key: sheetKey, frame })),
         frameRate: 8,
         repeat: -1
       });
