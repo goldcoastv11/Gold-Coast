@@ -19,8 +19,18 @@ import { HiLoScene } from "./scenes/HiLoScene";
 import { BaccaratScene } from "./scenes/BaccaratScene";
 import { VideoPokerScene } from "./scenes/VideoPokerScene";
 import { setUnauthorizedHandler } from "./api/client";
+import { startTracking, track, EVENTS } from "./api/track";
 import { gameState } from "./GameState";
 import { isTouchDevice } from "./ui/TouchControls";
+
+// Retention Leg 1 (see src/api/track.ts): one session.start per app load,
+// fired here - before Phaser even boots - so it's recorded for every
+// visit, including the ones that bounce off the login screen without ever
+// creating an account. That anonymous denominator is the whole point; a
+// funnel measured only from signup onward can't show what it's losing.
+// Cannot throw and never blocks boot - see track.ts's header.
+startTracking();
+track(EVENTS.SESSION_START, { touch: isTouchDevice() });
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,

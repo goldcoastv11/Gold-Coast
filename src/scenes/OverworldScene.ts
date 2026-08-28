@@ -19,6 +19,7 @@ import {
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 import { playSfx, playMusic } from "../ui/SoundManager";
 import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
 
@@ -1341,6 +1342,12 @@ export class OverworldScene extends Phaser.Scene {
 
   /** Remembers where the player was standing, then hands off to a game scene. */
   private goToGame(sceneKey: string) {
+    // Retention Leg 1: the single chokepoint every one of the 14 game
+    // cabinets funnels through (see addFurnitureStation), so one call site
+    // covers "which games do players actually walk into" for all of them -
+    // including the ones they open and immediately leave, which no
+    // ledger/round row would ever show.
+    track(EVENTS.GAME_OPENED, { game: sceneKey });
     gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
     this.savePositionRemote(this.player.x, this.player.y);
     fadeToScene(this, sceneKey);
@@ -1544,6 +1551,14 @@ export class OverworldScene extends Phaser.Scene {
       }
       return;
     }
+
+    // Retention Leg 1: the ad-gated free Gold Coins claim - the main
+    // "reason to come back tomorrow" mechanic, so its uptake is the single
+    // most decision-relevant number on this whole roadmap leg. Recorded
+    // here, after the server has already granted (the animation below is
+    // purely presentational), so it counts real grants only - a claim that
+    // hit COOLDOWN returned above and is never counted.
+    track(EVENTS.KIOSK_CLAIM, { gcAmount: result.granted.gcAmount });
 
     const panel = makePanel(this, 400, 300, 420, 260, 200).setScrollFactor(0);
     const title = this.add
@@ -1952,6 +1967,11 @@ export class OverworldScene extends Phaser.Scene {
               api
                 .buyItem(def.id)
                 .then((res) => {
+                  // Retention Leg 1: what players spend their TICKETS on -
+                  // catalog id and price only, both already-public catalog
+                  // facts. Fired on the server's confirmed success, never
+                  // on the optimistic click.
+                  track(EVENTS.ITEM_PURCHASED, { itemId: def.id, price: def.price });
                   gameState.hydrateFromServer(res.user);
                   applyEquipped();
                   this.updateHud();
@@ -1996,6 +2016,11 @@ export class OverworldScene extends Phaser.Scene {
             api
               .equipItem(def.id)
               .then((res) => {
+                // Retention Leg 1: equipping is the "do players care about
+                // the cosmetics they bought" signal - a bought-and-never-
+                // worn item is a very different product answer to a
+                // bought-and-worn one.
+                track(EVENTS.ITEM_EQUIPPED, { itemId: def.id });
                 gameState.hydrateFromServer(res.user);
                 applyEquipped();
                 render();
@@ -2183,6 +2208,9 @@ export class OverworldScene extends Phaser.Scene {
               api
                 .buySkin(def.id)
                 .then((res) => {
+                  // Retention Leg 1 - same rationale as the Item Shop's
+                  // buy handler above.
+                  track(EVENTS.SKIN_PURCHASED, { skinId: def.id, price: def.price });
                   gameState.hydrateFromServer(res.user);
                   this.player.setTexture(def.textureKey, this.player.frame.name);
                   this.applyPlayerBody();
@@ -2223,6 +2251,9 @@ export class OverworldScene extends Phaser.Scene {
               api
                 .equipSkin(def.id)
                 .then((res) => {
+                  // Retention Leg 1 - same rationale as the item "Wear"
+                  // handler above.
+                  track(EVENTS.ITEM_EQUIPPED, { skinId: def.id });
                   gameState.hydrateFromServer(res.user);
                   this.player.setTexture(def.textureKey, this.player.frame.name);
                   // Re-tune the collision body and on-screen scale for

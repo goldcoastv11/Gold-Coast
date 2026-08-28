@@ -17,6 +17,7 @@ import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 
 const TARGET_MIN = 5;
 const TARGET_MAX = 95;
@@ -224,17 +225,27 @@ export class DiceScene extends Phaser.Scene {
 
     api
       .playDice(bet, "GC", target)
-      .then((res) => this.resolveRoll(res))
+      .then((res) => this.resolveRoll(res, bet))
       .catch((err) => this.handleRollError(err));
   }
 
-  private resolveRoll(res: Awaited<ReturnType<typeof api.playDice>>) {
+  /** `bet` is threaded through purely so the round can be tracked with its stake - the play response doesn't echo it back. */
+  private resolveRoll(res: Awaited<ReturnType<typeof api.playDice>>, bet: number) {
     this.rollTimer?.remove(false);
     this.rollTimer = undefined;
 
     gameState.hydrateFromServer(res.user);
 
     const { roll, target, won, payout } = res.result;
+
+    // Retention Leg 1 - see src/api/track.ts. Server-settled result only;
+    // betAmount is Gold Coins, payout is Tickets (separate ledgers).
+    track(EVENTS.GAME_ROUND_PLAYED, {
+      game: "dice",
+      betAmount: bet,
+      outcome: won ? "win" : "loss",
+      payout
+    });
     this.lastRoll = roll;
     this.rollText.setText(String(roll));
     this.redrawZoneBar();

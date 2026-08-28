@@ -45,6 +45,13 @@ model User {
   // attendant-claim cooldown badly in testing (see AttendantClaim below) -
   // every DateTime column here uses @db.Timestamptz(3) to avoid it.
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  // Retention Leg 1: set on every successful signup AND login (see
+  // routes/auth.ts). Nullable rather than defaulting to now() so pre-
+  // existing rows stay honestly "unknown" instead of being backfilled with
+  // a fake login instant the moment the migration runs - a null here means
+  // "hasn't signed in since tracking shipped", which is a real, useful
+  // distinction for any day-1/day-7 retention query.
+  lastLoginAt DateTime? @map("last_login_at") @db.Timestamptz(3)
 
   balance             Balance?
   transactions        Transaction[]
@@ -53,6 +60,7 @@ model User {
   itemsOwned          ItemOwned[]
   equippedItems       EquippedItem[]
   lastPosition        LastPosition?
+  events              Event[]
   playthroughProgress PlaythroughProgress?
   attendantClaim      AttendantClaim?
   adRewardClaim       AdRewardClaim?
@@ -281,4 +289,72 @@ model GameRound {
 
   @@index([userId, game, status])
   @@map("game_rounds")
+}
+
+// Retention Leg 1: self-hosted player-activity events. Deliberately OUR
+// OWN table rather than a third-party analytics SDK (PostHog/Mixpanel/
+// Amplitude/Segment) - founder's call, so player data never leaves this
+// database. Nothing here is on any gameplay or money critical path: this
+// table is append-only telemetry, read by hand for retention questions
+// ("how many of last week's signups came back on day 7", "which games do
+// people actually open"), and losing a row costs nothing.
+//
+// PRIVACY (this is a compliance-phase social-casino product - keep it that
+// way): rows must never carry a password, a token, an email, an IP
+// address, or free text a player typed. `props` is for small, bounded,
+// enum-ish facts about the event only - a game name, a bet amount, a
+// win/lose outcome, a catalog item id. The route validates that shape (see
+// routes/events.ts's PropValue) rather than trusting callers, and the
+// client helper (src/api/track.ts) only ever passes literals it constructs
+// itself.
+//
+// Why not just derive all of this from `transactions`? The ledger only
+// sees money moving. Most retention signal doesn't move money - opening a
+// game and backing out, logging in and idling, browsing the Item Shop
+// without buying - and none of it exists in any table today. Retention
+// data can't be reconstructed after the fact, which is why this ships
+// first.
+model Event {
+  id String @id @default(uuid())
+
+  // Nullable ON PURPOSE: pre-login activity (app boot, the login screen
+  // itself) is exactly the funnel data we care most about, and it has no
+  // user yet. NEVER populated from the request body - the route derives it
+  // solely from a verified JWT (see routes/events.ts).
+  userId String? @map("user_id")
+  user   User?   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Dot-namespaced event name, e.g. "session.start", "game.opened",
+  // "game.round_played". Kept a plain String rather than an enum so adding
+  // an event never needs a destructive enum migration - the closed set
+  // lives in src/api/track.ts on the client instead.
+  name String
+
+  // Event-specific properties. See the PRIVACY note above for what may go
+  // in here. Optional - plenty of events are just "this happened".
+  props Json?
+
+  // Opaque, client-generated, per-app-load random id (see src/api/track.ts).
+  // Lets pre-login and post-login events from the same visit be stitched
+  // into one session without needing a user id. Not a JWT, not a cookie,
+  // not derived from anything identifying, and not stable across reloads.
+  sessionId String @map("session_id")
+
+  // When the SERVER received the batch. Deliberately server-assigned
+  // rather than accepting a client clock - device clocks are wrong often
+  // enough to wreck a date-range query, and a client-supplied timestamp is
+  // trivially forgeable. Batching delay is bounded by the client flush
+  // interval (seconds), which is well inside the tolerance of any
+  // retention question this table exists to answer.
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // "Everything user X did, in order" - the per-player timeline.
+  @@index([userId, createdAt])
+  // "Every event of type Y between two dates" - the funnel/retention
+  // rollups. Name first so the range scan happens inside one event type.
+  @@index([name, createdAt])
+  // "Everything that happened in one visit", for reading a single session
+  // end to end when debugging a funnel drop-off.
+  @@index([sessionId, createdAt])
+  @@map("events")
 }

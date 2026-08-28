@@ -14,6 +14,7 @@ import {
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
+import { track, EVENTS } from "../api/track";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
 
@@ -43,6 +44,8 @@ export class MinesScene extends Phaser.Scene {
   /** True while a start/pick/cash-out request is in flight - blocks further input without ending the round. */
   private busy = false;
   private roundId: string | null = null;
+  /** Gold Coins staked on the round currently in play - kept so endRound() can report the round's real stake (see its doc comment). */
+  private roundBet = 0;
   private tiles: TileVisual[] = [];
 
   private messageText!: Phaser.GameObjects.Text;
@@ -196,6 +199,7 @@ export class MinesScene extends Phaser.Scene {
       .then((res) => {
         gameState.hydrateFromServer(res.user);
         this.roundId = res.roundId;
+        this.roundBet = bet;
         this.active = true;
         this.busy = false;
         this.picksMade = 0;
@@ -317,7 +321,7 @@ export class MinesScene extends Phaser.Scene {
           playSfx(this, "bust");
           playSfx(this, "lose");
           this.updateBalance();
-          this.endRound();
+          this.endRound("loss", 0);
           return;
         }
 
@@ -342,7 +346,7 @@ export class MinesScene extends Phaser.Scene {
           this.messageText.setText(`Board cleared! +${res.payout ?? 0} Tickets`).setColor(Theme.textAccent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
-          this.endRound();
+          this.endRound("win", res.payout ?? 0);
           return;
         }
 
@@ -375,7 +379,7 @@ export class MinesScene extends Phaser.Scene {
         this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Theme.textAccent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
-        this.endRound();
+        this.endRound("win", res.payout);
       })
       .catch((err) => {
         this.busy = false;
@@ -395,7 +399,23 @@ export class MinesScene extends Phaser.Scene {
     }
   }
 
-  private endRound() {
+  /**
+   * The single terminal path for a Mines round - all three endings (hit a
+   * mine, cleared the board, cashed out) funnel through here, which makes
+   * it the one place worth tracking from for a stateful game.
+   *
+   * Retention Leg 1 (see src/api/track.ts): `outcome`/`payout` are passed
+   * in by each ending. A round the player walks away from mid-way is
+   * deliberately NOT tracked as played here - that path forfeits via
+   * POST /games/abandon and never reaches endRound.
+   */
+  private endRound(outcome: "win" | "loss", payout: number) {
+    track(EVENTS.GAME_ROUND_PLAYED, {
+      game: "mines",
+      betAmount: this.roundBet,
+      outcome,
+      payout
+    });
     this.roundId = null;
     this.cashOutBtn?.container.setVisible(false);
     this.cashOutBtn?.setEnabled(false);
