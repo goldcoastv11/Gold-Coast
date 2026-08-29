@@ -240,6 +240,26 @@ describe("rig descriptor invariants", () => {
     }
   });
 
+  it("asks the LPC sheet for nothing outside its four walk rows", () => {
+    // This is the invariant the imported wardrobe rests on. Every piece is
+    // stored as a walk-ONLY 9x4 sheet (scripts/import-lpc.mjs) whose frames
+    // BootScene re-registers at LPC indices - so it can only serve indices
+    // inside walk rows 8-11, columns 0-8. If the rig ever reached for a
+    // frame outside that window (a run cycle, a sit pose, column 9+), every
+    // imported piece would silently miss on it.
+    const first = LPC_WALK_ROW * LPC_COLUMNS;
+    const last = (LPC_WALK_ROW + DIRECTIONS.length - 1) * LPC_COLUMNS + (LPC_WALK_CYCLE.length + 1);
+
+    for (const dir of DIRECTIONS) {
+      for (const frame of [...LPC_RIG.walkFrames[dir], LPC_RIG.idleFrames[dir]]) {
+        expect(frame).toBeGreaterThanOrEqual(first);
+        expect(frame).toBeLessThan(last);
+        // ...and inside the 9 columns a walk row actually holds.
+        expect(frame % LPC_COLUMNS).toBeLessThanOrEqual(LPC_WALK_CYCLE.length);
+      }
+    }
+  });
+
   it("firstWalkFrame reads off the rig rather than a duplicate table", () => {
     // The ambient-bystander code wants each direction's FIRST frame.
     expect(firstWalkFrame(KENNEY_RIG, "left")).toBe(0);

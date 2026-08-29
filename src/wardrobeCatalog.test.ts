@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_BODY_PIECE_ID,
@@ -75,6 +77,48 @@ describe("catalogue", () => {
   it("offers something to buy in every slot", () => {
     for (const slotDef of WARDROBE_SLOTS) {
       expect(listPiecesBySlot(slotDef.slot).length).toBeGreaterThan(0);
+    }
+  });
+});
+
+/**
+ * The imported art, and the attribution it is conditional on.
+ *
+ * Almost every piece in the catalogue is real LPC art brought in by
+ * scripts/import-lpc.mjs, and taken under either CC0 or OGA-BY. OGA-BY
+ * REQUIRES attribution: shipping the art without the credits file is a
+ * licence breach, not a missing nicety. The import writes both together, so
+ * the way they come apart is someone hand-editing one of the generated
+ * files, deleting a PNG, or adding a catalogue entry by hand and pointing it
+ * at art that was never imported - which is exactly what these catch.
+ */
+describe("imported art ships with its credits", () => {
+  const ART_ROOT = path.resolve(__dirname, "../public/assets/characters/lpc");
+  const credits = fs.readFileSync(path.join(ART_ROOT, "CREDITS.txt"), "utf8");
+  const imported = WARDROBE_CATALOG.filter((p) => p.file?.startsWith("wardrobe/"));
+
+  it("actually imported something - the catalogue is not all placeholders", () => {
+    expect(imported.length).toBeGreaterThan(0);
+  });
+
+  it("has the art file every piece points at", () => {
+    for (const piece of imported) {
+      expect(fs.existsSync(path.join(ART_ROOT, piece.file!)), piece.id).toBe(true);
+    }
+  });
+
+  it("credits every imported piece by id", () => {
+    for (const piece of imported) {
+      expect(credits.includes(`(${piece.id})`), piece.id).toBe(true);
+    }
+  });
+
+  it("declares a walk-only layout for each, so BootScene remaps their frames", () => {
+    // A walk sheet left as "full" would have its frames looked up on a
+    // 13-column grid it doesn't have, and render as garbage rather than
+    // failing.
+    for (const piece of imported) {
+      expect(piece.sheetLayout, piece.id).toBe("walk");
     }
   });
 });

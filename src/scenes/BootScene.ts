@@ -241,9 +241,11 @@ export class BootScene extends Phaser.Scene {
     this.createWalkAnims("npc2_sheet", "npc2", KENNEY_RIG);
     this.createWalkAnims("npc3_sheet", "npc3", KENNEY_RIG);
     this.createWalkAnims("npc4_sheet", "npc4", KENNEY_RIG);
-    // Wardrobe: fill in generated stand-in art for every piece that has no
-    // real PNG yet, THEN build walk animations. Order matters - an anim
-    // can't reference a texture that doesn't exist.
+    // Wardrobe: put the imported walk-only sheets' frames at the indices the
+    // LPC rig addresses, fill in generated stand-in art for anything with no
+    // real PNG, THEN build walk animations. Order matters - an anim can't
+    // reference a texture (or a frame) that doesn't exist yet.
+    this.remapWalkOnlySheets();
     this.ensureWardrobePlaceholders();
     this.createWardrobeWalkAnims();
 
@@ -1771,12 +1773,16 @@ export class BootScene extends Phaser.Scene {
 
   // --- Wardrobe placeholder art ----------------------------------------
   //
-  // The layered wardrobe ships before its art does. Rather than have the
-  // shop sell invisible clothes (or block the whole feature on a weekend of
-  // spritesheet exports), every catalogue piece without a real PNG gets a
-  // generated stand-in drawn here, in the LPC frame layout, so the system
-  // is fully playable and testable today and each real export simply
-  // replaces one placeholder.
+  // Every catalogue piece HAS real art now (scripts/import-lpc.mjs), so in
+  // normal operation nothing below draws anything - it is the safety net,
+  // not the wardrobe. It still exists, and still runs, because the failure
+  // it covers is real and silent: a PNG that 404s, a half-written deploy, a
+  // piece added to the catalogue before its art is imported. In any of those
+  // the character wears a plain block in roughly the right shape instead of
+  // vanishing, showing a magenta missing-texture box, or crashing the boot.
+  //
+  // These are deliberately crude for the same reason they always were: they
+  // should never be mistaken for the shipped look.
   //
   // ## The compact-sheet trick
   //
@@ -1799,6 +1805,46 @@ export class BootScene extends Phaser.Scene {
   private static readonly PLACEHOLDER_COLUMNS = 9;
   /** LPC direction order for walk rows 8, 9, 10, 11. */
   private static readonly PLACEHOLDER_DIR_ORDER = ["up", "left", "down", "right"] as const;
+
+  /**
+   * Points the imported walk-only sheets' frames at the indices the LPC rig
+   * actually asks for.
+   *
+   * scripts/import-lpc.mjs downloads each piece's `walk.png` - a 9x4 grid of
+   * 64px frames - rather than the generator's full 13x54 export, because the
+   * game only ever animates the walk rows and the full sheet is 13x the
+   * pixels for the same four rows. Phaser numbers a loaded sheet's frames
+   * from its own geometry, so those frames arrive as 0-35 on a 9-column
+   * grid, while LPC_RIG addresses walk row 8 of a 13-column one (104-151).
+   * Left alone, every frame lookup would miss.
+   *
+   * The fix is the same one the generated placeholders use, and for the same
+   * reason: `texture.add` doesn't care whether a frame's index matches its
+   * physical position, so frame 143 ("right, standing") can live at compact
+   * position (0, 192). The new indices don't collide with the loader's own
+   * 0-35, so both sets coexist and nothing else in the game can tell these
+   * from a full sheet.
+   */
+  private remapWalkOnlySheets() {
+    const FRAME = LPC_RIG.frameHeight; // 64
+    const COLS = BootScene.PLACEHOLDER_COLUMNS;
+    const ROWS = BootScene.PLACEHOLDER_DIR_ORDER.length;
+
+    for (const piece of WARDROBE_CATALOG) {
+      if (piece.sheetLayout !== "walk") continue;
+      if (!this.textures.exists(piece.id)) continue;
+      const texture = this.textures.get(piece.id);
+      if (texture.key === "__MISSING") continue; // load failed - placeholder takes over below
+
+      for (let row = 0; row < ROWS; row++) {
+        for (let col = 0; col < COLS; col++) {
+          const lpcFrameIndex = (LPC_WALK_ROW + row) * LPC_COLUMNS + col;
+          if (texture.has(String(lpcFrameIndex))) continue;
+          texture.add(lpcFrameIndex, 0, col * FRAME, row * FRAME, FRAME, FRAME);
+        }
+      }
+    }
+  }
 
   /**
    * Generates stand-in art for every wardrobe piece that has no usable

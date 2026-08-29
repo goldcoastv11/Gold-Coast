@@ -12,9 +12,19 @@ This replaced the old system of 17 complete, separately-drawn characters. The ad
 draw a shirt **once** and it works on every body, in every combination, forever — instead of
 redrawing a whole character every time you want one new look.
 
-**The code is already finished and running.** Every piece in the shop currently shows simple
-placeholder art that the game draws itself. Each real file you produce replaces one placeholder.
-Nothing breaks while you work, and you can do one piece at a time.
+**The code is already finished and running.**
+
+> **You probably don't need this page any more.** The shop is stocked: 56 pieces of real LPC art
+> were imported automatically, and there is now a script that does the whole job —
+> `node scripts/import-lpc.mjs`. To add more, add a line to `scripts/lpc-manifest.mjs` and re-run
+> it. The script applies the same licence rule as Step 2 below, but reads it from each asset's own
+> metadata instead of trusting a filter checkbox, and writes the credits file for you.
+>
+> Follow the manual recipe below only for art the script can't fetch — something you drew yourself,
+> or a piece that needs two layers stacked.
+
+The generated placeholder art is still there as a safety net: a piece whose picture file goes
+missing falls back to a plain coloured block rather than making the character vanish.
 
 ---
 

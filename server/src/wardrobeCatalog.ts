@@ -18,6 +18,8 @@
  * non-optional slot with a free default that can never be un-equipped.
  */
 
+import { LPC_WARDROBE_PIECES } from "./wardrobeLpcPieces";
+
 export type WardrobeSlot = "BODY" | "LEGS" | "FEET" | "TORSO" | "HAIR" | "HAT";
 
 export interface WardrobeSlotDef {
@@ -48,32 +50,20 @@ export interface WardrobePieceDef {
 /** The free default body every player owns implicitly. Never sold, never removable. */
 export const DEFAULT_BODY_PIECE_ID = "body_default";
 
+/**
+ * The default body, then every piece the LPC art import brought in.
+ *
+ * `wardrobeLpcPieces.ts` is GENERATED, by scripts/import-lpc.mjs, from the
+ * same pick-list that generates the client's copy - so the ids, names and
+ * prices on the two sides come from one source and cannot drift apart by an
+ * edit to one of them. (The client's copy carries the rendering fields this
+ * one deliberately omits; see this file's header.) The catalogue-agreement
+ * test still runs, because a hand edit to either generated file is exactly
+ * the kind of drift it exists to catch.
+ */
 export const WARDROBE_CATALOG: readonly WardrobePieceDef[] = [
   { id: DEFAULT_BODY_PIECE_ID, slot: "BODY", name: "Classic", price: 0 },
-  { id: "body_tan", slot: "BODY", name: "Tan", price: 150 },
-  { id: "body_deep", slot: "BODY", name: "Deep", price: 150 },
-
-  { id: "hair_short", slot: "HAIR", name: "Short Crop", price: 120 },
-  { id: "hair_long", slot: "HAIR", name: "Long", price: 180 },
-  { id: "hair_ponytail", slot: "HAIR", name: "Ponytail", price: 220 },
-  { id: "hair_bleach", slot: "HAIR", name: "Bleached", price: 300 },
-
-  { id: "torso_tee", slot: "TORSO", name: "Plain Tee", price: 200 },
-  { id: "torso_hoodie", slot: "TORSO", name: "Hoodie", price: 380 },
-  { id: "torso_vest", slot: "TORSO", name: "Dealer Vest", price: 600 },
-  { id: "torso_suit", slot: "TORSO", name: "Suit Jacket", price: 1200 },
-
-  { id: "legs_jeans", slot: "LEGS", name: "Jeans", price: 200 },
-  { id: "legs_slacks", slot: "LEGS", name: "Slacks", price: 350 },
-  { id: "legs_shorts", slot: "LEGS", name: "Shorts", price: 160 },
-
-  { id: "feet_sneakers", slot: "FEET", name: "Sneakers", price: 150 },
-  { id: "feet_boots", slot: "FEET", name: "Boots", price: 260 },
-  { id: "feet_dress", slot: "FEET", name: "Dress Shoes", price: 400 },
-
-  { id: "hat_cap", slot: "HAT", name: "Ball Cap", price: 250 },
-  { id: "hat_visor", slot: "HAT", name: "Dealer Visor", price: 500 },
-  { id: "hat_fedora", slot: "HAT", name: "Fedora", price: 900 }
+  ...LPC_WARDROBE_PIECES
 ];
 
 export function getSlotDef(slot: WardrobeSlot): WardrobeSlotDef | undefined {
