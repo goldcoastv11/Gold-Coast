@@ -129,3 +129,29 @@ See `docs/legal/open-questions.md` for the full list.
 - Coin Kiosk still to be extracted from OverworldScene.
 - Overworld station name-tags and bench/hedge tints still cold blue.
 - Ground shadows and larger characters — the remaining two "free" visual wins from the art review.
+
+---
+
+## Session — 2026-08-29 (live with founder)
+
+**Merged and live:**
+- Higher detail pass (PR #13) — the real 64x64 LPC character body now renders at 1:1 instead of being shrunk to 70%, which had been destroying the detail it was adopted for. Casino textures gained shading, bevels, cabinet glass and floor tile variation, added WITHIN existing texture sizes so the floor plan didn't shift.
+- LPC wardrobe import (PR #14) — 56 real clothing pieces: 13 hair, 12 shirts, 10 trousers, 9 shoes, 10 hats, 2 body tones. Bought with TICKETS. Replaces the placeholder coloured blocks.
+
+**On the wardrobe import — the part that mattered:** the source repo is GPL-licensed as *code*, but each art asset carries its own licence, mixed within the same folders. Only CC0 and OGA-BY assets were imported, filtered per-asset and verified independently. Attribution ships in `public/assets/characters/lpc/CREDITS.txt` — an OGA-BY condition, not optional. A test asserts every piece has both its file and its credits entry.
+
+**Founder decisions this session:**
+- Replace the 17 monolithic skins with a layered wardrobe — buy hair/shirts/trousers separately with TICKETS. Old skins kept rather than deleted; founder confirmed it doesn't matter.
+- Whole game should have more visual detail, character and casino both.
+
+**Environment limits learned — worth not rediscovering:**
+- **Local dev servers started from this session are NOT reachable from the founder's browser.** Commands run in a sandbox with its own network, so `127.0.0.1` here is not theirs. Local review is impossible; use the live site.
+- Screenshots of the game fail in the in-app Browser pane (it doesn't composite frames while hidden). Chrome via the extension works, but only when that tab is the *foreground* tab — Phaser pauses rendering on hidden tabs.
+- Consequence: **no visual change this session or the last has actually been looked at by anyone before merging.** Everything was verified structurally. That is the standing risk.
+
+**Still open:**
+- Nobody has visually reviewed the new character, wardrobe, or casino detail in-game.
+- Dragon Tower still returns 213.6% — deferred by founder decision.
+- Coin Kiosk still to be extracted from OverworldScene.
+- Overworld station name-tags and bench/hedge tints still cold blue.
+- Ground shadows and larger characters — remaining items from the art review.
