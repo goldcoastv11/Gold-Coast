@@ -279,7 +279,7 @@ async function importPiece(pick, { checkOnly }) {
     return { pick, dir, credits: verdict.credits, licences: licencesOf(verdict.credits) };
   }
 
-  const png = await getBinary(`spritesheets/${dir}/walk.png`);
+  const { png, source, preColoured } = await getWalkSheet(dir, pick.color);
   const header = readHeader(png);
   if (header.width !== WALK_SHEET.width || header.height !== WALK_SHEET.height) {
     throw new Error(
@@ -289,9 +289,9 @@ async function importPiece(pick, { checkOnly }) {
   }
 
   let image = decodePng(png);
-  let colourNote = "source colours";
+  let colourNote = preColoured ? `pre-coloured sheet: ${pick.color}` : "source colours";
 
-  if (pick.color) {
+  if (pick.color && !preColoured) {
     const material = definition.recolors?.material ?? "cloth";
     const all = await ramps(material);
     const target = Object.entries(all).find(([n]) => n.toLowerCase() === pick.color.toLowerCase());
@@ -307,7 +307,44 @@ async function importPiece(pick, { checkOnly }) {
   fs.mkdirSync(ART_DIR, { recursive: true });
   fs.writeFileSync(path.join(ROOT, "public/assets/characters/lpc", file), out);
 
-  return { pick, dir, file, bytes: out.length, credits: verdict.credits, colourNote, licences: licencesOf(verdict.credits) };
+  return {
+    pick,
+    dir,
+    source,
+    file,
+    bytes: out.length,
+    credits: verdict.credits,
+    colourNote,
+    licences: licencesOf(verdict.credits)
+  };
+}
+
+/**
+ * Fetches a piece's walk sheet, across the two layouts the generator's
+ * spritesheets/ tree actually uses.
+ *
+ * Most assets are one neutral `<dir>/walk.png` that the generator recolours
+ * from a palette. An older set instead ships a `<dir>/walk/` DIRECTORY of
+ * sheets already drawn in each named colour. Same art, same grid, so the
+ * only difference that reaches the rest of the import is that a pre-coloured
+ * sheet must not then be palette-swapped again.
+ */
+async function getWalkSheet(dir, colour) {
+  try {
+    return { png: await getBinary(`spritesheets/${dir}/walk.png`), source: `${dir}/walk.png`, preColoured: false };
+  } catch (err) {
+    if (!String(err.message).includes("HTTP 404")) throw err;
+  }
+
+  if (!colour) {
+    throw new Error(`${dir} has no walk.png and no colour was chosen for its per-colour sheets`);
+  }
+  const source = `${dir}/walk/${colour}.png`;
+  try {
+    return { png: await getBinary(`spritesheets/${source}`), source, preColoured: true };
+  } catch (err) {
+    throw new Error(`${dir}: no walk.png, and no "${colour}" among its per-colour walk sheets`);
+  }
 }
 
 const licencesOf = (credits) => [
@@ -391,7 +428,7 @@ const CREDITS_END = "=== END GENERATED ===";
  */
 function writeCredits(results) {
   const blocks = results.map((r) => {
-    const lines = [`${r.pick.name} (${r.pick.id}) - spritesheets/${r.dir}/walk.png`];
+    const lines = [`${r.pick.name} (${r.pick.id}) - spritesheets/${r.source}`];
     for (const c of r.credits) {
       if (c.notes) lines.push(`\t- Note: ${c.notes}`);
       lines.push("\t- Used under:");

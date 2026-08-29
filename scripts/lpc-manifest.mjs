@@ -110,7 +110,7 @@ export const MANIFEST = [
   { id: "hat_kerchief", slot: "HAT", name: "Kerchief", price: 220, def: "headwear/coverings/headbands/hat_headband_kerchief.json", color: "maroon", swatch: 0x832121 },
   { id: "hat_headband", slot: "HAT", name: "Headband", price: 180, def: "headwear/coverings/headbands/hat_headband_thick.json", color: "blue", swatch: 0x466ac9 },
   { id: "hat_hood", slot: "HAT", name: "Hood", price: 560, def: "headwear/coverings/hoods/hat_hood_cloth.json", color: "charcoal", swatch: 0x2a3034 },
-  { id: "hat_bonnie", slot: "HAT", name: "Bonnie Hat", price: 640, def: "headwear/hats/caps/hat_cap_bonnie.json", color: "brown", swatch: 0x62351c },
-  { id: "hat_cavalier", slot: "HAT", name: "Cavalier Hat", price: 1100, def: "headwear/hats/caps/hat_cap_cavalier_feather.json", color: "purple", swatch: 0x621e78 },
-  { id: "hat_admiral", slot: "HAT", name: "Admiral Bicorne", price: 1500, def: "headwear/hats/athwart/hat_bicorne_athwart_admiral.json", color: "yellow", swatch: 0xd99431 }
+  { id: "hat_bonnie", slot: "HAT", name: "Bonnie Hat", price: 640, def: "headwear/hats/caps/hat_cap_bonnie.json", color: "maroon", swatch: 0x832121 },
+  { id: "hat_cavalier", slot: "HAT", name: "Cavalier Hat", price: 1100, def: "headwear/hats/caps/hat_cap_cavalier.json", color: "purple", swatch: 0x621e78 },
+  { id: "hat_admiral", slot: "HAT", name: "Admiral Bicorne", price: 1500, def: "headwear/hats/athwart/hat_bicorne_athwart_admiral.json", swatch: 0x22282a }
 ];
