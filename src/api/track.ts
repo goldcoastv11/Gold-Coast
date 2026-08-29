@@ -55,9 +55,19 @@ export const EVENTS = {
   KIOSK_CLAIM: "kiosk.claim",
   /** An Item Shop purchase (accessory/pet). Props: { itemId, price }. */
   ITEM_PURCHASED: "shop.item_purchased",
-  /** A skin purchase. Props: { skinId, price }. */
-  SKIN_PURCHASED: "shop.skin_purchased",
-  /** An owned cosmetic was equipped. Props: { itemId } or { skinId }. */
+  /**
+   * A wardrobe piece purchase. Props: { pieceId, slot, price }.
+   *
+   * Replaced `shop.skin_purchased` when the 17 monolithic skins became the
+   * layered wardrobe. A NEW event name rather than a reuse of the old one:
+   * the two aren't comparable (one skin purchase was a whole look, one
+   * piece purchase is a layer of one), so pooling them into a single name
+   * would silently corrupt any before/after read of the shop. `slot` is
+   * carried so "which layers do people actually buy" is answerable - the
+   * question that decides what art to produce next.
+   */
+  WARDROBE_PURCHASED: "shop.wardrobe_purchased",
+  /** An owned cosmetic was equipped. Props: { itemId } or { pieceId, slot }. */
   ITEM_EQUIPPED: "shop.item_equipped",
   /**
    * A completed challenge's reward was claimed. Props: { challengeId,

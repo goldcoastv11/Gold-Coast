@@ -7,7 +7,8 @@
 
 import { TxClient } from "./economy/ledger";
 import { getBalance } from "./economy/ledger";
-import { listOwnedSkins, getEquippedSkin } from "./economy/skinShop";
+import { listOwnedPieces, getEquippedWardrobe } from "./economy/wardrobe";
+import { DEFAULT_BODY_PIECE_ID, WardrobeSlot } from "./wardrobeCatalog";
 import { listOwnedItems, getEquippedItem } from "./economy/itemShop";
 import { getProgressionForDisplay } from "./progression/progress";
 import { prisma } from "./db";
@@ -16,8 +17,21 @@ export interface MeResponse {
   username: string;
   goldCoins: number;
   tickets: number;
-  skinsOwned: string[];
-  equippedSkin: string;
+  /**
+   * The layered wardrobe (see economy/wardrobe.ts) - what replaced the old
+   * `skinsOwned`/`equippedSkin` pair when the 17 monolithic skins were
+   * removed. `owned` always contains the free default body; `equipped`
+   * always has a BODY entry, so a client can render a character from this
+   * payload alone with no special-casing for a brand-new account.
+   *
+   * Read defensively (see getWardrobeState's doc comment) - never breaks
+   * the rest of this response if the wardrobe tables aren't migrated yet on
+   * this environment.
+   */
+  wardrobe: {
+    owned: string[];
+    equipped: Partial<Record<WardrobeSlot, string>>;
+  };
   /** Accessory/pet ids owned - see economy/itemShop.ts. Read defensively (see getItemShopState's doc comment) - never breaks the rest of this response if the items_owned/equipped_items tables aren't migrated yet on this environment. */
   ownedItems: string[];
   equippedAccessory: string | null;
@@ -111,12 +125,39 @@ async function getItemShopState(
   }
 }
 
+/**
+ * Same isolation as getItemShopState above, same reason, and it matters
+ * more here: wardrobe_owned/equipped_wardrobe are a brand-new migration
+ * that won't exist on any environment until someone runs
+ * `railway run npx prisma migrate deploy` against it - which does NOT
+ * happen automatically on a plain git push. Reading them on the caller's
+ * shared `tx` would abort that whole transaction on an environment where
+ * the migration hasn't been applied, 500ing every authenticated response in
+ * the app rather than just this feature.
+ *
+ * The degraded fallback is deliberately not empty: it reports the free
+ * default body as owned and worn, so a player on an un-migrated backend
+ * sees a plain character with an empty wardrobe rather than an invisible
+ * one. That's the same never-invisible-player invariant economy/wardrobe.ts
+ * enforces, held on the failure path too.
+ */
+async function getWardrobeState(userId: string): Promise<MeResponse["wardrobe"]> {
+  try {
+    const [owned, equipped] = await Promise.all([
+      listOwnedPieces(prisma, userId),
+      getEquippedWardrobe(prisma, userId)
+    ]);
+    return { owned, equipped };
+  } catch {
+    return { owned: [DEFAULT_BODY_PIECE_ID], equipped: { BODY: DEFAULT_BODY_PIECE_ID } };
+  }
+}
+
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
   const [
     goldCoins,
     tickets,
-    skinsOwned,
-    equippedSkin,
+    wardrobe,
     itemShopState,
     lastPosition,
     attendantClaim,
@@ -126,8 +167,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
   ] = await Promise.all([
     getBalance(tx, userId, "GC"),
     getBalance(tx, userId, "TICKETS"),
-    listOwnedSkins(tx, userId),
-    getEquippedSkin(tx, userId),
+    getWardrobeState(userId),
     getItemShopState(userId),
     tx.lastPosition.findUnique({ where: { userId } }),
     tx.attendantClaim.findUnique({ where: { userId } }),
@@ -140,8 +180,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     username,
     goldCoins,
     tickets,
-    skinsOwned,
-    equippedSkin,
+    wardrobe,
     ownedItems: itemShopState.ownedItems,
     equippedAccessory: itemShopState.equippedAccessory,
     equippedPet: itemShopState.equippedPet,

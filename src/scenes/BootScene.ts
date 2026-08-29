@@ -1,13 +1,14 @@
 import Phaser from "phaser";
-import { SKIN_CATALOG } from "../GameState";
+import { WARDROBE_CATALOG, WardrobePieceDef, WardrobeSlot } from "../wardrobeCatalog";
 import {
   CharacterRig,
   DIRECTIONS,
   FLAT_RIG,
   KENNEY_RIG,
-  LEGACY_SKIN_RIG,
   LPC_CHARACTER_SHEETS,
-  LPC_RIG
+  LPC_COLUMNS,
+  LPC_RIG,
+  LPC_WALK_ROW
 } from "../characterRig";
 import { fadeToScene } from "../ui/sceneTransition";
 import { preloadSounds, preloadMusic } from "../ui/SoundManager";
@@ -15,7 +16,7 @@ import { whenDisplayFontReady } from "../ui/Theme";
 
 /**
  * BootScene loads the environment tileset assets plus the player/NPC/dealer
- * character spritesheets and every purchasable skin.
+ * character spritesheets and every wardrobe piece.
  *
  * "Warm Daylight" reskin (this pass): every procedurally-drawn ground, wall
  * and cabinet/table texture below moves off the previous "Arcade Nights"
@@ -154,23 +155,33 @@ export class BootScene extends Phaser.Scene {
     this.loadCharacterSheet("npc3_sheet", "assets/characters/kenney/char_d_hardhat.png", KENNEY_RIG);
     this.loadCharacterSheet("npc4_sheet", "assets/characters/kenney/char_f_dark.png", KENNEY_RIG);
 
-    // Every purchasable skin (SKIN_CATALOG) - STILL the old Jephed-pack rig,
-    // 21x32, 3 cols (walk frame) x 4 rows (direction). STYLE_GUIDE.md's scope
-    // note is explicit: the new Kenney pack has no equivalent for these 17
-    // skins, so per art-director they're deliberately left on the old rig
-    // for now rather than being silently dropped or faked - see task #24
-    // report to main for the tradeoff/options. This means these files
-    // declare LEGACY_SKIN_RIG (old row-major layout), not KENNEY_RIG (used
-    // only for player/npc/dealer above). The LPC loop below is ADDITIVE -
-    // these 17 sheets are untouched and keep working exactly as they do
-    // today.
-    for (const skin of SKIN_CATALOG) {
-      if (skin.id === "player") continue; // already loaded above as player_sheet
-      this.loadCharacterSheet(
-        skin.textureKey,
-        `assets/characters/skins/${skin.textureKey}.png`,
-        LEGACY_SKIN_RIG
-      );
+    // Wardrobe pieces (see src/wardrobeCatalog.ts) - the layered character
+    // system that replaced the 17 monolithic skins. Every piece is an LPC
+    // sheet, so they all declare LPC_RIG.
+    //
+    // Only pieces that declare a `file` are loaded: the rest get generated
+    // placeholder art in create() below. That is what lets the shop sell a
+    // full catalogue of hair, shirts and hats before any real art exists -
+    // the founder produces PNGs from docs/character-art-spec.md and each
+    // one silently upgrades its piece from placeholder to real, with no
+    // code change.
+    //
+    // A declared file that FAILS to load (wrong name, bad export,
+    // interrupted download) is caught below and falls back to the same
+    // placeholder path, so a typo in a filename costs you one plain-looking
+    // hat rather than a black screen.
+    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
+      if (WARDROBE_CATALOG.some((p) => p.id === file.key)) {
+        console.warn(
+          `[wardrobe] art for "${file.key}" failed to load from ${file.url} - ` +
+            "falling back to generated placeholder art. See docs/character-art-spec.md."
+        );
+      }
+    });
+
+    for (const piece of WARDROBE_CATALOG) {
+      if (!piece.file) continue;
+      this.loadCharacterSheet(piece.id, `assets/characters/lpc/${piece.file}`, LPC_RIG);
     }
 
     // LPC (Universal LPC Spritesheet Generator) outfit sheets - the fourth
@@ -203,10 +214,12 @@ export class BootScene extends Phaser.Scene {
     this.createWalkAnims("npc2_sheet", "npc2", KENNEY_RIG);
     this.createWalkAnims("npc3_sheet", "npc3", KENNEY_RIG);
     this.createWalkAnims("npc4_sheet", "npc4", KENNEY_RIG);
-    for (const skin of SKIN_CATALOG) {
-      if (skin.id === "player") continue;
-      this.createWalkAnims(skin.textureKey, skin.id, LEGACY_SKIN_RIG);
-    }
+    // Wardrobe: fill in generated stand-in art for every piece that has no
+    // real PNG yet, THEN build walk animations. Order matters - an anim
+    // can't reference a texture that doesn't exist.
+    this.ensureWardrobePlaceholders();
+    this.createWardrobeWalkAnims();
+
     for (const sheet of LPC_CHARACTER_SHEETS) {
       this.createWalkAnims(sheet.textureKey, sheet.textureKey, LPC_RIG);
     }
@@ -755,8 +768,8 @@ export class BootScene extends Phaser.Scene {
   /**
    * The overworld Item Shop - per user direction, a booth/counter similar
    * to the Coin Kiosk (same cabinet-scale construction) rather than a
-   * person character (it used to be "skin_000", one of the purchasable
-   * skins itself, standing in as the attendant - see OverworldScene.ts's
+   * person character (it used to be a purchasable character skin
+   * standing in as the attendant - see OverworldScene.ts's
    * registerStation call for this station). A small orange-and-white
    * awning up top instead of the Coin Kiosk's antenna (reads as "market
    * stall," not "screen"), and a simple shirt icon on the screen panel
@@ -1375,8 +1388,8 @@ export class BootScene extends Phaser.Scene {
    * Flat/vector player character (user direction: "we are going to have to
    * overhaul the character design" + "like the Wii" + "make the casino not
    * 8 bit anymore" - away from the old chibi Kenney pixel-art look). Phase
-   * 1 of a larger planned overhaul - floor/walls/furniture and the 16
-   * purchasable legacy-rig skins are separate follow-up phases, not
+   * 1 of a larger planned overhaul - floor/walls/furniture were separate
+   * follow-up phases, not
    * touched here.
    *
    * Deliberately kept at the SAME 16x16-frame, 4-col [left,down,up,right] x
@@ -1394,7 +1407,7 @@ export class BootScene extends Phaser.Scene {
    * cycle spritesheet was sourced/drawn frame-by-frame either - the 3
    * "frames" per direction are just a 1px foot-offset wiggle, procedurally
    * varied per row below, reusing the exact same anim-key wiring
-   * (createWalkAnims, `${skin}_walk_${dir}`) the old rig used.
+   * (createWalkAnims, `${prefix}_walk_${dir}`) the old rig used.
    */
   private createFlatCharacterSheet() {
     const FRAME = FLAT_RIG.frameHeight;
@@ -1498,11 +1511,205 @@ export class BootScene extends Phaser.Scene {
     texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
   }
 
+  // --- Wardrobe placeholder art ----------------------------------------
+  //
+  // The layered wardrobe ships before its art does. Rather than have the
+  // shop sell invisible clothes (or block the whole feature on a weekend of
+  // spritesheet exports), every catalogue piece without a real PNG gets a
+  // generated stand-in drawn here, in the LPC frame layout, so the system
+  // is fully playable and testable today and each real export simply
+  // replaces one placeholder.
+  //
+  // ## The compact-sheet trick
+  //
+  // A real LPC sheet is 832 x 3456 (13 columns x 54 rows) and we address
+  // only the four walk rows out of it - rows 8-11. Generating a full-size
+  // sheet per piece would cost ~11MB of texture memory each, ~230MB across
+  // the catalogue, for art that is 97% empty space.
+  //
+  // Instead each placeholder is generated as a COMPACT 9x4 grid (576 x 256:
+  // the 9 walk columns by the 4 directions) and its frames are then
+  // registered under their real LPC frame INDICES pointing into that
+  // compact layout. Phaser's texture.add(index, source, x, y, w, h) doesn't
+  // care whether a frame's index matches its physical position, so frame
+  // 143 ("right, standing") can live at compact position (0, 192). Every
+  // consumer - LPC_RIG's walkFrames, the idle frames, LayeredCharacter's
+  // frame mirroring - addresses these exactly like a real sheet and cannot
+  // tell the difference, at ~1/20th the memory.
+
+  /** Placeholder walk columns: LPC's column 0 (standing) plus its 1-8 cycle. */
+  private static readonly PLACEHOLDER_COLUMNS = 9;
+  /** LPC direction order for walk rows 8, 9, 10, 11. */
+  private static readonly PLACEHOLDER_DIR_ORDER = ["up", "left", "down", "right"] as const;
+
+  /**
+   * Generates stand-in art for every wardrobe piece that has no usable
+   * texture - i.e. one with no `file` declared, or whose declared file
+   * failed to load. Pieces with real art are left completely alone.
+   */
+  private ensureWardrobePlaceholders() {
+    for (const piece of WARDROBE_CATALOG) {
+      if (this.textures.exists(piece.id) && this.textures.get(piece.id).key !== "__MISSING") {
+        continue; // real art loaded - nothing to do
+      }
+      this.createWardrobePlaceholderSheet(piece);
+    }
+  }
+
+  /**
+   * Walk animations for the wardrobe.
+   *
+   * Only BODY pieces get animations, and that is not an oversight: the body
+   * is the base sprite, the only layer that plays an animation at all.
+   * Every other layer mirrors the base's current frame index each tick
+   * rather than running its own timeline (see ui/LayeredCharacter.ts for
+   * why that is both simpler and exactly in sync). So a shirt needs a
+   * texture and nothing else.
+   */
+  private createWardrobeWalkAnims() {
+    for (const piece of WARDROBE_CATALOG) {
+      if (piece.slot !== "BODY") continue;
+      this.createWalkAnims(piece.id, piece.id, LPC_RIG);
+    }
+  }
+
+  /**
+   * Draws one piece's placeholder sheet: the same simple shape in the
+   * piece's own colour, posed for each of the four directions across nine
+   * walk columns.
+   *
+   * These are deliberately crude - flat blocks in the piece's colour, no
+   * shading or detail. They exist to prove the layering works and to let
+   * the shop be used, not to be shipped as the game's look. Anything more
+   * polished would risk being mistaken for finished art.
+   */
+  private createWardrobePlaceholderSheet(piece: WardrobePieceDef) {
+    const FRAME = LPC_RIG.frameHeight; // 64
+    const COLS = BootScene.PLACEHOLDER_COLUMNS;
+    const ROWS = BootScene.PLACEHOLDER_DIR_ORDER.length;
+    const g = this.add.graphics();
+
+    for (let row = 0; row < ROWS; row++) {
+      const dir = BootScene.PLACEHOLDER_DIR_ORDER[row];
+      for (let col = 0; col < COLS; col++) {
+        // Column 0 is the standing pose; 1-8 are the walk cycle. Swing the
+        // limbs on a sine so the cycle loops seamlessly back to column 1.
+        const phase = col === 0 ? 0 : Math.sin(((col - 1) / 8) * Math.PI * 2);
+        this.drawWardrobePlaceholderFrame(g, piece, dir, phase, col * FRAME, row * FRAME);
+      }
+    }
+
+    g.generateTexture(piece.id, FRAME * COLS, FRAME * ROWS);
+    g.destroy();
+
+    // Register each compact cell under its REAL LPC frame index - see the
+    // "compact-sheet trick" comment above. Without this the texture would
+    // have a single frame covering the whole packed image, and every
+    // numeric frame index the rig asks for would miss and render the entire
+    // sheet in place of one 64x64 frame.
+    const texture = this.textures.get(piece.id);
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const lpcFrameIndex = (LPC_WALK_ROW + row) * LPC_COLUMNS + col;
+        texture.add(lpcFrameIndex, 0, col * FRAME, row * FRAME, FRAME, FRAME);
+      }
+    }
+
+    // Same reasoning as createFlatCharacterSheet's: Graphics draws
+    // anti-aliased edges, and the default LINEAR filter softens them
+    // further when Phaser scales the frame for display.
+    texture.setFilter(Phaser.Textures.FilterMode.NEAREST);
+  }
+
+  /**
+   * One 64x64 placeholder frame, drawn at (ox, oy).
+   *
+   * Coordinates follow LPC's own proportions so the layers line up with
+   * each other and, later, with real LPC art: head around y 14-28, torso
+   * y 28-44, legs y 44-58, feet y 56-62, character centred on x 32 and
+   * about 20px wide. `phase` is -1..1 and swings the legs/arms.
+   */
+  private drawWardrobePlaceholderFrame(
+    g: Phaser.GameObjects.Graphics,
+    piece: WardrobePieceDef,
+    dir: "up" | "left" | "down" | "right",
+    phase: number,
+    ox: number,
+    oy: number
+  ) {
+    const color = piece.placeholderColor;
+    const cx = ox + 32;
+    const swing = phase * 3;
+    // Facing left/right shows a narrower silhouette than facing the camera.
+    const profile = dir === "left" || dir === "right";
+    const halfW = profile ? 7 : 10;
+
+    const slot: WardrobeSlot = piece.slot;
+
+    if (slot === "BODY") {
+      // Head.
+      g.fillStyle(color, 1);
+      g.fillCircle(cx, oy + 21, 7);
+      // Torso.
+      g.fillRect(cx - halfW, oy + 28, halfW * 2, 16);
+      // Legs, swinging in opposition.
+      g.fillRect(cx - 6, oy + 44, 5, 14 + swing);
+      g.fillRect(cx + 1, oy + 44, 5, 14 - swing);
+      // Face - two eyes facing the camera, one in profile, none from behind
+      // (same "no face when facing away" convention the flat rig uses).
+      if (dir === "down") {
+        g.fillStyle(0x2a1c12, 1);
+        g.fillCircle(cx - 2.5, oy + 20, 1.2);
+        g.fillCircle(cx + 2.5, oy + 20, 1.2);
+      } else if (profile) {
+        g.fillStyle(0x2a1c12, 1);
+        g.fillCircle(cx + (dir === "left" ? -3 : 3), oy + 20, 1.2);
+      }
+      return;
+    }
+
+    g.fillStyle(color, 1);
+
+    switch (slot) {
+      case "HAIR":
+        // A cap of hair over the top and back of the head.
+        g.fillCircle(cx, oy + 19, 7.5);
+        g.fillRect(cx - 7.5, oy + 15, 15, 5);
+        break;
+
+      case "HAT":
+        // Crown plus a brim, sitting just clear of the hair below it.
+        g.fillRect(cx - 6, oy + 11, 12, 6);
+        g.fillRect(cx - 10, oy + 16, 20, 2.5);
+        break;
+
+      case "TORSO":
+        // Shirt over the chest, with short sleeves that swing with the arms.
+        g.fillRect(cx - halfW, oy + 28, halfW * 2, 15);
+        g.fillRect(cx - halfW - 3, oy + 29 + swing, 3, 9);
+        g.fillRect(cx + halfW, oy + 29 - swing, 3, 9);
+        break;
+
+      case "LEGS":
+        // Trousers over the upper legs, following the same swing as the
+        // body's legs so they never separate mid-stride.
+        g.fillRect(cx - 6, oy + 43, 5, 11 + swing);
+        g.fillRect(cx + 1, oy + 43, 5, 11 - swing);
+        break;
+
+      case "FEET":
+        // Shoes at the bottom of each leg, tracking the same swing.
+        g.fillRect(cx - 7, oy + 56 + swing, 6, 4);
+        g.fillRect(cx + 1, oy + 56 - swing, 6, 4);
+        break;
+    }
+  }
+
   /**
    * Loads a character spritesheet at whatever frame size its rig declares.
    *
    * Replaces four near-identical `load.spritesheet(key, path, {frameWidth:
-   * 16, frameHeight: 16})` blocks plus the 21x32 skin loop - the frame size
+   * 16, frameHeight: 16})` blocks plus the old 21x32 skin loop - the frame size
    * is now read off the rig descriptor rather than repeated as a literal at
    * every call site, which is what makes a fourth rig (LPC's 64x64) a
    * one-argument change instead of a new copy of the loader.

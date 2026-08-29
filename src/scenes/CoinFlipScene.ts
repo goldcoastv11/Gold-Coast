@@ -164,7 +164,7 @@ export class CoinFlipScene extends Phaser.Scene {
 
     // Onboarding tutorial's "Play a Game" hands-on step - per user
     // direction, WALK AWAY needs to be unclickable here: it exits back to
-    // the Overworld WITHOUT setting tutorialResumeAtSkinAttendant (by
+    // the Overworld WITHOUT setting tutorialResumeAtItemShop (by
     // design - leaving without playing shouldn't count as "played"), so
     // using it mid-tutorial silently dropped the player out of the
     // tutorial with no Skin Attendant step ever appearing. Disabling it
@@ -318,11 +318,11 @@ export class CoinFlipScene extends Phaser.Scene {
     // (win OR lose, either counts as "played") just resolved for real, so
     // the tutorial's task here is done. Let the player see this result for
     // a beat, then send them back to the Overworld to resume at the Skin
-    // Attendant step - see gameState.tutorialResumeAtSkinAttendant's doc
+    // Attendant step - see gameState.tutorialResumeAtItemShop's doc
     // comment and OverworldScene.create()'s resume check.
     if (gameState.tutorialAwaitingGamePlay) {
       gameState.tutorialAwaitingGamePlay = false;
-      gameState.tutorialResumeAtSkinAttendant = true;
+      gameState.tutorialResumeAtItemShop = true;
       // Re-disable right away (already re-enabled above, matching the
       // normal non-tutorial flow) so a second flip can't slip in during
       // the delay below and race the scene transition.

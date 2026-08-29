@@ -21,6 +21,7 @@ import {
   petTrailOffset,
   resolveRig
 } from "./characterRig";
+import { WARDROBE_CATALOG } from "./wardrobeCatalog";
 
 /**
  * These are REGRESSION tests, not descriptive ones.
@@ -30,8 +31,14 @@ import {
  * createLegacySkinWalkAnims' `start = row * 3` ranges, OverworldScene's
  * idleFrameForDir / applyPlayerBody / applyPlayerScale / updatePetFollow),
  * NOT recomputed from the rig descriptors. That is the entire point: if the
- * descriptors ever drift, these fail, and the 17 purchasable skins cannot
- * silently start moonwalking or facing the wrong way.
+ * descriptors ever drift, these fail, and a character cannot silently start
+ * moonwalking or facing the wrong way.
+ *
+ * LEGACY_SKIN_RIG's values are still pinned here even though no sheet uses
+ * that rig any more (the 17 skins it backed were removed with the layered
+ * wardrobe): it remains resolveRig's documented fallback for an
+ * unregistered sheet, so these literals are the record of what that
+ * fallback actually is.
  */
 describe("legacy rigs are byte-for-byte what they were before the refactor", () => {
   it("reproduces createKenneyWalkAnims' DIRECTION_FRAMES exactly", () => {
@@ -165,11 +172,23 @@ describe("LPC rig matches the generator's published layout", () => {
 });
 
 describe("rig resolution", () => {
-  it("resolves every purchasable skin sheet to the legacy rig", () => {
+  // Replaces "resolves every purchasable skin sheet to the legacy rig".
+  // The 17 skin sheets are gone; every wardrobe piece that replaced them is
+  // an LPC sheet, and this is what guarantees adding a catalogue entry is
+  // the whole integration - a piece nobody registered would silently fall
+  // through to the legacy-rig fallback below and be posed and sized as a
+  // 21x32 frame.
+  it("resolves every wardrobe piece to the LPC rig", () => {
+    expect(WARDROBE_CATALOG.length).toBeGreaterThan(0);
+    for (const piece of WARDROBE_CATALOG) {
+      expect(hasRegisteredRig(piece.id)).toBe(true);
+      expect(resolveRig(piece.id)).toBe(LPC_RIG);
+    }
+  });
+
+  it("no longer registers any of the removed skin sheets", () => {
     for (let i = 0; i <= 16; i++) {
-      const key = `skin_${String(i).padStart(3, "0")}`;
-      expect(hasRegisteredRig(key)).toBe(true);
-      expect(resolveRig(key)).toBe(LEGACY_SKIN_RIG);
+      expect(hasRegisteredRig(`skin_${String(i).padStart(3, "0")}`)).toBe(false);
     }
   });
 

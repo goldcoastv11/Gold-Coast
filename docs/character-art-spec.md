@@ -1,15 +1,20 @@
-# Character art spec — how to make the outfits
+# Character art spec — how to make the wardrobe pieces
 
 This is the recipe for producing character art for the Item Shop. Follow it in order.
 You do not need to know anything about game development to do this.
 
-**What we are building:** one character body, wearing different outfits. Today the shop has 17
-separate hand-made characters, each drawn from scratch. Instead we make **one body once**, then
-export it again and again wearing different clothes. Every outfit is then guaranteed to be the
-same person — same height, same walk, same face — which is what makes them feel like a wardrobe
-instead of 17 unrelated strangers.
+**What we are building:** one character body, wearing separate pieces of clothing that players buy
+individually — hair, a shirt, trousers, shoes, a hat. Each piece is its own picture file with a
+transparent background, and the game stacks them on top of each other in a fixed order to make a
+character.
 
-The code is already finished and waiting. It needs the picture files described below.
+This replaced the old system of 17 complete, separately-drawn characters. The advantage is that you
+draw a shirt **once** and it works on every body, in every combination, forever — instead of
+redrawing a whole character every time you want one new look.
+
+**The code is already finished and running.** Every piece in the shop currently shows simple
+placeholder art that the game draws itself. Each real file you produce replaces one placeholder.
+Nothing breaks while you work, and you can do one piece at a time.
 
 ---
 
@@ -47,106 +52,115 @@ pick.
 
 ## Step 3 — Build the base body — once
 
-Pick the body itself: body type, skin tone, hair, face. This is our character. **Write down every
-choice you make**, or better, do this:
+Pick the body itself: body type, skin tone, face. **Do not pick hair, and do not pick any
+clothing** — hair is its own separate piece now, and so is everything else.
 
 - Click **Export to Clipboard (JSON)** and paste the result into a text file. Save it as
   `body-recipe.json` somewhere you will find it again.
 
 That file is the character's DNA. It lets you reload the exact same body later instead of trying
-to remember which of forty hair options you picked. **You will need it for every outfit.**
+to remember which of forty options you picked. **You will need it for every single piece.**
 
-Do not add any clothing yet.
-
-## Step 4 — Export the first file: the plain body
+## Step 4 — Export the body itself
 
 1. Click **Spritesheet (PNG)**.
-2. Save the file as **`lpc_base.png`**.
+2. Save the file as **`body_default.png`**.
 
 The file will be **832 pixels wide by 3456 pixels tall**. If it is not, something went wrong —
 stop and check with the team rather than continuing.
 
-Do not use the "ZIP: Split by..." buttons. We need the single whole sheet, not the split versions.
-Also ignore the animation dropdown (Walk, Run, Jump, and so on) — that only changes the little
-preview on screen, not the file you download. The downloaded file always contains everything,
-which is what we want.
+Do not use the "ZIP: Split by..." buttons. We need the single whole sheet. Also ignore the
+animation dropdown (Walk, Run, Jump, and so on) — that only changes the little preview on screen,
+not the file you download.
 
-## Step 5 — Export one file per outfit
+## Step 5 — Export one file per piece — the important bit
 
-For each outfit you want to sell in the shop:
+This is where the new system differs from the old one, and it is the step that makes layering work.
 
-1. **Reload the base body.** Use **Import from Clipboard (JSON)** with your saved `body-recipe.json`.
-   This guarantees the body underneath is identical every time. **Do not** rebuild the body by
-   hand — even one different pixel and the outfits stop looking like the same person.
-2. Add the clothing layers for this outfit: shirt, trousers, shoes, hat, and so on.
-3. **Change clothing only.** Do not change the body, skin tone, hair or face.
+For **each individual piece** of clothing:
+
+1. **Reload the base body.** Use **Import from Clipboard (JSON)** with your saved
+   `body-recipe.json`. Do this every single time. Even one different pixel in the body and the
+   pieces stop lining up with each other.
+2. Add **exactly one** piece — just the shirt, or just the trousers, or just the hair. Nothing
+   else.
+3. **Now hide the body.** Set the body's own options to **none / transparent** so only the piece
+   you just added is visible. What you want to export is the clothing floating on an otherwise
+   empty sheet, with the body invisible underneath it.
 4. Click **Spritesheet (PNG)**.
-5. Save it as `lpc_` plus a short lowercase name, with underscores instead of spaces:
-   - `lpc_dealer.png`
-   - `lpc_high_roller.png`
-   - `lpc_security.png`
+5. Save it under the piece's exact name from the list in Step 7.
 
-Rules for the names: lowercase letters, numbers and underscores only. No spaces, no capitals, no
-apostrophes. The name is used inside the code, so it has to be plain.
+**Why step 3 matters:** if the body is baked into the shirt's picture, then every player wearing
+that shirt gets that body too, and the shirt can never be worn by a character with a different skin
+tone. Each file must contain *only* its own piece.
 
-Start with **three or four** outfits, not seventeen. We want to see them working in the game
-before you invest a weekend in the full set.
+**If the generator will not let you hide the body:** export the piece with the body visible anyway
+and say so. The pieces will still load and the game will still run — the layers just will not
+combine properly yet, and it is a fixable problem on our side. Do not let it stop you.
+
+Start with **three or four** pieces, not the whole list. We want to see them working in the game
+before you invest a weekend in the full set. A shirt, a pair of trousers and a hat is a perfect
+first batch — that is enough to see all three layers stacking.
 
 ## Step 6 — Download the credits file (do not skip this)
 
 Click **Credits (TXT)** and save it next to the images as `lpc_credits.txt`.
 
-Do this **once per outfit**, or once at the end with every layer you used across all outfits
-selected. If two outfits use different art, their credits differ.
+Do this **once per piece**, or once at the end with every layer you used across all pieces
+selected. If two pieces use different art, their credits differ.
 
 **This is a legal condition, not admin.** The OGA-BY art we allowed in Step 2 is free to use *on
 the condition that* we name the artist. The credits file is the list of who to name. Losing it
 means we cannot ship the art. Keep it with the images.
 
-## Step 7 — Where the files go
+## Step 7 — File names
 
-Put everything here, creating the folder if it does not exist:
+Put everything in `public/assets/characters/lpc/`, creating the folder if it does not exist.
 
-```
-public/assets/characters/lpc/
-    lpc_base.png
-    lpc_dealer.png
-    lpc_high_roller.png
-    lpc_credits.txt
-```
+The name of each file must match the piece it is for, exactly. These are the pieces the shop
+currently sells:
 
-## Step 8 — Tell the code the files exist
+| Slot | File names |
+|---|---|
+| Body | `body_default.png`, `body_tan.png`, `body_deep.png` |
+| Hair | `hair_short.png`, `hair_long.png`, `hair_ponytail.png`, `hair_bleach.png` |
+| Shirt | `torso_tee.png`, `torso_hoodie.png`, `torso_vest.png`, `torso_suit.png` |
+| Trousers | `legs_jeans.png`, `legs_slacks.png`, `legs_shorts.png` |
+| Shoes | `feet_sneakers.png`, `feet_boots.png`, `feet_dress.png` |
+| Hat | `hat_cap.png`, `hat_visor.png`, `hat_fedora.png` |
 
-One line per outfit, in `src/characterRig.ts`, in the list called `LPC_CHARACTER_SHEETS` (it is
-currently empty):
+You do not have to do all of them, or do them in order. Any file you add replaces that one piece's
+placeholder; every other piece carries on with its placeholder until you get to it.
+
+## Step 8 — Tell the code the file exists
+
+One line per piece, in `src/wardrobeCatalog.ts`. Find the piece in the list and add its filename:
 
 ```ts
-export const LPC_CHARACTER_SHEETS: LpcSheetDef[] = [
-  { textureKey: "lpc_base", file: "lpc_base.png" },
-  { textureKey: "lpc_dealer", file: "lpc_dealer.png" }
-];
+{ id: "torso_tee", slot: "TORSO", name: "Plain Tee", price: 200, file: "torso_tee.png", placeholderColor: 0x5b9fd6 },
 ```
 
-`textureKey` is the filename without `.png`. That is the whole integration — loading the image,
-slicing it into frames and building the four walking animations all happen automatically from
-that one line. If you would rather not touch the code, just say which files you added and it will
-be done for you.
+The only thing you are adding is `file: "torso_tee.png"`. That is the whole integration — loading
+the image, slicing it into frames and layering it onto the character all happen automatically.
+
+If you would rather not touch the code, just say which files you added and it will be done for you.
 
 ---
 
-## What happens after that
+## Adding a piece that is not in the list
 
-The characters will load and walk correctly in the overworld. Two things still need doing before
-they can be sold in the Item Shop, and both are engineering work, not art work:
+Want to sell something the table above does not cover — a second hoodie, a cowboy hat? It is two
+lines, no new code:
 
-1. The overworld's character-positioning code still assumes the old smaller character size. It has
-   to be pointed at the new size before an LPC character can be the player. Until then the new
-   sheets load and animate but are not selectable.
-2. The Item Shop needs entries for the new outfits, priced in Tickets.
+1. Add an entry to `WARDROBE_CATALOG` in **`src/wardrobeCatalog.ts`** (client) with a new id, its
+   slot, a name and a Tickets price.
+2. Add the same entry — id, slot, name, price — to **`server/src/wardrobeCatalog.ts`**.
 
-The existing 17 skins are untouched by all of this and keep working exactly as they do now. The
-new system runs alongside the old one — nothing is being replaced until there is real art to
-replace it with.
+Both files, or the shop and the server will disagree about the price. There is a test that fails if
+they drift.
+
+The piece appears in the shop immediately with placeholder art, and picks up real art whenever a
+matching PNG lands.
 
 ## If something looks wrong
 
@@ -155,7 +169,9 @@ replace it with.
 | Character walks facing the wrong direction | The file is not a standard full sheet — re-export with **Spritesheet (PNG)**, not a ZIP option |
 | Character stutters or slides once per step | Same cause as above |
 | Image is not 832 × 3456 | A ZIP/split export, or the download was interrupted |
-| Outfits look like different people | The body was rebuilt by hand instead of imported from `body-recipe.json` (Step 5.1) |
+| A piece shows a plain coloured block | That piece has no real art yet — it is still on its placeholder |
+| A piece covers the whole character | The body was not hidden during export (Step 5.3) |
+| Pieces do not line up with each other | The body was rebuilt by hand instead of imported from `body-recipe.json` (Step 5.1) |
 
 ---
 
@@ -166,9 +182,15 @@ preview canvas (832 × 3456):
 
 - Frame size 64 × 64; 13 frames per row; 54 rows.
 - Walk starts at **row 8**, four rows, in the order **up, left, down, right** — *not* down-first
-  like this project's two older rigs.
+  like this project's older rigs.
 - A walk row's **column 0 is the standing pose**; the walk cycle is **columns 1–8**. Including
   column 0 in the cycle is what produces the stutter in the table above.
 
 All of this is declared once in `LPC_RIG` in `src/characterRig.ts` and locked down by regression
 tests in `src/characterRig.test.ts`.
+
+Layering is declared in `src/wardrobeCatalog.ts`: each slot carries an explicit `z`, and
+`resolveLayers()` turns "what the player is wearing" into an ordered, render-ready stack. The
+overworld draws that stack via `src/ui/LayeredCharacter.ts`, which mirrors each layer's frame off
+the body sprite rather than running one animation per layer. Placeholder art for a piece with no
+file is generated in `BootScene.ensureWardrobePlaceholders()`.

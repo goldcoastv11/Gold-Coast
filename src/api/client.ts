@@ -170,8 +170,10 @@ import type {
   LoginResponse,
   MeResponse,
   PositionResponse,
-  BuySkinResponse,
-  EquipSkinResponse,
+  BuyWardrobePieceResponse,
+  EquipWardrobePieceResponse,
+  UnequipWardrobeSlotResponse,
+  WardrobeSlot,
   BuyItemResponse,
   EquipItemResponse,
   UnequipItemResponse,
@@ -232,14 +234,19 @@ export function savePosition(x: number, y: number): Promise<PositionResponse> {
   return request<PositionResponse>("/position", { method: "POST", body: { x, y } });
 }
 
-// ---- Skins ----
+// ---- Wardrobe (layered character pieces - replaced skins) ----
 
-export function buySkin(skinId: string): Promise<BuySkinResponse> {
-  return request<BuySkinResponse>("/skins/buy", { method: "POST", body: { skinId } });
+export function buyWardrobePiece(pieceId: string): Promise<BuyWardrobePieceResponse> {
+  return request<BuyWardrobePieceResponse>("/wardrobe/buy", { method: "POST", body: { pieceId } });
 }
 
-export function equipSkin(skinId: string): Promise<EquipSkinResponse> {
-  return request<EquipSkinResponse>("/skins/equip", { method: "POST", body: { skinId } });
+export function equipWardrobePiece(pieceId: string): Promise<EquipWardrobePieceResponse> {
+  return request<EquipWardrobePieceResponse>("/wardrobe/equip", { method: "POST", body: { pieceId } });
+}
+
+/** Takes off whatever is worn in `slot`. Rejected server-side for BODY, which can never be empty. */
+export function unequipWardrobeSlot(slot: WardrobeSlot): Promise<UnequipWardrobeSlotResponse> {
+  return request<UnequipWardrobeSlotResponse>("/wardrobe/unequip", { method: "POST", body: { slot } });
 }
 
 // ---- Items (accessories/pets) ----

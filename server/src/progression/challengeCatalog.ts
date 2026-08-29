@@ -1,7 +1,7 @@
 /**
  * Challenge definitions - the starter set.
  *
- * Code, not database rows (same call as skinCatalog.ts and itemCatalog.ts):
+ * Code, not database rows (same call as wardrobeCatalog.ts and itemCatalog.ts):
  * adding, retiring or retuning a challenge is then a code change and a
  * deploy, never a seed script or a destructive enum migration, and the
  * definitions are reviewable in a diff alongside the logic that reads them.

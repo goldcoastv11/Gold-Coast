@@ -24,30 +24,34 @@
  * src/characterRig.test.ts, which pins every one of those values against a
  * literal copied from the pre-refactor code.
  *
- * ## Migration status - READ THIS BEFORE ASSUMING A CONSUMER IS WIRED UP
+ * ## Migration status - COMPLETE
  *
- * BootScene is fully migrated: it loads every sheet at its rig's declared
- * frame size and builds every walk animation from the rig's frame indices.
+ * BootScene loads every sheet at its rig's declared frame size and builds
+ * every walk animation from the rig's frame indices.
  *
- * OverworldScene is NOT yet migrated and still carries its own `height <= 16`
- * guess in idleFrameForDir / applyPlayerBody / applyPlayerScale, plus the
- * duplicate layout knowledge in AMBIENT_IDLE_FRAME_FOR_DIR and
- * updatePetFollow, and the `displayHeight`-derived accessory/label anchoring.
- * That is deliberate and temporary - that file was being edited concurrently
- * by another workstream when this landed, and a 1800-line merge conflict was
- * not worth the risk for a change with no art to test against yet.
+ * OverworldScene is migrated too, as of the layered wardrobe. It previously
+ * carried its own `height <= 16` guess in idleFrameForDir / applyPlayerBody
+ * / applyPlayerScale, duplicate layout knowledge in
+ * AMBIENT_IDLE_FRAME_FOR_DIR and updatePetFollow, and `displayHeight`-
+ * derived accessory/label anchoring - all of which was left in place
+ * deliberately at the time, because that file was being edited concurrently
+ * by another workstream and there was no LPC art to test against yet.
  *
- * Everything that swap needs already exists below and is tested:
+ * The wardrobe is what forced the issue: the player's body is an LPC sheet
+ * now, and under the old guess it would have been sized and posed as a
+ * 32px-tall legacy frame - a hat worn through the chest, a physics box
+ * covering empty pixels. Each call site moved to the helper this file
+ * always intended for it:
  *   idleFrameForDir  -> idleFrame(rig, dir)
- *   AMBIENT_IDLE_... -> idleFrame(rig, dir) / firstWalkFrame(rig, dir)
+ *   AMBIENT_IDLE_... -> firstWalkFrame(rig, dir)
  *   applyPlayerBody  -> bodyBox(rig)
  *   applyPlayerScale -> rig.displayScale
  *   accessory anchor -> accessoryY(rig, y, displayHeight) / accessoryScale(...)
  *   pet follow/scale -> petTrailOffset(rig) / petScale(rig)
- * with the rig itself coming from resolveRig(sprite.texture.key,
- * sprite.height). Until that swap happens an LPC sheet will load and animate
- * correctly but must not be made the player's equipped skin - the positioning
- * code would size its body and hat as if it were a 32px-tall legacy frame.
+ * with the rig coming from resolveRig(sprite.texture.key, sprite.height).
+ * Every one of those returns bit-identical values for the pre-existing
+ * rigs - see characterRig.test.ts, which pins them against literals copied
+ * from the pre-refactor code.
  *
  * ## Frame numbering
  *
@@ -55,6 +59,8 @@
  * `frame = row * columns + col`. Every absolute frame index below is derived
  * from that, so `columns` has to be right or every index is wrong.
  */
+
+import { WARDROBE_CATALOG } from "./wardrobeCatalog";
 
 export type Direction = "down" | "left" | "right" | "up";
 
@@ -192,14 +198,21 @@ export const KENNEY_RIG: CharacterRig = {
 export const FLAT_RIG: CharacterRig = { ...KENNEY_RIG, id: "flat" };
 
 /**
- * The old Jephed-pack rig still used by all 17 purchasable skins and the
- * ambient bystanders - 21x32 frames, 3 columns (walk frame) x 4 rows
+ * The old Jephed-pack rig - 21x32 frames, 3 columns (walk frame) x 4 rows
  * (direction), row order [down, left, right, up].
  *
+ * NO SHEET USES THIS ANY MORE. It backed the 17 purchasable skins (and the
+ * ambient bystanders dressed in them), all of which were removed when the
+ * layered wardrobe landed. It is deliberately kept rather than deleted for
+ * two reasons: `resolveRig` still names it as the documented fallback for
+ * an unregistered sheet taller than 16px (which is what the pre-rig-system
+ * `height <= 16` guess did, so an unregistered sheet keeps degrading to
+ * exactly its historical behaviour rather than to something new), and
+ * characterRig.test.ts pins its every value as the regression record of
+ * what that old rig was. Do not point new art at it.
+ *
  * Reproduces createLegacySkinWalkAnims' `start = row * 3, end = start + 2`
- * exactly, and idleFrameForDir's `row * 3 + 1` (the middle frame). The
- * bystander code separately wants each direction's FIRST frame, which is now
- * read off `walkFrames[dir][0]` instead of its own duplicate table.
+ * exactly, and the old idleFrameForDir's `row * 3 + 1` (the middle frame).
  */
 export const LEGACY_SKIN_RIG: CharacterRig = {
   id: "legacy",
@@ -305,15 +318,17 @@ export const RIGS = {
 export type RigId = keyof typeof RIGS;
 
 /**
- * One LPC outfit sheet exported from the generator.
+ * One standalone LPC sheet - a WHOLE character on one sheet, outside the
+ * wardrobe system.
  *
- * DELIBERATELY EMPTY until real art exists. This is the whole "make the
- * codebase ready" seam: dropping a PNG into public/assets/characters/lpc/ and
- * adding one entry here is all it takes for BootScene to load it, build its
- * walk animations and register its rig. Nothing else has to change.
+ * Deliberately empty, and mostly superseded: the layered wardrobe
+ * (src/wardrobeCatalog.ts) is now the way character art enters the game, and
+ * a wardrobe piece needs a catalogue entry rather than a line here. This
+ * list survives for a full pre-composed character that isn't assembled from
+ * layers - an NPC, a dealer, a one-off - where there's nothing to mix and
+ * match and a single sheet is simpler.
  *
- * `textureKey` doubles as the walk-animation prefix (same convention as
- * SKIN_CATALOG, where a skin's id is its anim prefix).
+ * `textureKey` doubles as the walk-animation prefix.
  */
 export interface LpcSheetDef {
   textureKey: string;
@@ -338,11 +353,17 @@ const SHEET_RIGS = new Map<string, CharacterRig>([
   ["npc4_sheet", KENNEY_RIG]
 ]);
 
-// Every purchasable skin sheet (skin_000 .. skin_016) is the legacy rig.
-// Registered by loop rather than 17 hand-written lines so a new legacy skin
-// can never be half-registered.
-for (let i = 0; i <= 16; i++) {
-  SHEET_RIGS.set(`skin_${String(i).padStart(3, "0")}`, LEGACY_SKIN_RIG);
+// Every wardrobe piece - body, hair, shirt, trousers, shoes, hat - is an
+// LPC sheet. Registered by loop off the catalogue rather than by hand so a
+// newly-added piece can never be half-registered: adding a catalogue entry
+// is the whole integration, exactly as wardrobeCatalog.ts's header
+// promises.
+//
+// (This loop replaced the one that registered skin_000..skin_016 on
+// LEGACY_SKIN_RIG. Those 17 sheets no longer exist - see LEGACY_SKIN_RIG's
+// own comment above.)
+for (const piece of WARDROBE_CATALOG) {
+  SHEET_RIGS.set(piece.id, LPC_RIG);
 }
 
 for (const sheet of LPC_CHARACTER_SHEETS) {

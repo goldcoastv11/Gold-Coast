@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { BET_MAX, BET_MIN, gameState } from "./GameState";
+import { DEFAULT_BODY_PIECE_ID } from "./wardrobeCatalog";
 
 /**
  * Smoke tests for the current (pre-ledger) client-side GameState.
  *
  * NOTE for future maintainers: per CLAUDE.md, GC (spend to play) and
  * TICKETS (won from playing, spent in the Item Shop) are separate
- * ledgers, TICKETS must never be sold directly, skin purchases must use
+ * ledgers, TICKETS must never be sold directly, wardrobe purchases must use
  * TICKETS only, and all balance changes must go through a transaction
  * ledger. This file currently exercises the placeholder POC state module
  * as-is (it predates the economy team's ledger work - see file header
@@ -55,7 +56,12 @@ describe("GameState", () => {
       expect(result).toEqual({ ok: true, isNew: true });
       expect(gameState.goldCoins).toBe(1000);
       expect(gameState.tickets).toBe(0);
-      expect(gameState.unlockedSkins).toEqual(["player"]);
+      // Every player starts owning and wearing the free default body - the
+      // layered wardrobe's never-invisible-player guarantee (see
+      // src/wardrobeCatalog.ts). Everything else is bought a piece at a
+      // time with TICKETS, server-side.
+      expect(gameState.ownedWardrobe).toEqual([DEFAULT_BODY_PIECE_ID]);
+      expect(gameState.wornInSlot("BODY")).toBe(DEFAULT_BODY_PIECE_ID);
     });
 
     it("rejects an empty username or password", () => {
@@ -82,45 +88,32 @@ describe("GameState", () => {
     });
   });
 
-  describe("purchaseSkin - TICKETS only", () => {
+  /**
+   * The old `purchaseSkin - TICKETS only` block lived here. It covered
+   * GameState's LOCAL skin-purchase path, which no longer exists: the
+   * layered wardrobe that replaced skins is server-authoritative end to
+   * end, so buying a piece is an HTTP call (POST /wardrobe/buy) and its
+   * TICKETS-only, ledger-backed, GC-never-touched behaviour is proved
+   * against the real ledger in server/test/wardrobe.test.ts instead.
+   * Re-adding a local debit path here would be re-adding a way to spend
+   * TICKETS that the server never sees.
+   */
+  describe("wardrobe state", () => {
     beforeEach(() => {
       gameState.login("erin", "pw");
     });
 
-    it("deducts TICKETS and unlocks the skin on a successful purchase", () => {
-      gameState.resolveBet(1000); // seed a TICKETS balance, as if won from a game
-      const ok = gameState.purchaseSkin("skin_001"); // price 250
-      expect(ok).toBe(true);
-      expect(gameState.tickets).toBe(750);
-      expect(gameState.ownsSkin("skin_001")).toBe(true);
+    it("owns and wears the free default body before any server hydration", () => {
+      expect(gameState.ownsWardrobePiece(DEFAULT_BODY_PIECE_ID)).toBe(true);
+      expect(gameState.wornInSlot("BODY")).toBe(DEFAULT_BODY_PIECE_ID);
     });
 
-    it("fails and leaves balance untouched when TICKETS is insufficient", () => {
-      gameState.resolveBet(100);
-      const ok = gameState.purchaseSkin("skin_002"); // price 1000
-      expect(ok).toBe(false);
-      expect(gameState.tickets).toBe(100);
-      expect(gameState.ownsSkin("skin_002")).toBe(false);
+    it("does not claim to own a piece that was never bought", () => {
+      expect(gameState.ownsWardrobePiece("torso_suit")).toBe(false);
     });
 
-    it("fails on an unknown skin id", () => {
-      gameState.resolveBet(999999);
-      expect(gameState.purchaseSkin("not_a_real_skin")).toBe(false);
-    });
-
-    it("fails to re-purchase an already-owned skin", () => {
-      gameState.resolveBet(1000);
-      expect(gameState.purchaseSkin("skin_001")).toBe(true);
-      const before = gameState.tickets;
-      expect(gameState.purchaseSkin("skin_001")).toBe(false);
-      expect(gameState.tickets).toBe(before);
-    });
-
-    it("never touches GC - purchases are TICKETS only", () => {
-      gameState.goldCoins = 5000;
-      gameState.resolveBet(1000);
-      gameState.purchaseSkin("skin_001");
-      expect(gameState.goldCoins).toBe(5000);
+    it("reports nothing worn in an empty optional slot", () => {
+      expect(gameState.wornInSlot("HAT")).toBeNull();
     });
   });
 

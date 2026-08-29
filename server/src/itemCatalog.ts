@@ -1,6 +1,6 @@
 /**
  * Item catalog - server-side copy of casino-poc/src/itemCatalog.ts's
- * ITEM_CATALOG (same deliberate duplication as skinCatalog.ts - the client
+ * ITEM_CATALOG (same deliberate duplication as wardrobeCatalog.ts - the client
  * has no server package to import from, so this is a copy, not a divergent
  * source of truth. Keep the two in sync by hand - ids/prices/render fields
  * below are copied verbatim).

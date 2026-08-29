@@ -1,8 +1,8 @@
 /**
  * Item catalog - client-side copy of server/src/itemCatalog.ts's
- * ITEM_CATALOG (same deliberate duplication as GameState.ts's SKIN_CATALOG/
- * server/src/skinCatalog.ts - no shared package between client/server, see
- * skinCatalog.ts's own doc comment). Keep the two in sync by hand.
+ * ITEM_CATALOG (same deliberate duplication as src/wardrobeCatalog.ts /
+ * server/src/wardrobeCatalog.ts - no shared package between client/server,
+ * see that file's own doc comment). Keep the two in sync by hand.
  *
  * See server/src/itemCatalog.ts's doc comment for the "easier version to
  * test" rendering decisions this catalog implies:

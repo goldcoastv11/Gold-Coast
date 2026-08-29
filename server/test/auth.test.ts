@@ -23,9 +23,13 @@ describe("POST /auth/signup", () => {
     // No starting TICKETS - only ever won by playing a game.
     expect(res.body.user.tickets).toBe(0);
 
-    // Default skin/equip state.
-    expect(res.body.user.skinsOwned).toEqual(["player"]);
-    expect(res.body.user.equippedSkin).toBe("player");
+    // Default wardrobe state. A brand-new account owns exactly the free
+    // default body and is wearing it - with no rows written anywhere, since
+    // the default body is owned implicitly (see economy/wardrobe.ts). This
+    // is the "a new player is never invisible" guarantee, checked at the
+    // one moment it could go wrong.
+    expect(res.body.user.wardrobe.owned).toEqual(["body_default"]);
+    expect(res.body.user.wardrobe.equipped.BODY).toBe("body_default");
   });
 
   it("ignores any client-supplied multiplier - the server always resolves its own", async () => {
@@ -101,14 +105,16 @@ describe("GET /me", () => {
     expect(badAuth.status).toBe(401);
   });
 
-  it("returns balances, skins, equipped skin, and position for the authenticated user", async () => {
+  it("returns balances, wardrobe, and position for the authenticated user", async () => {
     const { token } = await signupUser();
     const res = await request(app).get("/me").set(authed(token));
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      skinsOwned: ["player"],
-      equippedSkin: "player",
+      wardrobe: {
+        owned: ["body_default"],
+        equipped: { BODY: "body_default" }
+      },
       lastPosition: null
     });
   });
