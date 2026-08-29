@@ -108,7 +108,17 @@ export class LayeredCharacter {
 
   /**
    * Pulls every overlay onto the base sprite's current position, scale,
-   * frame and visibility. Call once per frame, after the base has moved.
+   * frame and visibility.
+   *
+   * Call once per frame, and specifically from a point that runs AFTER
+   * Arcade Physics has finished writing this frame's movement into the
+   * base sprite's x/y - Phaser only does that in the physics plugin's own
+   * POST_UPDATE handler, which runs after the scene's update() method
+   * returns. Calling this from inside update() (or anything it calls, like
+   * a movement handler) reads last frame's position instead of this one's,
+   * which is exactly the "clothes trail the body by one frame" bug this
+   * class exists to avoid. OverworldScene's caller registers its own
+   * POST_UPDATE listener for this reason - see the comment where it does.
    *
    * Copying the frame index is what keeps the layers in lockstep with the
    * walk cycle - see this file's header on why that beats one animation per
