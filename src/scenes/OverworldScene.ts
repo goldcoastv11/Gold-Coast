@@ -1976,7 +1976,20 @@ export class OverworldScene extends Phaser.Scene {
         // more visual noise competing with the now-white game cabinets for
         // attention than an intentional accent. One flat, quiet fill lets
         // the furniture be the thing your eye lands on.
-        const key = inRug ? "carpet_blue" : "floor_tan";
+        //
+        // Detail pass: the plaza (NOT the rug - that stays one uniform fill
+        // per the direction above) now mixes in a second paving slab,
+        // `floor_tan_b`, so the 16px stamp doesn't repeat identically 4480
+        // times. Thin and deterministic: a cheap integer hash of the tile
+        // coordinates, roughly 1 tile in 7, so the variation reads as
+        // natural stonework rather than a pattern, and the same tile always
+        // gets the same slab across scene reloads. Both slabs share their
+        // edge joints, so this cannot produce a visible seam.
+        const key = inRug
+          ? "carpet_blue"
+          : (x * 7 + y * 13 + ((x * y) % 5)) % 7 === 0
+            ? "floor_tan_b"
+            : "floor_tan";
         this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key);
       }
     }

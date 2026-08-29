@@ -96,8 +96,35 @@ const PALETTE = {
   /** Warm sandstone plaster - the perimeter wall (was dark navy brick 0x161c30). */
   wall: 0xc9a27a,
   /** Mortar/course line on the wall, a shade deeper than `wall` (was a near-black 0x0a0e1a seam). */
-  wallLine: 0xa8825d
+  wallLine: 0xa8825d,
+
+  // --- Shading tokens (detail pass) ---------------------------------------
+  // Every surface in this file used to be a FLAT fill inside an outline: no
+  // light direction, no volume, no material. That - not the pixel count - is
+  // what made the floor read as blocky next to hand-drawn reference art. The
+  // world is drawn 1:1 into the 800x600 canvas (TILE is 16 and every tile
+  // image is a 16px texture at scale 1; cabinets are 48x64 textures at scale
+  // 1), so a bigger texture at the same world size would add no visible
+  // pixels at all - it would just be resampled straight back down by
+  // `pixelArt: true`'s NEAREST filter, which drops rows rather than blending
+  // them. The detail therefore has to come from USING the pixels that are
+  // already there: a consistent light direction (top-left), a shadow side,
+  // a contact shadow, and real material texture (paving joints, brick
+  // courses, weave, screen glass).
+  //
+  // These two are drawn at low alpha over whatever is beneath them, so one
+  // pair works on every surface regardless of its base colour.
+  /** Warm white, used at low alpha as the lit (top-left) edge of a form. */
+  litEdge: 0xfffaf0,
+  /** The outline brown, used at low alpha as the shaded (bottom-right) edge and as contact shadow. */
+  shadeEdge: 0x3d2a1e
 } as const;
+
+/** Light comes from the top-left, consistently, on every surface in this file. */
+const LIT_ALPHA = 0.28;
+const SHADE_ALPHA = 0.22;
+/** Contact shadow cast on the floor directly under a piece of furniture. */
+const CONTACT_SHADOW_ALPHA = 0.16;
 
 export class BootScene extends Phaser.Scene {
   constructor() {
@@ -278,8 +305,7 @@ export class BootScene extends Phaser.Scene {
   }
 
   /**
-   * Main plaza floor tile, 16x16 - warm sunlit sand with a faint deeper
-   * fleck pattern so it doesn't read as a dead flat field. Drawn
+   * Main plaza floor tile, 16x16 - warm sunlit sandstone paving. Drawn
    * procedurally (see class doc comment) instead of a loaded PNG.
    *
    * "Warm Daylight" pass: this is the single largest surface in the game by
@@ -289,24 +315,69 @@ export class BootScene extends Phaser.Scene {
    * rule is inverted here (PALETTE.floorFleck is darker than PALETTE.floor);
    * see floorFleck's own comment - the underlying rule being kept is "the
    * fleck has to actually be visible," which flips with the base's lightness.
-   * Still low-contrast and small, so it stays texture rather than pattern.
+   *
+   * Detail pass: this was a flat fill plus three 1px specks - repeated 4480
+   * times across the map, which is precisely why the ground read as a dead
+   * field rather than a surface. It is now a real paving slab: a joint along
+   * two edges (so consecutive tiles form a visible grid rather than one
+   * continuous smear), a lit top-left bevel and shaded bottom-right bevel
+   * inside the joint, and grain. All of it stays deliberately low-contrast -
+   * the founder's standing direction on this surface is "quieter, so the
+   * games pop," so the goal here is texture you feel rather than a pattern
+   * you look at.
+   *
+   * `variant` 1 splits the slab into two courses, giving the plaza a second
+   * paver shape to break up the 16px repeat (see buildFloor, which sprinkles
+   * it thinly). Both variants share the same edge joints, so they tile
+   * against each other seamlessly in any arrangement.
    */
-  private createFloorTanTexture() {
+  private drawPavingTile(key: string, variant: 0 | 1) {
     const s = 16;
     const g = this.add.graphics();
+
     g.fillStyle(PALETTE.floor, 1);
     g.fillRect(0, 0, s, s);
+
+    // Joints along the top and left edges only - the neighbouring tile
+    // supplies the other two, so the grid never doubles up into a 2px seam.
     g.fillStyle(PALETTE.floorFleck, 1);
-    g.fillCircle(4, 4, 0.9);
-    g.fillCircle(11, 9, 0.9);
-    // Third speck: was `cream at 0.1`, i.e. a near-white dot, which was a
-    // visible sparkle on a near-black floor and is completely invisible on a
-    // light sand one. Flipped to a very faint warm-brown speck for the same
-    // reason the flecks above flipped.
-    g.fillStyle(PALETTE.outline, 0.06);
-    g.fillCircle(8, 13, 0.8);
-    g.generateTexture("floor_tan", s, s);
+    g.fillRect(0, 0, s, 1);
+    g.fillRect(0, 0, 1, s);
+
+    // Bevel inside the joint: lit on the top-left, shaded on the bottom
+    // right. This is the whole reason the slab reads as raised.
+    g.fillStyle(PALETTE.litEdge, 0.35);
+    g.fillRect(1, 1, s - 1, 1);
+    g.fillRect(1, 1, 1, s - 1);
+    g.fillStyle(PALETTE.shadeEdge, 0.1);
+    g.fillRect(1, s - 1, s - 1, 1);
+    g.fillRect(s - 1, 1, 1, s - 1);
+
+    if (variant === 1) {
+      // A second course line across the middle, with its own bevel - the
+      // same slab broken into two bricks.
+      g.fillStyle(PALETTE.floorFleck, 1);
+      g.fillRect(1, 8, s - 1, 1);
+      g.fillStyle(PALETTE.litEdge, 0.3);
+      g.fillRect(1, 9, s - 1, 1);
+    }
+
+    // Grain. Kept to a handful of 1px specks at very low contrast.
+    g.fillStyle(PALETTE.floorFleck, 0.7);
+    g.fillRect(5, 5, 1, 1);
+    g.fillRect(11, 10, 1, 1);
+    g.fillRect(8, 13, 1, 1);
+    g.fillStyle(PALETTE.shadeEdge, 0.07);
+    g.fillRect(12, 4, 2, 1);
+    g.fillRect(4, 11, 2, 1);
+
+    g.generateTexture(key, s, s);
     g.destroy();
+  }
+
+  private createFloorTanTexture() {
+    this.drawPavingTile("floor_tan", 0);
+    this.drawPavingTile("floor_tan_b", 1);
   }
 
   /**
@@ -324,13 +395,28 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     g.fillStyle(PALETTE.rug, 1);
     g.fillRect(0, 0, s, s);
+
+    // Detail pass: this used to be a flat terracotta fill with four 1px
+    // dots on it. It is now a woven WEAVE - alternating warp and weft
+    // threads, one pixel each - which is what makes a rug read as fabric
+    // instead of paint. Deliberately kept to a 2px period and very low
+    // contrast: at this scale the eye reads it as material, not as stripes,
+    // and the founder's direction on this surface is "quieter."
+    g.fillStyle(PALETTE.rugFleck, 0.55);
+    for (let x = 0; x < s; x += 2) g.fillRect(x, 0, 1, s);
+    g.fillStyle(PALETTE.litEdge, 0.05);
+    for (let y = 1; y < s; y += 2) g.fillRect(0, y, s, 1);
+
+    // A few slubs in the weave so it isn't perfectly mechanical, plus the
+    // original faint coral/ivory specks.
     g.fillStyle(PALETTE.rugFleck, 1);
-    g.fillCircle(4, 4, 0.9);
-    g.fillCircle(12, 12, 0.9);
-    g.fillStyle(PALETTE.coral, 0.22);
-    g.fillCircle(9, 5, 0.9);
-    g.fillStyle(PALETTE.cream, 0.16);
-    g.fillCircle(13, 8, 0.7);
+    g.fillRect(4, 4, 1, 1);
+    g.fillRect(12, 12, 1, 1);
+    g.fillStyle(PALETTE.coral, 0.2);
+    g.fillRect(9, 5, 1, 1);
+    g.fillStyle(PALETTE.cream, 0.14);
+    g.fillRect(13, 8, 1, 1);
+
     g.generateTexture("carpet_blue", s, s);
     g.destroy();
   }
@@ -358,13 +444,35 @@ export class BootScene extends Phaser.Scene {
   private createWallTexture() {
     const s = 16;
     const g = this.add.graphics();
-    g.fillStyle(PALETTE.wall, 1);
+
+    // Mortar bed, then the blocks laid on top of it - the opposite of the
+    // previous version, which filled the tile and stroked two rectangles
+    // over it (giving two outlined boxes, not masonry).
+    g.fillStyle(PALETTE.wallLine, 1);
     g.fillRect(0, 0, s, s);
-    g.lineStyle(1, PALETTE.wallLine, 1);
-    g.strokeRect(0, 0, s, 8);
-    g.strokeRect(0, 8, s, 8);
+
+    // Running bond: a full block on the upper course, two half blocks on
+    // the lower one, so the vertical joints stagger tile-to-tile instead of
+    // stacking into one continuous seam down the wall.
+    const block = (x: number, y: number, bw: number, bh: number) => {
+      g.fillStyle(PALETTE.wall, 1);
+      g.fillRect(x, y, bw, bh);
+      g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+      g.fillRect(x, y, bw, 1);
+      g.fillStyle(PALETTE.shadeEdge, 0.13);
+      g.fillRect(x, y + bh - 1, bw, 1);
+      g.fillRect(x + bw - 1, y, 1, bh);
+    };
+    block(0, 1, s, 6);
+    block(0, 9, 7, 6);
+    block(8, 9, 8, 6);
+
+    // Painted skirting along the base, as before.
     g.fillStyle(PALETTE.coral, 1);
     g.fillRect(0, s - 2, s, 2);
+    g.fillStyle(PALETTE.litEdge, 0.3);
+    g.fillRect(0, s - 2, s, 1);
+
     g.generateTexture("wall", s, s);
     g.destroy();
   }
@@ -402,8 +510,34 @@ export class BootScene extends Phaser.Scene {
    * on top between the two calls.
    */
   private drawCabinetBody(g: Phaser.GameObjects.Graphics, w: number, h: number) {
+    // Contact shadow on the floor under the cabinet. Without one, every
+    // cabinet looked pasted onto the floor rather than standing on it - the
+    // single cheapest thing that makes a top-down floor read as having depth.
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillEllipse(w / 2, h - 3, w - 10, 7);
+
     g.fillStyle(PALETTE.cabinet, 1);
     g.fillRoundedRect(4, 10, w - 8, h - 16, 6);
+
+    // Shaded right-hand face, then the lit top-left edge: the two together
+    // are what turn a flat rounded rectangle into a box with a light on it.
+    // Both sit outside the 9..w-9 window every caller draws its screen into,
+    // so a caller's own content always lands on top of plain cabinet colour.
+    g.fillStyle(PALETTE.shadeEdge, SHADE_ALPHA);
+    g.fillRect(w - 10, 12, 4, h - 20);
+    g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+    g.fillRect(6, 12, 2, h - 22);
+
+    // Marquee header - the strip above the screen that a real cabinet
+    // carries its game's name on, finished with a gold pinstripe. Ends at
+    // y 15, one pixel clear of the screen bezel every caller draws at y 16
+    // (see drawCabinetScreen, which insets its bezel by 1px for exactly
+    // this reason).
+    g.fillStyle(PALETTE.cabinetDark, 1);
+    g.fillRoundedRect(7, 11.5, w - 14, 3.5, 1.5);
+    g.fillStyle(PALETTE.gold, 0.8);
+    g.fillRect(7, 14, w - 14, 1);
+
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(4, 10, w - 8, h - 16, 6);
   }
@@ -411,6 +545,47 @@ export class BootScene extends Phaser.Scene {
   private drawCabinetBase(g: Phaser.GameObjects.Graphics, w: number, h: number) {
     g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillRoundedRect(10, h - 10, w - 20, 8, 3);
+    // Lit top face of the plinth plus a shaded underside, so the base reads
+    // as a solid block the cabinet stands on rather than a painted stripe.
+    g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+    g.fillRect(12, h - 9, w - 24, 1);
+    g.fillStyle(PALETTE.shadeEdge, SHADE_ALPHA);
+    g.fillRect(12, h - 4, w - 24, 2);
+  }
+
+  /**
+   * The lit-glass screen panel every cabinet carries, drawn once here rather
+   * than as a bare `fillRoundedRect` repeated at eight call sites.
+   *
+   * Adds what a flat fill can't say: a dark bezel around the glass, a gloss
+   * band across the top, and faint scanlines. Callers still draw their own
+   * content on top afterwards, exactly as before.
+   */
+  private drawCabinetScreen(
+    g: Phaser.GameObjects.Graphics,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    color: number = PALETTE.screen
+  ) {
+    // Bezel - a dark recess the glass sits inside.
+    g.fillStyle(PALETTE.outline, 0.9);
+    g.fillRoundedRect(x - 1, y - 1, w + 2, h + 2, 5);
+
+    g.fillStyle(color, 1);
+    g.fillRoundedRect(x, y, w, h, 4);
+
+    // Scanlines - very low contrast, just enough to read as a lit panel
+    // rather than a painted rectangle.
+    g.fillStyle(PALETTE.outline, 0.09);
+    for (let i = 3; i < h - 1; i += 3) {
+      g.fillRect(x + 1, y + i, w - 2, 1);
+    }
+
+    // Gloss: a bright band across the top of the glass, fading out.
+    g.fillStyle(PALETTE.litEdge, 0.12);
+    g.fillRoundedRect(x + 1, y + 1, w - 2, Math.max(3, h * 0.28), 3);
   }
 
   /**
@@ -426,8 +601,7 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     const cell = 7;
     const gap = 2;
@@ -452,10 +626,19 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillEllipse(w / 2, h - 3, w - 10, 7);
+
     g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillRoundedRect(10, h - 18, w - 20, 14, 3);
     g.fillStyle(PALETTE.felt, 1);
     g.fillRoundedRect(2, h - 42, w - 4, 26, 6);
+    // Lit top edge / shaded lower edge on the felt bed, plus a shadow the
+    // dice below can sit in.
+    g.fillStyle(PALETTE.litEdge, 0.12);
+    g.fillRoundedRect(5, h - 40, w - 10, 3, 1.5);
+    g.fillStyle(PALETTE.shadeEdge, 0.16);
+    g.fillRoundedRect(5, h - 20, w - 10, 3, 1.5);
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(2, h - 42, w - 4, 26, 6);
 
@@ -502,8 +685,7 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     g.lineStyle(3, PALETTE.gold, 1);
     g.beginPath();
@@ -524,8 +706,10 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(2, 4, w - 4, h - 18, 6);
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillEllipse(w / 2, h - 3, w - 12, 7);
+
+    this.drawCabinetScreen(g, 2, 4, w - 4, h - 18, PALETTE.screen);
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(2, 4, w - 4, h - 18, 6);
 
@@ -560,8 +744,7 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     const cell = 5;
     const gap = 1.5;
@@ -635,8 +818,7 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     // two overlapping mini playing cards
     g.fillStyle(PALETTE.cream, 1);
@@ -694,9 +876,9 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawCabinetBody(g, w, h);
 
-    // screen
-    g.fillStyle(PALETTE.screenAlt, 1);
-    g.fillRoundedRect(9, 15, w - 18, 24, 4);
+    // screen - starts a row lower than it used to (15 -> 16) so it clears
+    // the marquee header drawCabinetBody now draws above it.
+    this.drawCabinetScreen(g, 9, 16, w - 18, 23, PALETTE.screenAlt);
 
     // five tiny cards on the screen
     const cardW = 4;
@@ -753,8 +935,7 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(w / 2 - 6, 2, 1.8);
     g.fillCircle(w / 2 + 6, 2, 1.8);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     // coral play triangle, centered on the screen
     g.fillStyle(PALETTE.coral, 1);
@@ -787,8 +968,7 @@ export class BootScene extends Phaser.Scene {
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeTriangle(w / 2, 1, w / 2 - 11, 12, w / 2 + 11, 12);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     // shirt icon, centered on the screen panel
     const cx = w / 2;
@@ -828,8 +1008,7 @@ export class BootScene extends Phaser.Scene {
     g.fillTriangle(cx, 1, cx - 6, 12, cx + 6, 12);
     g.fillTriangle(cx, 13, cx - 6, 3, cx + 6, 3);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     // Gold-trimmed notice board inset into the screen panel.
     g.lineStyle(1.5, PALETTE.gold, 1);
@@ -947,13 +1126,35 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
+    // Contact shadow, so the table stands on the floor instead of floating.
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillRoundedRect(5, 6, w - 8, h - 6, 12);
+
+    // Padded wood rail, lit along the top and shaded underneath.
     g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillRoundedRect(2, 2, w - 4, h - 4, 12);
+    g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+    g.fillRoundedRect(5, 4, w - 10, 3, 1.5);
+    g.fillStyle(PALETTE.shadeEdge, SHADE_ALPHA);
+    g.fillRoundedRect(5, h - 7, w - 10, 3, 1.5);
+    // Grain along the rail.
+    g.fillStyle(PALETTE.shadeEdge, 0.12);
+    for (let x = 12; x < w - 12; x += 7) {
+      g.fillRect(x, 3, 1, 4);
+      g.fillRect(x + 3, h - 7, 1, 4);
+    }
     g.lineStyle(3, PALETTE.outline, 1);
     g.strokeRoundedRect(2, 2, w - 4, h - 4, 12);
 
     g.fillStyle(PALETTE.felt, 1);
     g.fillRoundedRect(8, 8, w - 16, h - 16, 9);
+    // Felt sits BELOW the rail, so it catches a shadow from the rail on its
+    // top edge and a little bounce light at the bottom - the inset that
+    // makes the playing surface read as recessed rather than painted on.
+    g.fillStyle(PALETTE.shadeEdge, 0.18);
+    g.fillRoundedRect(9, 9, w - 18, 3, 1.5);
+    g.fillStyle(PALETTE.litEdge, 0.07);
+    g.fillRoundedRect(9, h - 13, w - 18, 2, 1);
     g.lineStyle(1, PALETTE.gold, 0.6);
     g.strokeRoundedRect(8, 8, w - 16, h - 16, 9);
 
@@ -992,10 +1193,27 @@ export class BootScene extends Phaser.Scene {
       g.closePath();
       g.fillPath();
     });
+    // Fret lines between the pockets, then the outer rim, hub and a lit
+    // sliver on the wheel's top-left - a spinning metal wheel, not a pie
+    // chart.
+    g.lineStyle(1, PALETTE.outline, 0.55);
+    for (let i = 0; i < colors.length; i++) {
+      const a = i * slice;
+      g.beginPath();
+      g.moveTo(cx, cy);
+      g.lineTo(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius);
+      g.strokePath();
+    }
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeCircle(cx, cy, radius);
+    g.lineStyle(1, PALETTE.litEdge, 0.4);
+    g.strokeCircle(cx, cy, radius - 2);
     g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillCircle(cx, cy, 4);
+    g.fillStyle(PALETTE.litEdge, 0.4);
+    g.fillCircle(cx - 1, cy - 1, 1.6);
+    g.lineStyle(1, PALETTE.outline, 1);
+    g.strokeCircle(cx, cy, 4);
 
     g.generateTexture("roulette_table", w, h);
     g.destroy();
@@ -1011,21 +1229,40 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
+    // Contact shadow, matching every other piece of floor furniture.
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillEllipse(w / 2 - 3, h - 3, w - 12, 7);
+
     g.fillStyle(PALETTE.cabinet, 1);
     g.fillRoundedRect(4, 6, w - 12, h - 10, 8);
+    // Same top-left light / bottom-right shade as drawCabinetBody, so this
+    // cabinet belongs to the same lit floor as the eight that use it.
+    g.fillStyle(PALETTE.shadeEdge, SHADE_ALPHA);
+    g.fillRect(w - 12, 10, 3, h - 20);
+    g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+    g.fillRect(6, 10, 2, h - 20);
+    g.fillRect(6, 8, w - 18, 2);
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(4, 6, w - 12, h - 10, 8);
 
-    g.fillStyle(PALETTE.screenAlt, 1);
-    g.fillRoundedRect(8, 12, w - 20, 26, 5);
+    // Reel window - recessed glass with a gloss band, drawn the same way
+    // the arcade cabinets' screens are.
+    this.drawCabinetScreen(g, 8, 12, w - 20, 26, PALETTE.screenAlt);
     g.lineStyle(1.5, PALETTE.outline, 1);
     g.strokeRoundedRect(8, 12, w - 20, 26, 5);
 
-    // three reel symbols
+    // Reel separators, so it reads as three spinning reels behind one pane.
+    g.fillStyle(PALETTE.outline, 0.35);
+    g.fillRect(16.5, 13, 1, 24);
+    g.fillRect(24.5, 13, 1, 24);
+
+    // three reel symbols, each with a small specular dot
     const reelColors = [PALETTE.coral, PALETTE.gold, PALETTE.mint];
     reelColors.forEach((color, i) => {
       g.fillStyle(color, 1);
       g.fillCircle(13 + i * 8, 25, 4.5);
+      g.fillStyle(PALETTE.litEdge, 0.45);
+      g.fillCircle(11.5 + i * 8, 23.5, 1.4);
       g.lineStyle(1, PALETTE.outline, 1);
       g.strokeCircle(13 + i * 8, 25, 4.5);
     });
@@ -1063,15 +1300,32 @@ export class BootScene extends Phaser.Scene {
     const h = 112;
     const g = this.add.graphics();
 
-    // wood rail
+    // Contact shadow under the table.
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillRoundedRect(9, 10, w - 14, h - 12, 22);
+
+    // wood rail, lit on top and shaded underneath, with grain
     g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillRoundedRect(6, 6, w - 12, h - 12, 22);
+    g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+    g.fillRoundedRect(24, 8, w - 48, 3, 1.5);
+    g.fillStyle(PALETTE.shadeEdge, SHADE_ALPHA);
+    g.fillRoundedRect(24, h - 12, w - 48, 3, 1.5);
+    g.fillStyle(PALETTE.shadeEdge, 0.12);
+    for (let y = 26; y < h - 26; y += 8) {
+      g.fillRect(7, y, 4, 1);
+      g.fillRect(w - 11, y + 4, 4, 1);
+    }
     g.lineStyle(3, PALETTE.outline, 1);
     g.strokeRoundedRect(6, 6, w - 12, h - 12, 22);
 
-    // felt
+    // felt, recessed below the rail (shadow along its top edge)
     g.fillStyle(PALETTE.felt, 1);
     g.fillRoundedRect(16, 16, w - 32, h - 32, 16);
+    g.fillStyle(PALETTE.shadeEdge, 0.18);
+    g.fillRoundedRect(22, 17, w - 44, 4, 2);
+    g.fillStyle(PALETTE.litEdge, 0.07);
+    g.fillRoundedRect(22, h - 21, w - 44, 3, 1.5);
     g.lineStyle(1.5, PALETTE.gold, 0.6);
     g.strokeRoundedRect(16, 16, w - 32, h - 32, 16);
 
@@ -1118,8 +1372,7 @@ export class BootScene extends Phaser.Scene {
     const g = this.add.graphics();
     this.drawCabinetBody(g, w, h);
 
-    g.fillStyle(PALETTE.screen, 1);
-    g.fillRoundedRect(9, 16, w - 18, 30, 4);
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
 
     const cx = w / 2;
     const cy = 31;
@@ -1147,9 +1400,14 @@ export class BootScene extends Phaser.Scene {
     const h = 64;
     const g = this.add.graphics();
 
+    g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+    g.fillEllipse(w / 2, h - 3, w - 16, 7);
+
     // base plinth
     g.fillStyle(PALETTE.cabinetDark, 1);
     g.fillRoundedRect(10, h - 14, w - 20, 10, 3);
+    g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+    g.fillRect(12, h - 13, w - 24, 1);
     g.lineStyle(2, PALETTE.outline, 1);
     g.strokeRoundedRect(10, h - 14, w - 20, 10, 3);
 
