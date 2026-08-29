@@ -111,7 +111,21 @@ export const DEFAULT_BODY_PIECE_ID = "body_default";
 
 export const WARDROBE_CATALOG: readonly WardrobePieceDef[] = [
   // --- BODY (free default + alternates) ---
-  { id: DEFAULT_BODY_PIECE_ID, slot: "BODY", name: "Classic", price: 0, placeholderColor: 0xffc999 },
+  // The one piece with REAL art. `body_base.png` is a genuine 832x3456 LPC
+  // sheet (13 columns x 54 rows of 64x64 frames - see
+  // public/assets/characters/lpc/CREDITS.txt for the authors and licences),
+  // so every player's default character is now 64x64 hand-drawn pixel art
+  // rather than the flat block placeholder below. Nothing else had to
+  // change to wire it in: declaring `file` is the whole integration, exactly
+  // as this file's header promises.
+  {
+    id: DEFAULT_BODY_PIECE_ID,
+    slot: "BODY",
+    name: "Classic",
+    price: 0,
+    file: "body_base.png",
+    placeholderColor: 0xffc999
+  },
   { id: "body_tan", slot: "BODY", name: "Tan", price: 150, placeholderColor: 0xe0a878 },
   { id: "body_deep", slot: "BODY", name: "Deep", price: 150, placeholderColor: 0x8d5a3b },
 

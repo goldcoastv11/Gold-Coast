@@ -283,29 +283,43 @@ export const LPC_RIG: CharacterRig = {
     down: (LPC_WALK_ROW + 2) * LPC_COLUMNS,
     right: (LPC_WALK_ROW + 3) * LPC_COLUMNS
   },
-  // An LPC character stands roughly 48px tall inside its 64px frame, vs the
-  // ~32px on-screen height both existing rigs land at. 0.7 puts it at ~34px -
-  // the same apparent size as today's characters next to unchanged 48x64
-  // cabinet furniture. This is the one number here that is a judgement call
-  // rather than a published constant, and it is the knob to turn if real LPC
-  // art reads too big or too small on the floor.
-  displayScale: 0.7,
+  // 1:1. This is the one scale at which LPC art appears exactly as it was
+  // drawn, and that is the whole point of moving to it - the game runs
+  // `pixelArt: true` (NEAREST filtering) on a fixed 800x600 canvas, so any
+  // non-integer scale resamples the art by dropping or doubling pixel rows,
+  // which on detailed pixel art breaks outlines and eats facial features.
+  // Downscaling a 64x64 sheet to fit the old 32px silhouette would have
+  // thrown away most of the extra detail it was adopted for.
+  //
+  // It was 0.7, chosen before there was any real art to look at, to keep an
+  // LPC character the same apparent size as the 16x16 flat rig it replaced
+  // (~34px). The character now stands ~47px on screen (measured: the art
+  // occupies y 15-62 of its 64px frame), which is deliberately more
+  // prominent - and better proportioned against the 64px-tall cabinets,
+  // which used to tower at twice the player's height.
+  displayScale: 1,
   // Feet footprint inside a 64px frame: the character is ~20px wide, centred,
   // standing on roughly y 52-60. Much narrower and much lower than
   // LEGACY_ERA_BODY, which assumed a frame the character fills edge to edge.
+  // Verified against the real sheet: the legs occupy x 21-42, y 52-62.
   body: {
     widthFrac: 20 / 64,
     heightFrac: 8 / 64,
     offsetXFrac: 22 / 64,
     offsetYFrac: 52 / 64
   },
-  // ~12px of empty headroom above the head inside the frame. Without this the
-  // hat/HUD label would float a full 12 device px above where the head
-  // actually is (the frame's top edge, not the character's).
-  headTopFrac: 12 / 64,
-  // An LPC head is ~14px wide in frame space vs ~8px on the legacy rigs, so
-  // the accessory art has to grow with it to still read as worn.
-  accessoryScaleMul: 1.7
+  // Empty headroom above the head inside the frame. Measured off the real
+  // sheet rather than estimated: the topmost non-transparent pixel of every
+  // walk frame is at y 15 (it was 12 as an estimate). Without this the
+  // hat/HUD label would float clear above where the head actually is (the
+  // frame's top edge, not the character's).
+  headTopFrac: 15 / 64,
+  // An LPC head is ~21px wide in frame space (measured) vs ~8px on the
+  // legacy rigs, so the accessory art has to grow with it to still read as
+  // worn. The accessory textures are 14px wide natively and used to be drawn
+  // at the flat rig's scale of 2 (28px) over a 16px-wide head; 2.4 keeps
+  // roughly that same hat-to-head ratio over the LPC head at displayScale 1.
+  accessoryScaleMul: 2.4
 };
 
 export const RIGS = {
