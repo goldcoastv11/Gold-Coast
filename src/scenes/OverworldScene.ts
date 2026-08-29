@@ -414,7 +414,10 @@ export class OverworldScene extends Phaser.Scene {
   /**
    * The worn wardrobe layers stacked on `player` (see
    * ui/LayeredCharacter.ts). Rebuilt on spawn and after any shop change;
-   * synced to the body's position and frame every frame.
+   * synced to the body's position and frame every frame from a POST_UPDATE
+   * listener registered in create() - see that listener's own comment for
+   * why POST_UPDATE specifically (not a call inside update()/
+   * handleMovement()) is what keeps the clothes from trailing the body.
    */
   private layeredCharacter?: LayeredCharacter;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -569,6 +572,38 @@ export class OverworldScene extends Phaser.Scene {
     this.player.setDamping(true);
     this.player.setDrag(0.85);
     this.layeredCharacter = new LayeredCharacter(this, this.player);
+
+    // Sync the worn layers from POST_UPDATE, not from inside update()/
+    // handleMovement(). Arcade Physics only writes its computed movement
+    // into the body's game object (this.player.x/y) during its own
+    // POST_UPDATE handler (Body.postUpdate, bound by the physics plugin to
+    // the scene's POST_UPDATE event) - which runs AFTER the scene's own
+    // update() method returns. A sync() called from inside update() (the
+    // original bug) therefore always read the PREVIOUS frame's position:
+    // the classic one-frame lag, visible as clothes trailing the body.
+    // Registering our own listener on POST_UPDATE - guaranteed to run after
+    // the physics plugin's, since Arcade Physics binds its POST_UPDATE
+    // handler during the plugin's boot, before this scene's create() ever
+    // runs, and Phaser's EventEmitter calls listeners in registration order
+    // - reads the position Arcade Physics wrote for THIS frame, so the
+    // layers can never be stale. This is tied to Phaser's own lifecycle
+    // rather than to call order inside our code, so it can't regress by a
+    // future reshuffle of update()/handleMovement().
+    //
+    // (A "true" structural fix - making the overlays real display-list
+    // children of a single transform, so there's no copy to get stale at
+    // all - would mean moving the physics body off `this.player` onto a
+    // wrapping Container, since Phaser Sprites can't parent other Sprites.
+    // That touches every collider, the camera follow target, and the body
+    // sizing/scale helpers below across this whole scene file - too large
+    // a blast radius for this bug, so this listener is the deliberate
+    // choice here.)
+    const syncLayeredCharacter = () => this.layeredCharacter?.sync();
+    this.events.on(Phaser.Scenes.Events.POST_UPDATE, syncLayeredCharacter);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.events.off(Phaser.Scenes.Events.POST_UPDATE, syncLayeredCharacter);
+    });
+
     this.applyPlayerWardrobe();
     this.accessoryBadge = undefined;
     this.petSprite = undefined;
@@ -1053,16 +1088,13 @@ export class OverworldScene extends Phaser.Scene {
       }
       // Animations are keyed off the BODY piece - the base sprite is the
       // only layer that plays one. Every other layer mirrors this sprite's
-      // frame index in layeredCharacter.sync() below.
+      // frame index in the POST_UPDATE listener registered in create() -
+      // see that listener's comment for why it's not synced right here.
       this.player.play(`${this.player.texture.key}_walk_${this.lastDir}`, true);
     } else {
       this.player.stop();
       this.player.setFrame(this.idleFrameForDir(this.lastDir));
     }
-
-    // Pull the worn layers onto the body's new position/frame. Must run
-    // after the frame above is set, or the clothes render one frame behind.
-    this.layeredCharacter?.sync();
   }
 
   /**
@@ -1132,6 +1164,11 @@ export class OverworldScene extends Phaser.Scene {
     this.layeredCharacter?.apply(gameState.equippedWardrobe);
     this.applyPlayerBody();
     this.applyPlayerScale();
+    // One extra sync right after rebuilding the stack, so a freshly-equipped
+    // piece doesn't sit at (0,0) for the instant before the next
+    // POST_UPDATE tick (see create()'s POST_UPDATE listener, which handles
+    // every ongoing per-frame sync). Harmless to call twice in one frame -
+    // sync() is a pure copy from the base sprite's current state.
     this.layeredCharacter?.sync();
   }
 
