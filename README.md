@@ -2,7 +2,7 @@
 
 A minimal, runnable proof of concept: log in with a username/password, then
 walk around a Pokémon-style pixel-art casino floor with nine playable games,
-an NPC to claim a Gold Coin bonus, and a skin shop.
+an NPC to claim a Gold Coin bonus, and an Item Shop.
 
 Built with **Phaser 3** + **TypeScript** + **Vite**.
 
@@ -60,16 +60,16 @@ Built with **Phaser 3** + **TypeScript** + **Vite**.
   game screen and the coin-claim panel, so they all look consistent
 - `src/GameState.ts` — placeholder client-side Gold Coin / Stake Coin
   balances (see the warning in that file — this is NOT how a real build
-  should handle money or RNG). Also holds the skin catalog: 17 purchasable
-  skins plus the free "Classic" default, each with a random price. Every
-  balance/skin change auto-saves to `localStorage` under the logged-in
+  should handle money or RNG). The wardrobe catalog lives in
+  `src/wardrobeCatalog.ts` - individual clothing pieces plus a free default
+  body. Every balance change auto-saves to `localStorage` under the logged-in
   username, so progress survives a page reload or closing the tab.
-- **Skin Attendant** (center-top of the map) — browse and buy skins you
-  don't own yet, now with a small preview sprite next to each entry so you
-  can see the outfit before buying
-- **Clothes button** (top-right corner, always on screen) — switch between
-  skins you already own without needing to find the attendant again, also
-  with a preview sprite per entry
+- **Item Shop** (center-top of the map) — browse and buy wardrobe pieces you
+  don't own yet, with a layered preview next to each entry so you
+  can see the piece on a character before buying
+- **Clothes button** (top-right corner, always on screen) — change any layer
+  you already own without needing to find the shop again, also
+  with a preview per entry
 - **Exit** — now a drawn door instead of a flat sign
 
 ## Running it
@@ -100,16 +100,20 @@ Output goes to `dist/`.
 ## Art credits
 
 The casino tileset (floor, walls, roulette table, slot machine, blackjack
-table, plant) and the 17 purchasable character skins (`SKIN_CATALOG` in
-`GameState.ts`) are from the **"2D Top-Down Pixel Art"** Casino tileset and
-matching character pack by Jephed, Game Between The Lines
-(https://gamebetweenthelines.com/), used under their free license. Per the
-license terms, keep this credit somewhere visible in the project (e.g. an
-in-game credits screen or your README) if you ship this publicly. (Task
-#24: the base player/chip-attendant-NPC/dealer sprites moved off this pack
-to Kenney's pack below as part of the "Bright Social-Hub" reskin — see
-`STYLE_GUIDE.md`'s scope note. The 17 skins have not been redrawn to match
-and still use this Jephed rig.)
+table, plant) is from the **"2D Top-Down Pixel Art"** Casino tileset by
+Jephed, Game Between The Lines (https://gamebetweenthelines.com/), used
+under their free license. Per the license terms, keep this credit somewhere
+visible in the project (e.g. an in-game credits screen or your README) if
+you ship this publicly. (Task #24: the base player/attendant-NPC/dealer
+sprites moved off this pack to Kenney's pack below as part of the "Bright
+Social-Hub" reskin — see `STYLE_GUIDE.md`'s scope note. The 17 purchasable
+character skins that also came from this pack were removed entirely when
+the layered wardrobe replaced them.)
+
+Wardrobe art comes from the **Universal LPC Spritesheet Generator**
+(CC0/OGA-BY layers only — see `docs/character-art-spec.md`, which covers the
+licence filter and the required credits file). Any piece without real art
+yet renders generated placeholder art instead.
 
 The base player, chip attendant NPC, and dealer character sprites are from
 the **"RPG Urban Pack"** by Kenney (https://kenney.nl/assets/rpg-urban-pack),
@@ -155,12 +159,12 @@ pixel-art casino and sitting down at a table to play feel good.
   checksum so it isn't literal plain text), and no protection against
   someone opening devtools and reading or editing any profile, including
   the "password" they'd need. It exists only so 2-3 people sharing a
-  device/link don't stomp on each other's coins and skins. It also means
+  device/link don't stomp on each other's coins. It also means
   progress lives in one specific browser on one specific device — clearing
   site data, using a different browser, or using incognito loses it, and
   it never syncs between devices. Fine for showing friends; do not build on
   top of this for anything real.
-- Balances/skins persist to `localStorage`, but the values themselves are
+- Balances persist to `localStorage`, but the values themselves are
   still entirely client-controlled — nothing stops a player from editing
   their own `localStorage` to give themselves coins. In a real build,
   **all currency balances and RNG outcomes must be computed server-side**

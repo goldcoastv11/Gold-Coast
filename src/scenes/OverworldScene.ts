@@ -1,6 +1,19 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
-import { listSkins, SkinDef } from "../economy/skinShop";
+import { DEFAULT_BODY_PIECE_ID } from "../wardrobeCatalog";
+import { LayeredCharacter } from "../ui/LayeredCharacter";
+import {
+  ACCESSORY_HEAD_GAP,
+  KENNEY_RIG,
+  accessoryScale,
+  accessoryY,
+  bodyBox,
+  firstWalkFrame,
+  idleFrame,
+  petScale,
+  petTrailOffset,
+  resolveRig
+} from "../characterRig";
 import { ITEM_CATALOG, ItemCategory, getItem, walkAnimPrefixForTexture } from "../itemCatalog";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
@@ -8,7 +21,7 @@ import { makeButton, makePanel, makeTextChip, TextChip, UIButton } from "../ui/u
 import {
   openShopCategoryMenu,
   openItemPanel,
-  openSkinPanel,
+  openWardrobeSlotMenu,
   ShopPanelHost
 } from "../ui/ShopPanel";
 import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel";
@@ -62,25 +75,33 @@ const AMBIENT_NPC_ARRIVE_DIST = 4;
 // Random dwell range (ms) at each waypoint before reversing direction.
 const AMBIENT_NPC_PAUSE_MIN_MS = 1000;
 const AMBIENT_NPC_PAUSE_MAX_MS = 2000;
-// Per user direction, ambient bystanders now wear real Item Shop skins
-// (see addAmbientNpc's call sites) instead of the generic Kenney NPC rig -
-// so this follows BootScene's createLegacySkinWalkAnims row-major layout
-// (row 0=down, 1=left, 2=right, 3=up, each row 3 frames), not
-// createKenneyWalkAnims' column layout the Kenney rig used. Frame = row*3
-// is each direction's idle pose (first frame of that direction's row) -
-// used both to seed an ambient NPC's starting facing from its idleFrame
-// and to pick the idle frame to show when it pauses.
+// Ambient bystanders are back on the spare Kenney NPC sheets
+// (npc2/npc3/npc4 - already loaded, already animated).
+//
+// They used to be dressed in real Item Shop skins, per an earlier user
+// direction, on the premise that seeing bystanders wear buyable outfits
+// advertised the shop. That premise died with the skins themselves: the
+// shop no longer sells whole characters, so there is no "outfit a
+// bystander is wearing" a player could go and buy. Dressing them from the
+// layered wardrobe instead was considered and rejected for now - it would
+// mean giving every bystander its own six-layer stack to keep in sync,
+// which is real per-frame cost for pure background flavour. The Kenney
+// sheets they were on before are still loaded and cost nothing.
+//
+// These frames are now derived from KENNEY_RIG rather than hardcoded (the
+// old table was a hand-copy of the legacy skin rig's row-major layout),
+// so they can't drift from the rig the sheets actually use.
 const AMBIENT_IDLE_FRAME_FOR_DIR: Record<"left" | "down" | "up" | "right", number> = {
-  down: 0,
-  left: 3,
-  right: 6,
-  up: 9
+  down: firstWalkFrame(KENNEY_RIG, "down"),
+  left: firstWalkFrame(KENNEY_RIG, "left"),
+  right: firstWalkFrame(KENNEY_RIG, "right"),
+  up: firstWalkFrame(KENNEY_RIG, "up")
 };
 const AMBIENT_DIR_FOR_IDLE_FRAME: Record<number, "left" | "down" | "up" | "right"> = {
-  0: "down",
-  3: "left",
-  6: "right",
-  9: "up"
+  [AMBIENT_IDLE_FRAME_FOR_DIR.down]: "down",
+  [AMBIENT_IDLE_FRAME_FOR_DIR.left]: "left",
+  [AMBIENT_IDLE_FRAME_FOR_DIR.right]: "right",
+  [AMBIENT_IDLE_FRAME_FOR_DIR.up]: "up"
 };
 
 /** One ambient bystander's simple two-point back-and-forth patrol state. See addAmbientNpc/updateAmbientNpcs. */
@@ -384,7 +405,18 @@ const RESERVED_STATIONS: Array<{ col: number; row: number; label: string }> = [
 ];
 
 export class OverworldScene extends Phaser.Scene {
+  /**
+   * The player's BODY layer - the physics sprite that actually moves,
+   * collides and is followed by the camera. Everything else the player is
+   * wearing is drawn over it by `layeredCharacter` below.
+   */
   private player!: Phaser.Physics.Arcade.Sprite;
+  /**
+   * The worn wardrobe layers stacked on `player` (see
+   * ui/LayeredCharacter.ts). Rebuilt on spawn and after any shop change;
+   * synced to the body's position and frame every frame.
+   */
+  private layeredCharacter?: LayeredCharacter;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private interactKey!: Phaser.Input.Keyboard.Key;
@@ -418,12 +450,12 @@ export class OverworldScene extends Phaser.Scene {
 
   /**
    * A false->true transition means some REAL modal/panel/flow is opening
-   * (chip claim confirm, skin shop, ad kiosk, etc.) - if a tutorial hands-on
+   * (kiosk claim confirm, Item Shop, etc.) - if a tutorial hands-on
    * step's highlight ring + instruction bubble happen to still be showing
    * at that moment, clear them right here, centrally, rather than needing
    * every single real-panel call site to remember to do it themselves
    * (confirmed via live testing: they were staying visible on top of the
-   * real panel the whole time you were, say, buying a skin - genuinely
+   * real panel the whole time you were, say, buying a shirt - genuinely
    * confusing/cluttered, not just a cosmetic nit). This mirrors the same
    * "fix it once at the boundary, not at every one of 18 call sites"
    * approach used for the scene-data retention bug - see create()'s doc
@@ -524,13 +556,20 @@ export class OverworldScene extends Phaser.Scene {
     // Player - spawn back where they were before entering a game, if known;
     // otherwise start near the bottom entrance/exit
     const spawn = gameState.lastPlayerPosition ?? { x: 40 * TILE, y: 46 * TILE };
-    const equippedTexture = this.getSkinDef(gameState.currentSkin).textureKey;
-    this.player = this.physics.add.sprite(spawn.x, spawn.y, equippedTexture, 1);
+    // The player sprite is now the BODY layer of a layered character - the
+    // physics body that moves and collides - with the rest of the wardrobe
+    // drawn over it by LayeredCharacter (see ui/LayeredCharacter.ts).
+    // Spawning it on the equipped body (falling back to the free default)
+    // rather than on a "skin" texture is what makes an invisible player
+    // impossible here: `equippedWardrobe.BODY` is always populated, both
+    // from the server and from GameState's own default.
+    const bodyTexture = gameState.wornInSlot("BODY") ?? DEFAULT_BODY_PIECE_ID;
+    this.player = this.physics.add.sprite(spawn.x, spawn.y, bodyTexture, idleFrame(resolveRig(bodyTexture), "down"));
     this.player.setCollideWorldBounds(true);
     this.player.setDamping(true);
     this.player.setDrag(0.85);
-    this.applyPlayerBody();
-    this.applyPlayerScale();
+    this.layeredCharacter = new LayeredCharacter(this, this.player);
+    this.applyPlayerWardrobe();
     this.accessoryBadge = undefined;
     this.petSprite = undefined;
     this.petLastDir = "down";
@@ -571,20 +610,20 @@ export class OverworldScene extends Phaser.Scene {
       fadeToScene(this, "StartMenuScene");
     });
 
-    // Item Shop (was "Skin Attendant" - rebrand only, same skin-purchase
-    // mechanic underneath) - buy new looks for your character. Per user
-    // direction, a booth/counter (BootScene.ts's createItemShopTexture,
-    // same cabinet scale as every other station) rather than a person
-    // character - it used to be "skin_000", one of the purchasable skins
-    // itself, standing in as the attendant. No setScale needed (unlike the
-    // old character sprite) since the texture is already native cabinet
-    // size, same as the Coin Kiosk above.
-    const skinAttendant = this.physics.add.staticSprite(40 * TILE, 18 * TILE, "item_shop_booth");
-    if (isTouchDevice()) skinAttendant.setScale(MOBILE_FURNITURE_SCALE_BOOST);
-    skinAttendant.refreshBody();
-    this.physics.add.collider(this.player, skinAttendant);
+    // Item Shop - buy new looks for your character, a piece at a time (see
+    // ui/ShopPanel.ts). Was the "Skin Attendant" back when this sold 17
+    // whole characters; the station and its position are unchanged, only
+    // what it sells. Per user direction it's a booth/counter (BootScene's
+    // createItemShopTexture, same cabinet scale as every other station)
+    // rather than a person character. No setScale needed (unlike the old
+    // character sprite it once was) since the texture is already native
+    // cabinet size, same as the Coin Kiosk above.
+    const itemShopBooth = this.physics.add.staticSprite(40 * TILE, 18 * TILE, "item_shop_booth");
+    if (isTouchDevice()) itemShopBooth.setScale(MOBILE_FURNITURE_SCALE_BOOST);
+    itemShopBooth.refreshBody();
+    this.physics.add.collider(this.player, itemShopBooth);
     this.registerStation(
-      skinAttendant,
+      itemShopBooth,
       "Item Shop",
       "Press E to browse the Item Shop",
       () => this.openShopCategoryMenu("shop")
@@ -616,18 +655,18 @@ export class OverworldScene extends Phaser.Scene {
     // (67,38), the standalone "Ad Kiosk" station's old spot, is now empty -
     // that station was retired and consolidated into the Coin Kiosk above.
 
-    // Ambient bystanders - purely decorative "social hub" flavor, dressed
-    // in real Item Shop skins (per user direction) instead of the old
-    // generic Kenney NPC rig - literally wearing outfits players can buy,
-    // reinforcing that the Item Shop sells real looks. No registerStation
-    // call - these aren't interactable, just people milling around the
-    // plaza. See addAmbientNpc's doc comment for the idle-frame convention.
-    // Patrol waypoints stay a couple tiles clear of every nearby
-    // GAME_STATIONS/decoration collider so the back-and-forth walk never
-    // clips through furniture - see updateAmbientNpcs for the movement.
-    this.addAmbientNpc(40, 31, "skin_003", 0, [37, 31], [43, 31]); // patrols between the two benches (37,31)/(43,31), by the Coin Kiosk
-    this.addAmbientNpc(35, 20, "skin_007", 0, [33, 20], [37, 20]); // short local patrol near the market stall (35,17)/Item Shop
-    this.addAmbientNpc(37, 47, "skin_012", 0, [37, 44], [37, 49]); // strolls the lamp-post path toward the exit
+    // Ambient bystanders - purely decorative "social hub" flavor. Back on
+    // the three spare Kenney NPC sheets (see AMBIENT_IDLE_FRAME_FOR_DIR's
+    // comment for why they moved off the Item Shop skins they briefly
+    // wore). No registerStation call - these aren't interactable, just
+    // people milling around the plaza. Patrol waypoints stay a couple tiles
+    // clear of every nearby GAME_STATIONS/decoration collider so the
+    // back-and-forth walk never clips through furniture - see
+    // updateAmbientNpcs for the movement.
+    const ambientIdle = AMBIENT_IDLE_FRAME_FOR_DIR.down;
+    this.addAmbientNpc(40, 31, "npc2_sheet", ambientIdle, [37, 31], [43, 31]); // patrols between the two benches (37,31)/(43,31), by the Coin Kiosk
+    this.addAmbientNpc(35, 20, "npc3_sheet", ambientIdle, [33, 20], [37, 20]); // short local patrol near the market stall (35,17)/Item Shop
+    this.addAmbientNpc(37, 47, "npc4_sheet", ambientIdle, [37, 44], [37, 49]); // strolls the lamp-post path toward the exit
 
     // Every playable game's furniture - declarative (see GAME_STATIONS
     // above) so new entries can be appended there instead of adding more
@@ -723,7 +762,7 @@ export class OverworldScene extends Phaser.Scene {
     this.hudText.container.setDepth(90);
 
     // "Clothes" corner button - always available, opens the wardrobe
-    // (switch between skins you already own). Y=155, not the original 30 -
+    // (change any layer you already own). Y=155, not the original 30 -
     // main.ts's Scale.ENVELOP-on-mobile crops the canvas to fill a wide
     // phone screen, so nothing needed on-screen can sit outside the
     // measured safe zone y=[130,470] any more (see uiHelpers.ts's
@@ -740,16 +779,16 @@ export class OverworldScene extends Phaser.Scene {
     // - A brand-new signup (see OverworldSceneData's doc comment) starts
     //   the whole thing from the top.
     // - Returning from a tutorial-triggered Coin Flip round (see
-    //   gameState.tutorialResumeAtSkinAttendant's doc comment - identifier
+    //   gameState.tutorialResumeAtItemShop's doc comment - identifier
     //   name predates the Item Shop rename, still means the same thing)
     //   resumes directly at the Item Shop hands-on step, skipping
     //   everything before it - the player already completed the Welcome/
     //   movement/Coin Kiosk/Play a Game steps in a PREVIOUS OverworldScene
     //   instance that no longer exists (this one's a fresh scene, entered
     //   via a real scene transition out of and back from CoinFlipScene).
-    if (gameState.tutorialResumeAtSkinAttendant) {
-      gameState.tutorialResumeAtSkinAttendant = false;
-      this.runHandsOnSkinAttendantStep();
+    if (gameState.tutorialResumeAtItemShop) {
+      gameState.tutorialResumeAtItemShop = false;
+      this.runHandsOnItemShopStep();
     } else if (shouldStartTutorial) {
       this.startOnboardingTutorial();
     }
@@ -894,7 +933,7 @@ export class OverworldScene extends Phaser.Scene {
         () => {
           gameState.tutorialAwaitingGamePlay = false;
           this.clearTutorialHighlight();
-          this.runHandsOnSkinAttendantStep();
+          this.runHandsOnItemShopStep();
         }
       );
       // No completion event to listen for here on the success path -
@@ -910,7 +949,7 @@ export class OverworldScene extends Phaser.Scene {
     });
   }
 
-  private runHandsOnSkinAttendantStep() {
+  private runHandsOnItemShopStep() {
     this.cameras.main.stopFollow();
     this.cameras.main.pan(40 * TILE, 18 * TILE, 700, "Sine.easeInOut", true, (_cam, progress) => {
       if (progress !== 1) return;
@@ -924,17 +963,17 @@ export class OverworldScene extends Phaser.Scene {
         18 * TILE,
         40,
         "Item Shop",
-        "Walk up to the Item Shop and press E, then buy a skin to wear it!",
+        "Walk up to the Item Shop and press E, then buy something to wear!",
         // Skip means "skip THIS step" (per user direction) - this is the
         // LAST step though, so "move to the next one" has nowhere left to
         // go and is the same as finishing.
         () => {
-          this.events.off("tutorial:skinPurchased", onPurchased);
+          this.events.off("tutorial:wardrobePurchased", onPurchased);
           this.clearTutorialHighlight();
           this.finishOnboardingTutorial();
         }
       );
-      this.events.once("tutorial:skinPurchased", onPurchased);
+      this.events.once("tutorial:wardrobePurchased", onPurchased);
     });
   }
 
@@ -976,9 +1015,14 @@ export class OverworldScene extends Phaser.Scene {
     // person) - the tracker itself moves further up to make room ONLY when
     // an accessory is actually equipped, so nothing shifts for anyone not
     // wearing one.
-    const headTopY = this.player.y - this.player.displayHeight / 2;
-    this.hudText.container.setPosition(this.player.x, headTopY - (this.accessoryBadge ? 32 : 6));
-    this.accessoryBadge?.setPosition(this.player.x, headTopY - 6);
+    // Anchored to where the head actually IS (the rig's headTopFrac), not
+    // to the top edge of the frame. Identical pixels for the legacy rigs,
+    // which all declare 0 headroom - but an LPC frame has ~12px of empty
+    // space above the head, so the old frame-top assumption would float the
+    // hat and the HUD label well clear of the character.
+    const headTop = accessoryY(this.playerRig, this.player.y, this.player.displayHeight) + ACCESSORY_HEAD_GAP;
+    this.hudText.container.setPosition(this.player.x, headTop - (this.accessoryBadge ? 32 : 6));
+    this.accessoryBadge?.setPosition(this.player.x, headTop - ACCESSORY_HEAD_GAP);
     this.updatePetFollow();
   }
 
@@ -1007,77 +1051,88 @@ export class OverworldScene extends Phaser.Scene {
       } else {
         this.lastDir = vel.y < 0 ? "up" : "down";
       }
-      this.player.play(`${gameState.currentSkin}_walk_${this.lastDir}`, true);
+      // Animations are keyed off the BODY piece - the base sprite is the
+      // only layer that plays one. Every other layer mirrors this sprite's
+      // frame index in layeredCharacter.sync() below.
+      this.player.play(`${this.player.texture.key}_walk_${this.lastDir}`, true);
     } else {
       this.player.stop();
       this.player.setFrame(this.idleFrameForDir(this.lastDir));
     }
+
+    // Pull the worn layers onto the body's new position/frame. Must run
+    // after the frame above is set, or the clothes render one frame behind.
+    this.layeredCharacter?.sync();
   }
 
   /**
-   * Task #24 (Kenney reskin) left two different character rigs in play:
-   * the free "Classic" skin is the new Kenney sheet (16x16, 4 cols
-   * [left,down,up,right] x 3 rows - see BootScene's createKenneyWalkAnims/
-   * DIRECTION_FRAMES), while every purchased skin is still the old
-   * Jephed-pack rig (21x32, 3 cols x 4 rows [down,left,right,up] - see
-   * createLegacySkinWalkAnims). Walking animations already resolve
-   * correctly either way since they're looked up by name
-   * (`${skin}_walk_${dir}`), but the idle pose sets a raw frame index, so
-   * it has to know which rig is currently equipped. Discriminated by frame
-   * height (16 vs 32) rather than skin id, so it keeps working if more
-   * skins land on either rig later.
+   * The rig the player's current body is drawn on.
+   *
+   * This scene used to guess the rig from the sprite's frame height
+   * (`height <= 16`) in three separate places, which worked only while
+   * exactly one rig was <= 16px tall. src/characterRig.ts replaced that
+   * guess with an explicit per-sheet declaration precisely so a fourth rig
+   * (LPC's 64x64, which the wardrobe uses) could land without silently
+   * mislabelling one of the others - the failure mode being a character
+   * that moonwalks or faces the wrong way rather than an error.
+   *
+   * That file's own header called this migration out as the remaining work
+   * and listed the replacement for each call site; the layered wardrobe is
+   * what finally needed it, since an LPC-bodied player really would have
+   * been sized and posed as a 32px-tall legacy frame under the old guess.
    */
+  private get playerRig() {
+    return resolveRig(this.player.texture.key, this.player.height);
+  }
+
+  /** The idle/standing frame for a direction, read off the player's declared rig. Replaces the old `height <= 16` branch. */
   private idleFrameForDir(dir: "down" | "left" | "right" | "up"): number {
-    if (this.player.height <= 16) {
-      // New Kenney rig: frame = row*4 + col, walk rows are [start,mid,end]
-      // 4 apart per direction (DIRECTION_FRAMES in BootScene) - mid frame
-      // is col + 4.
-      const col = { left: 0, down: 1, up: 2, right: 3 } as const;
-      return col[dir] + 4;
-    }
-    // Old Jephed rig: 3 cols/row, frame = row*3 + col; middle frame (index 1)
-    // of the current direction's row is the idle pose.
-    const row = { down: 0, left: 1, right: 2, up: 3 } as const;
-    return row[dir] * 3 + 1;
+    return idleFrame(this.playerRig, dir);
   }
 
   /**
    * Sizes/positions the player's physics body as a small "feet" footprint
-   * (not the full sprite) proportional to whichever texture is currently
-   * equipped - same width/height-fraction pattern addFurnitureStation uses
-   * for furniture. Needed (not just a fixed pixel size) because, per #24,
-   * SKIN_CATALOG now mixes two rig sizes (16x16 Kenney "Classic" vs 21x32
-   * legacy purchased skins) - fractions computed from the original 21x32
-   * tuning (14x10 body, 3.5/20 offset) reproduce that exact box for legacy
-   * skins and scale proportionally for the new 16x16 rig. Call again after
-   * switching skins (see openSkinPanel's "Wear" handler).
+   * rather than the full sprite, from the rig's own declared fractions
+   * (see characterRig.ts's bodyBox). Every rig states its own footprint, so
+   * this no longer has to assume a character fills its frame - an LPC
+   * character stands in the middle of a 64x64 frame with real empty space
+   * around it, which the old shared 21x32-derived fractions would have got
+   * badly wrong.
    */
   private applyPlayerBody() {
-    const fracW = 14 / 21;
-    const fracH = 10 / 32;
-    const fracOffX = 3.5 / 21;
-    const fracOffY = 20 / 32;
-    this.player.setSize(this.player.width * fracW, this.player.height * fracH);
-    this.player.setOffset(this.player.width * fracOffX, this.player.height * fracOffY);
+    const box = bodyBox(this.playerRig);
+    this.player.setSize(box.width, box.height);
+    this.player.setOffset(box.offsetX, box.offsetY);
   }
 
   /**
-   * Task #24 follow-up (flagged by "environment"/#23): the new Kenney rig's
-   * native frame is 16x16, vs. the legacy Jephed rig's 21x32 - rendered at
-   * 1:1 scale (as it always was, and still is for legacy skins) the new
-   * "Classic" character reads about half as tall as before, next to the
-   * new 16x16 floor tiles and the untouched 48x64-cabinet-scale furniture.
-   * A single fixed setScale can't be applied unconditionally though: it
-   * would also double-size any equipped legacy 21x32 skin, which
-   * applyPlayerBody's whole point is to keep looking exactly as it did
-   * pre-#24. So this branches the same way applyPlayerBody/idleFrameForDir
-   * do - by native frame height, not skin id - and only scales up the new
-   * 16x16 rig. Call alongside applyPlayerBody(), same two call sites
-   * (spawn + the "Wear" handler).
+   * Scales the player so every rig lands at roughly the same on-screen
+   * height regardless of its native resolution - the rig's declared
+   * `displayScale`, times the mobile size boost on touch devices.
+   *
+   * Was a `height <= 16 ? 2 : 1` branch, which is exactly the two values
+   * KENNEY_RIG/FLAT_RIG (2) and LEGACY_SKIN_RIG (1) now declare for
+   * themselves, so this is like-for-like for those - and correct, rather
+   * than accidental, for the LPC rig the wardrobe introduced.
    */
   private applyPlayerScale() {
-    const base = this.player.height <= 16 ? 2 : 1;
+    const base = this.playerRig.displayScale;
     this.player.setScale(isTouchDevice() ? base * MOBILE_CHAR_SCALE_BOOST : base);
+  }
+
+  /**
+   * Rebuilds the player's layered character from gameState.equippedWardrobe
+   * and re-tunes the body/scale for whatever rig the new body uses.
+   *
+   * The one entry point for "what the player looks like changed" - called
+   * on spawn and from the shop panel after any buy/equip/unequip, so those
+   * two paths can't drift apart.
+   */
+  private applyPlayerWardrobe() {
+    this.layeredCharacter?.apply(gameState.equippedWardrobe);
+    this.applyPlayerBody();
+    this.applyPlayerScale();
+    this.layeredCharacter?.sync();
   }
 
   /**
@@ -1101,10 +1156,20 @@ export class OverworldScene extends Phaser.Scene {
     const item = getItem(id);
     if (!item?.textureKey) return;
 
+    // Both the anchor and the scale come off the rig now: a rig with real
+    // headroom in its frame (LPC) needs the badge dropped to the actual
+    // head, and a rig with a wider head in frame space needs it scaled up
+    // to match, or the hat perches on top like a party favour instead of
+    // being worn. Legacy rigs declare 0 headroom and a 1x multiplier, so
+    // this is pixel-identical for them.
     this.accessoryBadge = this.add
-      .image(this.player.x, this.player.y - this.player.displayHeight / 2 - 6, item.textureKey)
+      .image(
+        this.player.x,
+        accessoryY(this.playerRig, this.player.y, this.player.displayHeight),
+        item.textureKey
+      )
       .setOrigin(0.5)
-      .setScale(this.player.scaleX)
+      .setScale(accessoryScale(this.playerRig, this.player.scaleX))
       .setDepth(91); // just above hudText's own 90
   }
 
@@ -1133,12 +1198,23 @@ export class OverworldScene extends Phaser.Scene {
     // it by lerping x/y directly every frame, no velocity/collision needed,
     // so there's no reason to pay for (or have to disable) an Arcade
     // Physics body it would never actually use.
-    this.petSprite = this.add.sprite(spawn.x, spawn.y, item.textureKey, 1).setScale(1.4).setDepth(5);
+    // Scale comes off the pet sheet's own rig rather than a hardcoded 1.4 -
+    // which is exactly what petScale(KENNEY_RIG) returns (2 * 0.7), so this
+    // is like-for-like today and stays correct if a pet ever ships on a
+    // different rig.
+    this.petSprite = this.add
+      .sprite(spawn.x, spawn.y, item.textureKey, 1)
+      .setScale(petScale(resolveRig(item.textureKey)))
+      .setDepth(5);
   }
 
   /** World point just behind the player's current facing direction - both applyEquippedPet()'s spawn point and updatePetFollow()'s per-frame target. */
   private petTrailTarget(): { x: number; y: number } {
-    const offset = 26;
+    // Was a flat 26px. petTrailOffset() returns exactly 26 for both the
+    // rigs the player has ever used, and scales the trail proportionally
+    // for a taller one (an LPC body) instead of leaving the pet walking
+    // through the player's shins.
+    const offset = petTrailOffset(this.playerRig);
     const dx = { left: 1, right: -1, up: 0, down: 0 }[this.lastDir];
     const dy = { left: 0, right: 0, up: 1, down: -1 }[this.lastDir];
     return { x: this.player.x + dx * offset, y: this.player.y + dy * offset };
@@ -1168,13 +1244,11 @@ export class OverworldScene extends Phaser.Scene {
       this.petSprite.play(`${prefix}_walk_${this.petLastDir}`, true);
     } else {
       this.petSprite.stop();
-      // Same idle-frame formula as idleFrameForDir() below, inlined rather
-      // than shared - that method is written against `this.player`
-      // specifically, and every pet texture is always the new 16x16 Kenney
-      // rig (never the legacy 21x32 one a purchased skin can be), so it
-      // doesn't need that method's dual-rig branch at all.
-      const col = { left: 0, down: 1, up: 2, right: 3 } as const;
-      this.petSprite.setFrame(col[this.petLastDir] + 4);
+      // Read off the pet sheet's own declared rig instead of the inlined
+      // copy of the Kenney idle-frame formula this used to carry. Same
+      // frame for today's pets; correct rather than coincidental if a pet
+      // ever ships on another rig.
+      this.petSprite.setFrame(idleFrame(resolveRig(this.petSprite.texture.key), this.petLastDir));
     }
   }
 
@@ -1182,23 +1256,19 @@ export class OverworldScene extends Phaser.Scene {
    * A purely decorative background character - not registered as an
    * Interactable (no "Press E" prompt/name label), just visual "social hub"
    * flavor that ambles along a fixed, predetermined two-point patrol (see
-   * updateAmbientNpcs). Per user direction, these are dressed in real Item
-   * Shop skins now (see call sites below) - `skinTextureKey` is a real
-   * `SKIN_CATALOG` entry's `textureKey` (== its `id`; see GameState.ts),
-   * same legacy 21x32 rig the player equips, at native scale (no
-   * setScale() needed - unlike the old Kenney rig this replaced, the
-   * legacy rig's native size already lands at the same on-screen height,
-   * per applyPlayerScale's doc comment). Dynamic body (physics.add.sprite,
-   * not staticSprite) since it now actually moves - refreshBody() is a
-   * no-op here (dynamic bodies auto-resync every frame) but kept for the
-   * same refreshBody() pattern the Coin Kiosk furniture above uses. Still
-   * collides with the player so it reads as a person, not a background
-   * decal.
+   * updateAmbientNpcs). `sheetKey` is a loaded character spritesheet -
+   * currently one of the spare Kenney NPC sheets (see the call sites and
+   * AMBIENT_IDLE_FRAME_FOR_DIR's comment). Dynamic body
+   * (physics.add.sprite, not staticSprite) since it actually moves -
+   * refreshBody() is a no-op here (dynamic bodies auto-resync every frame)
+   * but kept for the same refreshBody() pattern the Coin Kiosk furniture
+   * above uses. Still collides with the player so it reads as a person,
+   * not a background decal.
    *
-   * idleFrame follows createLegacySkinWalkAnims' row-major layout (see
-   * AMBIENT_IDLE_FRAME_FOR_DIR above) - the first frame of a direction's
-   * walk cycle. Used both as the spawn-time static frame and to seed which
-   * way the NPC is initially "facing" before its first patrol leg.
+   * `spawnFrame` is the first frame of a direction's walk cycle (see
+   * AMBIENT_IDLE_FRAME_FOR_DIR above). Used both as the spawn-time static
+   * frame and to seed which way the NPC is initially "facing" before its
+   * first patrol leg.
    *
    * waypointA/waypointB are [col, row] tile coordinates - the two ends of
    * the back-and-forth walk. The NPC starts idle at (col, row) (not
@@ -1207,19 +1277,24 @@ export class OverworldScene extends Phaser.Scene {
   private addAmbientNpc(
     col: number,
     row: number,
-    skinTextureKey: string,
-    idleFrame: number,
+    sheetKey: string,
+    spawnFrame: number,
     waypointA: [number, number],
     waypointB: [number, number]
   ) {
-    const npc = this.physics.add.sprite(col * TILE, row * TILE, skinTextureKey, idleFrame);
-    if (isTouchDevice()) npc.setScale(MOBILE_CHAR_SCALE_BOOST);
+    const npc = this.physics.add.sprite(col * TILE, row * TILE, sheetKey, spawnFrame);
+    // Scaled off the sheet's own rig, exactly like the player - these are
+    // 16x16 Kenney frames, which render at half height without it.
+    const base = resolveRig(sheetKey).displayScale;
+    npc.setScale(isTouchDevice() ? base * MOBILE_CHAR_SCALE_BOOST : base);
     npc.refreshBody();
     this.physics.add.collider(this.player, npc);
 
     this.ambientNpcs.push({
       sprite: npc,
-      animPrefix: skinTextureKey,
+      // Anim keys are built from the sheet's prefix ("npc2"), not its full
+      // texture key ("npc2_sheet") - see BootScene's createWalkAnims calls.
+      animPrefix: walkAnimPrefixForTexture(sheetKey),
       waypoints: [
         new Phaser.Math.Vector2(waypointA[0] * TILE, waypointA[1] * TILE),
         new Phaser.Math.Vector2(waypointB[0] * TILE, waypointB[1] * TILE)
@@ -1227,7 +1302,7 @@ export class OverworldScene extends Phaser.Scene {
       targetIndex: 0,
       // Stagger the initial departure a little so all 3 don't start/stop in lockstep.
       pausedUntil: this.time.now + Phaser.Math.Between(0, AMBIENT_NPC_PAUSE_MAX_MS),
-      lastDir: AMBIENT_DIR_FOR_IDLE_FRAME[idleFrame] ?? "down"
+      lastDir: AMBIENT_DIR_FOR_IDLE_FRAME[spawnFrame] ?? "down"
     });
   }
 
@@ -1272,11 +1347,6 @@ export class OverworldScene extends Phaser.Scene {
       npc.sprite.setVelocity(velocity.x, velocity.y);
       npc.sprite.play(`${npc.animPrefix}_walk_${npc.lastDir}`, true);
     }
-  }
-
-  private getSkinDef(id: string): SkinDef {
-    const catalog = listSkins();
-    return catalog.find((s) => s.id === id) ?? catalog[0];
   }
 
   private handleProximity() {
@@ -1780,8 +1850,8 @@ export class OverworldScene extends Phaser.Scene {
   private activeToast?: TextChip;
 
   /**
-   * Brief fading confirmation/error message, positioned above the skin
-   * shop panel but generic enough for any overworld panel flow (also used
+   * Brief fading confirmation/error message, positioned above the shop
+   * panel but generic enough for any overworld panel flow (also used
    * by the attendant claim's rare cooldown-race fallback, #29). Uses the
    * same rounded warm-cream chip (makeTextChip) as the HUD/prompt bubble,
    * rather than a flat CSS-rect Text background, so toast notifications
@@ -1821,15 +1891,15 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * The skin panel, the accessory/pet panel and the category picker that
-   * fronts them both now live in ui/ShopPanel.ts - they were ~580 lines of
+   * The wardrobe panels, the accessory/pet panel and the category picker
+   * that fronts them all live in ui/ShopPanel.ts - they were ~580 lines of
    * this file and are the same kind of thing as each other, not the same
    * kind of thing as the casino floor, the tutorial or the Coin Kiosk that
-   * surround them here. The panels are unchanged; only their address is.
+   * surround them here.
    *
-   * These three wrappers stay so the existing call sites (the Item Shop
-   * station, the Clothes corner button, and the tutorial) keep reading the
-   * way they always did.
+   * These wrappers stay so the existing call sites (the Item Shop station,
+   * the Clothes corner button, and the tutorial) keep reading the way they
+   * always did.
    */
   private openShopCategoryMenu(mode: "shop" | "wardrobe") {
     openShopCategoryMenu(this.shopPanelHost, mode);
@@ -1839,8 +1909,8 @@ export class OverworldScene extends Phaser.Scene {
     openItemPanel(this.shopPanelHost, category, mode);
   }
 
-  private openSkinPanel(mode: "shop" | "wardrobe") {
-    openSkinPanel(this.shopPanelHost, mode);
+  private openWardrobeSlotMenu(mode: "shop" | "wardrobe") {
+    openWardrobeSlotMenu(this.shopPanelHost, mode);
   }
 
   /**
@@ -1858,11 +1928,7 @@ export class OverworldScene extends Phaser.Scene {
       showToast: (message, color) => this.showToast(message, color),
       applyEquippedAccessory: () => this.applyEquippedAccessory(),
       applyEquippedPet: () => this.applyEquippedPet(),
-      applyPlayerSkin: (textureKey) => {
-        this.player.setTexture(textureKey, this.player.frame.name);
-        this.applyPlayerBody();
-        this.applyPlayerScale();
-      }
+      applyPlayerWardrobe: () => this.applyPlayerWardrobe()
     };
   }
 

@@ -322,7 +322,35 @@ case.
       double-cash-out guard - calling cashOut() again after an already-settled
       run is a no-op (balance unchanged). GC only, SC untouched.
 
-## Skin shop (floor's #11 - OverworldScene's Skin Attendant panel)
+## Layered wardrobe (Item Shop → Clothing)
+
+Replaced the skin shop below. A character is a stack of pieces over one
+shared body now, bought a layer at a time.
+
+- [ ] Item Shop → Clothing lists all six slots (Body, Trousers, Shoes,
+      Shirt, Hair, Hat), each showing what's currently worn.
+- [ ] Buying a piece debits TICKETS only and leaves Gold Coins unchanged
+      (server-side equivalent is asserted in `server/test/wardrobe.test.ts`).
+- [ ] A bought piece is worn immediately, and the player sprite visibly
+      changes on the floor without a reload.
+- [ ] Buying pieces for different slots layers them — a shirt AND trousers
+      AND a hat all show at once, in that draw order.
+- [ ] "Take Off" clears an optional slot; the piece stays owned.
+- [ ] The Body slot has no "Take Off" button and the player is never
+      invisible.
+- [ ] Pieces with no real art yet show generated placeholder art (flat
+      coloured blocks), not a missing-texture checkerboard.
+- [ ] Walking: every worn layer stays locked to the body through the whole
+      walk cycle, in all four directions — no layer lagging a frame behind.
+- [ ] An equipped accessory (hat badge) sits on the head, not floating above
+      it or sunk into the chest.
+
+## Skin shop (SUPERSEDED - floor's #11, the old Skin Attendant panel)
+
+**This whole section is historical.** The 17 monolithic skins, their
+catalog, shop module, routes and panel were all removed when the layered
+wardrobe above replaced them. The dated results below are kept as the record
+of what was verified at the time; do not re-run them.
 
 - [x] Skin purchases debit GC only (verify against the economy-rule tripwire
       above); SC balance is unaffected by any skin purchase.

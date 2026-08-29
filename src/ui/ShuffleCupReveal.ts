@@ -71,7 +71,7 @@ import { GC_MULTIPLIERS } from "../economy/gcMultiplier";
  * Phaser's hit-testing entirely and can't catch this class of bug - and
  * watched the click get dropped), fixed by setting scrollFactor(0) on
  * every element here individually (matching how every other modal-style
- * overlay in this codebase - see OverworldScene's chip/skin panels - sets
+ * overlay in this codebase - see OverworldScene's kiosk/shop panels - sets
  * it per-element rather than trusting container inheritance), and
  * reproduced-then-confirmed-fixed the same way.
  */

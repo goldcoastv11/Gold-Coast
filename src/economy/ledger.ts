@@ -15,7 +15,7 @@
  * GC and TICKETS are separate ledgers (tracked as two fields on one
  * LedgerState, never conflated or convertible into one another). No code
  * anywhere should mutate a balance number directly - every change
- * (purchase, payout, wager, bonus, skin buy) must go through
+ * (purchase, payout, wager, bonus, Item Shop buy) must go through
  * `applyTransaction` so there is always a full, inspectable audit trail.
  *
  * This module is intentionally pure/side-effect-free (no localStorage, no

@@ -2,7 +2,7 @@
  * Minimal in-memory localStorage polyfill for pure-logic unit tests that run
  * under Node (no DOM). Kept intentionally tiny instead of pulling in jsdom -
  * these tests target plain TypeScript modules (ledger, payout math, package
- * tiers, playthrough tracking, skin shop backend), not rendered UI.
+ * tiers, playthrough tracking, Item Shop backend), not rendered UI.
  */
 class MemoryStorage implements Storage {
   private store = new Map<string, string>();

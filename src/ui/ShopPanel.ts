@@ -1,6 +1,15 @@
 import Phaser from "phaser";
 import { gameState } from "../GameState";
-import { listSkins, SkinDef } from "../economy/skinShop";
+import {
+  DEFAULT_BODY_PIECE_ID,
+  WARDROBE_SLOTS,
+  WardrobePieceDef,
+  WardrobeSlot,
+  getPiece,
+  getSlotDef,
+  listPiecesBySlot
+} from "../wardrobeCatalog";
+import { LPC_RIG, idleFrame } from "../characterRig";
 import { ItemDef, ItemCategory, listItemsByCategory } from "../itemCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
@@ -10,23 +19,24 @@ import { track, EVENTS } from "../api/track";
 import { playSfx } from "./SoundManager";
 
 /**
- * The overworld's three shop/wardrobe panels - the category picker, the
- * accessory/pet panel, and the skin panel - lifted verbatim out of
- * OverworldScene.ts, which had grown to ~2,400 lines doing the casino
- * floor, the tutorial, the Coin Kiosk, the shuffle mini-game AND both of
- * these panels at once.
+ * The overworld's shop/wardrobe panels - the category picker, the
+ * accessory/pet panel, and the layered-wardrobe slot picker and piece
+ * panel. These were lifted out of OverworldScene.ts, which had grown to
+ * ~2,400 lines doing the casino floor, the tutorial, the Coin Kiosk, the
+ * shuffle mini-game AND all of these panels at once.
  *
- * This is a pure move: every coordinate, string, sound, tween, network call
- * and analytics event below is byte-for-byte what OverworldScene used to
- * run, so the panels look and behave exactly as they did before. Anything
- * that looked like a bug while moving was deliberately left as-is and
- * flagged in the pull request instead of fixed here - mixing a refactor
- * with fixes is what turns a "safe" cleanup into a regression.
+ * The wardrobe panels replaced a single "skin panel" that sold 17 complete
+ * characters. Buying a look is now buying one LAYER of it - so where there
+ * was one flat list there is now a slot picker (which layer?) fronting a
+ * per-slot list (which piece?). The accessory/pet panel is untouched by
+ * that change and keeps its original geometry, which the wardrobe panel
+ * then copies so the whole shop still feels like one thing.
  *
  * Everything the panels need from the scene that isn't the scene itself
- * (the panel-open flag, the HUD, the toast, the player sprite's skin, the
- * equipped accessory/pet visuals) comes in through ShopPanelHost below, so
- * this module never reaches back into OverworldScene's privates.
+ * (the panel-open flag, the HUD, the toast, the player's layered
+ * character, the equipped accessory/pet visuals) comes in through
+ * ShopPanelHost below, so this module never reaches back into
+ * OverworldScene's privates.
  */
 
 export type ShopMode = "shop" | "wardrobe";
@@ -54,17 +64,20 @@ export interface ShopPanelHost {
   /** Re-reads gameState.equippedPet and updates the follower sprite. */
   applyEquippedPet(): void;
   /**
-   * Points the player sprite at a newly bought/equipped skin's texture and
-   * re-tunes its collision body + on-screen scale for whichever rig that
-   * skin uses (16x16 Kenney vs 21x32 legacy). Both skin-panel call sites
-   * ran the identical three lines, so they travel together as one host
-   * call rather than three.
+   * Rebuilds the player's layered character from gameState.equippedWardrobe
+   * and re-tunes its collision body + on-screen scale.
+   *
+   * Replaces the old `applyPlayerSkin(textureKey)`: a character is no
+   * longer one texture the panel can hand over, it's a whole stack the host
+   * assembles - so the panel says "what I changed is now in gameState, go
+   * look" rather than passing a texture key it would have to guess the
+   * layering for.
    */
-  applyPlayerSkin(textureKey: string): void;
+  applyPlayerWardrobe(): void;
 }
 
-/** Turns a /skins/buy or /skins/equip failure into a short user-facing toast message. */
-function describeSkinError(err: unknown, action: string): string {
+/** Turns a shop buy/equip failure into a short user-facing toast message. */
+function describeShopError(err: unknown, action: string): string {
   if (err instanceof ApiError) {
     switch (err.code) {
       case "INSUFFICIENT_TICKETS":
@@ -72,7 +85,9 @@ function describeSkinError(err: unknown, action: string): string {
       case "ALREADY_OWNED":
         return "You already own that.";
       case "NOT_FOUND":
-        return "That skin doesn't exist - try again.";
+        return "That item doesn't exist - try again.";
+      case "SLOT_NOT_OPTIONAL":
+        return "You can't take that off.";
       default:
         return err.message;
     }
@@ -82,15 +97,14 @@ function describeSkinError(err: unknown, action: string): string {
 }
 
 /**
- * Small category picker shown before either openSkinPanel() or
- * openItemPanel() - both the Item Shop station and the Clothes corner
- * button now open this first, instead of jumping straight to skins.
- * Deliberately a separate entry step rather than folding a tab row into
- * openSkinPanel() itself: that panel's layout is already tightly packed
- * into the mobile-crop-safe zone (see its own SAFE_ZONE_TOP/BOTTOM-driven
- * Y coordinates) and is live in production - this keeps it (and its
- * skin-purchase flow) completely untouched, at the cost of one extra tap
- * to pick a category.
+ * Small category picker shown before any of the browsing panels - both the
+ * Item Shop station and the Clothes corner button open this first.
+ *
+ * Deliberately a separate entry step rather than a tab row inside each
+ * panel: those panels are already tightly packed into the mobile-crop-safe
+ * zone (see their SAFE_ZONE_TOP/BOTTOM-driven Y coordinates), so a tab
+ * strip would have to come out of the rows themselves. One extra tap is
+ * the cheaper trade.
  */
 export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
   const scene = host.scene;
@@ -128,7 +142,7 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
   };
 
   const buttons: Array<[string, () => void]> = [
-    ["👕 Skins", () => openSkinPanel(host, mode)],
+    ["👕 Clothing", () => openWardrobeSlotMenu(host, mode)],
     ["🎩 Accessories", () => openItemPanel(host, "ACCESSORY", mode)],
     ["🐾 Pets", () => openItemPanel(host, "PET", mode)]
   ];
@@ -150,14 +164,12 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
 }
 
 /**
- * Accessory/Pet browsing panel - structurally mirrors openSkinPanel()
+ * Accessory/Pet browsing panel - structurally mirrors openWardrobePanel()
  * below (same paginated shop/wardrobe shape) but is a fully independent
- * function reading ITEM_CATALOG instead of SKIN_CATALOG, so nothing here
- * can regress the live, already-shipped skin-purchase flow. Two real
- * differences from skins: the preview is an emoji (ACCESSORY) or a small
- * character-sheet thumbnail (PET) instead of a real skin portrait, and
- * "wearing nothing" is a valid state - the currently-equipped item's row
- * gets a "Take Off" button instead of a disabled "Worn" one.
+ * function reading ITEM_CATALOG, so nothing here can regress the live,
+ * already-shipped accessory/pet purchase flow. The preview is the drawn
+ * accessory texture or a small character-sheet thumbnail rather than a
+ * layered character render, since neither is a wardrobe layer.
  */
 export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode: ShopMode) {
   const scene = host.scene;
@@ -244,8 +256,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
 
       // Preview: the real drawn accessory texture (see
       // BootScene.ts's createAccessoryTextures) scaled up so it's legible
-      // in the row, or a small character-sheet thumbnail (frame 1, same
-      // convention openSkinPanel's own preview uses) for pets.
+      // in the row, or a small character-sheet thumbnail (frame 1) for pets.
       const preview =
         def.category === "ACCESSORY"
           ? scene.add.image(219, y, def.textureKey ?? "acc_bow").setScale(2.2)
@@ -283,8 +294,8 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
           canAfford ? Theme.accent : Theme.neutral,
           canAfford ? Theme.accentHover : Theme.neutral,
           () => {
-            // Same "a purchase also equips it" product decision as
-            // skins (see economy/itemShop.ts's purchaseItem doc comment).
+            // Same "a purchase also equips it" product decision the
+            // wardrobe makes (see economy/itemShop.ts's purchaseItem doc comment).
             buyBtn.setEnabled(false);
             api
               .buyItem(def.id)
@@ -302,7 +313,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
                 render();
               })
               .catch((err) => {
-                host.showToast(describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
+                host.showToast(describeShopError(err, `buy ${def.name}`), Theme.textDanger);
                 playSfx(scene, "error");
                 render();
               });
@@ -312,8 +323,8 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
         buyBtn.container.setScrollFactor(0).setDepth(201);
         elements.push(buyBtn.container);
       } else if (isEquipped) {
-        // "wearing nothing" is a valid state for accessories/pets (unlike
-        // skins, which always fall back to "player") - the currently-worn
+        // "wearing nothing" is a valid state for accessories/pets (as it
+        // is for every wardrobe slot but BODY) - the currently-worn
         // row gets an active "Take Off" button instead of a disabled
         // "Worn" one.
         const takeOffBtn = makeButton(scene, 540, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
@@ -326,7 +337,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
               render();
             })
             .catch((err) => {
-              host.showToast(describeSkinError(err, `take off ${def.name}`), Theme.textDanger);
+              host.showToast(describeShopError(err, `take off ${def.name}`), Theme.textDanger);
               render();
             });
         });
@@ -348,7 +359,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
               render();
             })
             .catch((err) => {
-              host.showToast(describeSkinError(err, `wear ${def.name}`), Theme.textDanger);
+              host.showToast(describeShopError(err, `wear ${def.name}`), Theme.textDanger);
               render();
             });
         });
@@ -395,12 +406,119 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
   render();
 }
 
+
 /**
- * Shared panel for both the Skin Attendant ("shop" - buy skins you don't
- * own) and the Clothes corner button ("wardrobe" - equip a skin you do
- * own). Paginated since the catalog is bigger than fits on one screen.
+ * Slot picker - the entry point to the layered wardrobe, shown after
+ * choosing "Clothing" from the category menu.
+ *
+ * This step exists because a character is now a stack rather than a single
+ * look: there is no one list of "outfits" to show any more, so the player
+ * first says which layer they're shopping for. Six slots in two columns fit
+ * one panel with no pagination, which keeps the extra tap cheap.
+ *
+ * Each button shows what's currently worn in that slot, so the picker
+ * doubles as a summary of the whole outfit - the closest thing the wardrobe
+ * has to "here is your character".
  */
-export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
+export function openWardrobeSlotMenu(host: ShopPanelHost, mode: ShopMode) {
+  const scene = host.scene;
+  host.setPanelOpen(true);
+  playSfx(scene, "open");
+
+  let elements: Phaser.GameObjects.GameObject[] = [];
+  const cleanup = () => {
+    elements.forEach((e) => e.destroy());
+    elements = [];
+  };
+
+  const panel = makePanel(scene, 400, 300, 460, 400, 200).setScrollFactor(0);
+  elements.push(panel);
+
+  const title = scene.add
+    .text(400, 145, mode === "shop" ? "🧥 Clothing Shop" : "👕 Wardrobe", {
+      fontSize: "20px",
+      color: Theme.textGold,
+      fontStyle: "bold"
+    })
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(201);
+  elements.push(title);
+
+  const sub = scene.add
+    .text(
+      400,
+      168,
+      mode === "shop" ? `You have ${gameState.tickets} Tickets` : "Pick a layer to change",
+      { fontSize: "13px", color: Theme.textMuted }
+    )
+    .setOrigin(0.5)
+    .setScrollFactor(0)
+    .setDepth(201);
+  elements.push(sub);
+
+  // Two columns of three. WARDROBE_SLOTS is already in draw order (body
+  // first, hat last), which also reads as a sensible dressing order.
+  WARDROBE_SLOTS.forEach((slotDef, i) => {
+    const col = i % 2;
+    const row = Math.floor(i / 2);
+    const x = 400 + (col === 0 ? -105 : 105);
+    const y = 215 + row * 62;
+
+    const wornId = gameState.wornInSlot(slotDef.slot);
+    const worn = wornId ? getPieceName(wornId) : "Nothing";
+
+    const btn = makeButton(
+      scene,
+      x,
+      y,
+      190,
+      50,
+      `${slotDef.name}\n${worn}`,
+      Theme.accent,
+      Theme.accentHover,
+      () => {
+        cleanup();
+        openWardrobePanel(host, slotDef.slot, mode);
+      }
+    );
+    btn.container.setScrollFactor(0).setDepth(201);
+    elements.push(btn.container);
+  });
+
+  const closeBtn = makeButton(scene, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
+    cleanup();
+    host.setPanelOpen(false);
+    host.updateHud();
+  });
+  closeBtn.container.setScrollFactor(0).setDepth(201);
+  elements.push(closeBtn.container);
+}
+
+/** Display name for a piece id, falling back to the raw id for a piece pulled from the catalogue after someone equipped it. */
+function getPieceName(id: string): string {
+  return getPiece(id)?.name ?? id;
+}
+
+/**
+ * One slot's pieces - buy them ("shop") or wear ones you already own
+ * ("wardrobe"). Structurally the same paginated panel as openItemPanel
+ * above, and it deliberately keeps that panel's exact geometry (row
+ * spacing, button positions, the mobile-crop-safe y=[130,470] zone) so
+ * the whole shop still feels like one thing.
+ *
+ * Two things differ from the accessory/pet panel, both consequences of
+ * layering:
+ *
+ *  - The preview is a real two-layer render - the default body with this
+ *    piece drawn on top - rather than a single sprite. A shirt on its own
+ *    is an unreadable floating shape; on a body it's a shirt. This is the
+ *    same "stack of layers" the overworld draws, at panel scale.
+ *  - "Take Off" appears for every slot except BODY, whose slot definition
+ *    is `optional: false`. The server refuses to unequip it too - this is
+ *    the UI half of the same never-invisible-player rule.
+ */
+export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode: ShopMode) {
   const scene = host.scene;
   host.setPanelOpen(true);
   playSfx(scene, "open");
@@ -408,17 +526,42 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
   const itemsPerPage = 4;
   let elements: Phaser.GameObjects.GameObject[] = [];
 
-  // Catalog comes from the skin shop backend (economy/skinShop.ts), not
-  // GameState directly - owned/equipped state still comes from GameState
-  // since that's the player's live profile data, not catalog data.
-  const getItems = (): readonly SkinDef[] =>
+  const slotDef = getSlotDef(slot);
+  const slotName = slotDef?.name ?? slot;
+
+  const getItems = (): WardrobePieceDef[] =>
     mode === "shop"
-      ? listSkins().filter((s) => !gameState.ownsSkin(s.id))
-      : listSkins().filter((s) => gameState.ownsSkin(s.id));
+      ? listPiecesBySlot(slot).filter((p) => !gameState.ownsWardrobePiece(p.id))
+      : listPiecesBySlot(slot).filter((p) => gameState.ownsWardrobePiece(p.id));
 
   const cleanup = () => {
     elements.forEach((e) => e.destroy());
     elements = [];
+  };
+
+  /**
+   * Draws the piece the way it will actually look: the default body with
+   * this piece layered over it, at the LPC down-facing standing frame.
+   *
+   * Degrades the same way the overworld does - a layer whose texture is
+   * missing is skipped rather than drawn as Phaser's missing-texture
+   * checkerboard, so a piece with no art yet previews as a plain body
+   * instead of a broken image.
+   */
+  const addPreview = (piece: WardrobePieceDef, x: number, y: number) => {
+    const standingFrame = idleFrame(LPC_RIG, "down");
+    const keys = piece.slot === "BODY" ? [piece.id] : [DEFAULT_BODY_PIECE_ID, piece.id];
+
+    for (const key of keys) {
+      if (!scene.textures.exists(key) || scene.textures.get(key).key === "__MISSING") continue;
+      const sprite = scene.add
+        .image(x, y, key, standingFrame)
+        .setOrigin(0.5)
+        .setScale(0.62)
+        .setScrollFactor(0)
+        .setDepth(201);
+      elements.push(sprite);
+    }
   };
 
   const render = () => {
@@ -432,7 +575,7 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
     elements.push(panel);
 
     const title = scene.add
-      .text(400, 140, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
+      .text(400, 140, `${mode === "shop" ? "🧥" : "👕"} ${slotName}`, {
         fontSize: "20px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -446,7 +589,7 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
       .text(
         400,
         162,
-        mode === "shop" ? `You have ${gameState.tickets} Tickets` : "Pick a look to wear",
+        mode === "shop" ? `You have ${gameState.tickets} Tickets` : `Pick a ${slotName.toLowerCase()} to wear`,
         { fontSize: "13px", color: Theme.textMuted }
       )
       .setOrigin(0.5)
@@ -460,8 +603,8 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
           400,
           280,
           mode === "shop"
-            ? "You own every skin!"
-            : "Nothing owned yet.\nVisit the Item Shop to buy one.",
+            ? `You own every ${slotName.toLowerCase()} option!`
+            : `Nothing owned yet.\nVisit the Item Shop to buy some.`,
           { fontSize: "14px", color: Theme.textMuted, align: "center" }
         )
         .setOrigin(0.5)
@@ -476,23 +619,15 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
       row.setScrollFactor(0).setDepth(200);
       elements.push(row);
 
-      const isEquipped = mode === "wardrobe" && gameState.currentSkin === def.id;
+      const isWorn = mode === "wardrobe" && gameState.wornInSlot(slot) === def.id;
 
-      // Small preview of the skin's idle-down pose, so you can see what
-      // you're buying/wearing before committing
-      const preview = scene.add
-        .image(219, y, def.textureKey, 1)
-        .setOrigin(0.5)
-        .setScale(1.4)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(preview);
+      addPreview(def, 219, y);
 
       const nameLabel = scene.add
-        .text(252, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
+        .text(252, y, `${def.name}${isWorn ? " (worn)" : ""}`, {
           fontSize: "14px",
-          color: isEquipped ? Theme.textAccent : Theme.textPrimary,
-          fontStyle: isEquipped ? "bold" : "normal"
+          color: isWorn ? Theme.textAccent : Theme.textPrimary,
+          fontStyle: isWorn ? "bold" : "normal"
         })
         .setOrigin(0, 0.5)
         .setScrollFactor(0)
@@ -518,35 +653,37 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
           canAfford ? Theme.accent : Theme.neutral,
           canAfford ? Theme.accentHover : Theme.neutral,
           () => {
-            // Task #37: POST /skins/buy - TICKETS-only, server-authoritative.
-            // The canAfford/ownership checks above are optimistic UI only;
-            // the server re-checks both (INSUFFICIENT_TICKETS/ALREADY_OWNED)
-            // and is the one that actually decides. A purchase now also
-            // equips server-side (economy/skinShop.ts's purchaseSkin, per
-            // product decision: buying a skin means wearing it) - so
-            // `res.user.equippedSkin` is already the new skin here, and
-            // the player sprite needs the same texture/body/scale update
-            // the "Wear" button below applies, not just a balance refresh.
+            // POST /wardrobe/buy - TICKETS-only, server-authoritative. The
+            // affordability/ownership checks above are optimistic UI only;
+            // the server re-checks both and is the one that decides. A
+            // purchase also wears the piece server-side (see
+            // economy/wardrobe.ts), so the player's character has to be
+            // rebuilt here, not just the balance refreshed.
             buyBtn.setEnabled(false);
             api
-              .buySkin(def.id)
+              .buyWardrobePiece(def.id)
               .then((res) => {
-                // Retention Leg 1 - same rationale as the Item Shop's
-                // buy handler above.
-                track(EVENTS.SKIN_PURCHASED, { skinId: def.id, price: def.price });
+                // Retention Leg 1: what players spend TICKETS on - catalog
+                // id, slot and price, all already-public catalog facts.
+                // Fired on the server's confirmed success, never on the
+                // optimistic click.
+                track(EVENTS.WARDROBE_PURCHASED, {
+                  pieceId: def.id,
+                  slot: def.slot,
+                  price: def.price
+                });
                 gameState.hydrateFromServer(res.user);
-                host.applyPlayerSkin(def.textureKey);
+                host.applyPlayerWardrobe();
                 host.updateHud();
                 host.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
                 playSfx(scene, "confirm");
                 render();
-                // Onboarding tutorial's Skin Attendant hands-on step
-                // (see startOnboardingTutorial) listens for this -
-                // harmless no-op emit when the tutorial isn't running.
-                scene.events.emit("tutorial:skinPurchased");
+                // Onboarding tutorial's Item Shop hands-on step listens for
+                // this - a harmless no-op emit when no tutorial is running.
+                scene.events.emit("tutorial:wardrobePurchased");
               })
               .catch((err) => {
-                host.showToast(describeSkinError(err, `buy ${def.name}`), Theme.textDanger);
+                host.showToast(describeShopError(err, `buy ${def.name}`), Theme.textDanger);
                 playSfx(scene, "error");
                 render();
               });
@@ -555,6 +692,25 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
         if (!canAfford) buyBtn.setEnabled(false);
         buyBtn.container.setScrollFactor(0).setDepth(201);
         elements.push(buyBtn.container);
+      } else if (isWorn && slotDef?.optional) {
+        // "Wearing nothing" is valid for every slot but BODY, so the worn
+        // row gets an active "Take Off" rather than a disabled "Worn".
+        const takeOffBtn = makeButton(scene, 540, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
+          takeOffBtn.setEnabled(false);
+          api
+            .unequipWardrobeSlot(slot)
+            .then((res) => {
+              gameState.hydrateFromServer(res.user);
+              host.applyPlayerWardrobe();
+              render();
+            })
+            .catch((err) => {
+              host.showToast(describeShopError(err, `take off ${def.name}`), Theme.textDanger);
+              render();
+            });
+        });
+        takeOffBtn.container.setScrollFactor(0).setDepth(201);
+        elements.push(takeOffBtn.container);
       } else {
         const wearBtn = makeButton(
           scene,
@@ -562,42 +718,32 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
           y,
           90,
           42,
-          isEquipped ? "Worn" : "Wear",
-          isEquipped ? Theme.neutral : Theme.accent,
-          isEquipped ? Theme.neutral : Theme.accentHover,
+          isWorn ? "Worn" : "Wear",
+          isWorn ? Theme.neutral : Theme.accent,
+          isWorn ? Theme.neutral : Theme.accentHover,
           () => {
-            // Task #37: POST /skins/equip - server-authoritative; only
-            // touch the player's texture/body once the server confirms.
             wearBtn.setEnabled(false);
             api
-              .equipSkin(def.id)
+              .equipWardrobePiece(def.id)
               .then((res) => {
-                // Retention Leg 1 - same rationale as the item "Wear"
-                // handler above.
-                track(EVENTS.ITEM_EQUIPPED, { skinId: def.id });
+                track(EVENTS.ITEM_EQUIPPED, { pieceId: def.id, slot: def.slot });
                 gameState.hydrateFromServer(res.user);
-                // Re-tune the collision body and on-screen scale for
-                // whichever rig this skin uses (16x16 Kenney vs 21x32
-                // legacy) - see applyPlayerBody's/applyPlayerScale's comments.
-                host.applyPlayerSkin(def.textureKey);
+                host.applyPlayerWardrobe();
                 render();
               })
               .catch((err) => {
-                host.showToast(describeSkinError(err, `wear ${def.name}`), Theme.textDanger);
+                host.showToast(describeShopError(err, `wear ${def.name}`), Theme.textDanger);
                 render();
               });
           }
         );
-        if (isEquipped) wearBtn.setEnabled(false);
+        if (isWorn) wearBtn.setEnabled(false);
         wearBtn.container.setScrollFactor(0).setDepth(201);
         elements.push(wearBtn.container);
       }
     });
 
     if (totalPages > 1) {
-      // Y=405 (was 435) - see closeBtn's comment below, this row and
-      // Close both had to move up together to fit the mobile-crop-safe
-      // zone (y<=470) with Close still below this row.
       const pageLabel = scene.add
         .text(400, 405, `Page ${page + 1} / ${totalPages}`, {
           fontSize: "12px",
@@ -609,53 +755,31 @@ export function openSkinPanel(host: ShopPanelHost, mode: ShopMode) {
       elements.push(pageLabel);
 
       if (page > 0) {
-        const prevBtn = makeButton(
-          scene,
-          290,
-          405,
-          90,
-          34,
-          "◀ Prev",
-          Theme.neutral,
-          Theme.neutralHover,
-          () => {
-            page--;
-            render();
-          }
-        );
+        const prevBtn = makeButton(scene, 290, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
+          page--;
+          render();
+        });
         prevBtn.container.setScrollFactor(0).setDepth(201);
         elements.push(prevBtn.container);
       }
       if (page < totalPages - 1) {
-        const nextBtn = makeButton(
-          scene,
-          510,
-          405,
-          90,
-          34,
-          "Next ▶",
-          Theme.neutral,
-          Theme.neutralHover,
-          () => {
-            page++;
-            render();
-          }
-        );
+        const nextBtn = makeButton(scene, 510, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
+          page++;
+          render();
+        });
         nextBtn.container.setScrollFactor(0).setDepth(201);
         elements.push(nextBtn.container);
       }
     }
 
-    // Y=450, not the original 490 - keeps this button's full height
-    // inside the measured mobile-crop-safe zone y=[130,470] (see
-    // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM).
-    const closeBtn = makeButton(scene, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
+    // "Back" rather than "Close": this panel is now one level deep (the
+    // slot picker fronts it), so the natural exit is up a level.
+    const backBtn = makeButton(scene, 400, 450, 140, 40, "Back", Theme.neutral, Theme.neutralHover, () => {
       cleanup();
-      host.setPanelOpen(false);
-      host.updateHud();
+      openWardrobeSlotMenu(host, mode);
     });
-    closeBtn.container.setScrollFactor(0).setDepth(201);
-    elements.push(closeBtn.container);
+    backBtn.container.setScrollFactor(0).setDepth(201);
+    elements.push(backBtn.container);
   };
 
   render();

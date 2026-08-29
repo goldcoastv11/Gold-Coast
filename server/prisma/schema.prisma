@@ -57,6 +57,8 @@ model User {
   transactions        Transaction[]
   skinsOwned          SkinOwned[]
   equippedSkin        EquippedSkin?
+  wardrobeOwned       WardrobeOwned[]
+  equippedWardrobe    EquippedWardrobe[]
   itemsOwned          ItemOwned[]
   equippedItems       EquippedItem[]
   lastPosition        LastPosition?
@@ -165,6 +167,18 @@ model Transaction {
   @@map("transactions")
 }
 
+// RETIRED - the 17 monolithic character skins these backed no longer exist.
+// The Item Shop now sells individual wardrobe PIECES over one shared body
+// (see WardrobeOwned/EquippedWardrobe below and src/wardrobeCatalog.ts).
+//
+// All skin CODE is gone - the catalog, the shop module, the routes and the
+// client panel were deleted outright, not deprecated, per founder decision
+// (nobody outside testing ever owned a skin, so there was nothing to
+// migrate). These two TABLES are left in place, unused, rather than dropped:
+// same additive-only-migration precedent as PlaythroughProgress above and
+// economy/adRewards.ts's table - a destructive DROP TABLE against production
+// buys nothing functional and can't be undone if the assumption about who
+// owns what turns out to be wrong. Nothing reads or writes them.
 model SkinOwned {
   userId String @map("user_id")
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -174,13 +188,66 @@ model SkinOwned {
   @@map("skins_owned")
 }
 
-// One equipped skin per user - PK on userId enforces that directly.
+// RETIRED alongside SkinOwned above - see that comment.
 model EquippedSkin {
   userId String @id @map("user_id")
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   skinId String @map("skin_id")
 
   @@map("equipped_skin")
+}
+
+// The layered wardrobe (see server/src/wardrobeCatalog.ts and
+// economy/wardrobe.ts) - what replaced skins. A character is a stack of
+// images drawn in a fixed order over one shared body, and players buy the
+// individual pieces: hair, shirt, trousers, shoes, hat.
+//
+// TICKETS-only, exactly as skins were (repo-root CLAUDE.md's economy rule) -
+// Gold Coins buy plays, Tickets buy looks. Purchases debit through
+// SKIN_PURCHASE_TICKETS, the same transaction type the accessory/pet Item
+// Shop already reuses; see economy/wardrobe.ts on why no new enum value.
+//
+// The slot list mirrors the catalog's WardrobeSlot union 1:1. Adding a slot
+// is a destructive enum migration, so the six below were chosen to cover the
+// whole body up front; adding a PIECE (the common case) needs no migration
+// at all, just a catalog entry.
+enum WardrobeSlot {
+  BODY
+  LEGS
+  FEET
+  TORSO
+  HAIR
+  HAT
+}
+
+// One row per piece a player owns. Mirrors ItemOwned's shape exactly.
+//
+// The free default body (wardrobeCatalog.ts's DEFAULT_BODY_PIECE_ID) is
+// NEVER stored here - it's owned implicitly by everyone, the same way the
+// old free "player" skin was. That's what guarantees a brand-new account
+// with zero rows in this table still has a body to render.
+model WardrobeOwned {
+  userId  String @map("user_id")
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pieceId String @map("piece_id")
+
+  @@id([userId, pieceId])
+  @@map("wardrobe_owned")
+}
+
+// One row per (user, slot) - what the player is currently wearing in that
+// slot. Absence of a row means "wearing nothing there", which is a valid
+// state for every slot EXCEPT BODY: an absent/unknown BODY resolves to the
+// free default piece in application code (see wardrobeCatalog.ts's
+// resolveLayers), so a character can never resolve to an empty layer stack.
+model EquippedWardrobe {
+  userId  String       @map("user_id")
+  user    User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slot    WardrobeSlot
+  pieceId String       @map("piece_id")
+
+  @@id([userId, slot])
+  @@map("equipped_wardrobe")
 }
 
 // Cosmetic equip-slot categories beyond skins (see server/src/itemCatalog.ts

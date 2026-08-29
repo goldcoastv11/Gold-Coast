@@ -4,7 +4,6 @@ import { createLedger, getBalance } from "./ledger";
 import { GC_PACKAGES, purchasePackage } from "./packages";
 import { grantSignupBonus } from "./signupBonus";
 import { claimAdRewardGc } from "./adRewards";
-import { purchaseSkin } from "./skinShop";
 import { claimAttendantBonus } from "./attendantClaim";
 import { isValidGcMultiplier, GC_MULTIPLIER_BASE, InvalidGcMultiplierError } from "./gcMultiplier";
 
@@ -73,15 +72,18 @@ describe("QA tripwire: GC packages are a plain top-up, no other currency attache
   });
 });
 
-describe("QA tripwire: skinShop.ts (Item Shop) has zero code path touching GC", () => {
-  it("a skin purchase leaves GC balance byte-for-byte untouched, including at 0 GC", () => {
-    const ledger = createLedger(0, 1000);
-    const unlocked = ["player"];
-    const outcome = purchaseSkin(ledger, unlocked, "skin_000"); // price 400
-    expect(outcome.ok).toBe(true);
-    expect(getBalance(ledger, "GC")).toBe(0);
-  });
-});
+/**
+ * The "skinShop.ts has zero code path touching GC" tripwire lived here.
+ * skinShop.ts is gone along with the skins, and the layered wardrobe that
+ * replaced it has no client-side purchase path to put a tripwire on.
+ *
+ * The equivalent tripwire now runs server-side, against the real ledger and
+ * a real database, in server/test/wardrobe.test.ts: "buys an affordable
+ * piece with TICKETS and never touches GC" asserts the GC balance is
+ * unchanged across a purchase, and checks the emitted transaction row is
+ * TICKETS-currency. That is where a GC leak could actually cost anyone
+ * anything, so that is where the guard belongs.
+ */
 
 describe("QA tripwire: ad rewards only ever grant GC", () => {
   it("repeated ad-reward claims never move TICKETS even from a nonzero starting balance", () => {

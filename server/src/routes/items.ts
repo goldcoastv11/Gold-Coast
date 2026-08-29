@@ -1,5 +1,5 @@
 /**
- * Item shop routes (accessories/pets) - mirrors routes/skins.ts's shape
+ * Item shop routes (accessories/pets) - mirrors routes/wardrobe.ts's shape
  * exactly, generalized to the ItemOwned/EquippedItem tables (see
  * economy/itemShop.ts). TICKETS-only, fully isolated from GC.
  */

@@ -7,13 +7,28 @@
  * client can import from).
  */
 
+import type { WardrobeSlot } from "../wardrobeCatalog";
+
+// Re-exported so api/client.ts and its callers can name a slot without also
+// importing the catalog - the catalog is the definition, this is the wire type.
+export type { WardrobeSlot };
+
 /** GET /me, and embedded as `user` in most economy/auth responses. */
 export interface MeResponse {
   username: string;
   goldCoins: number;
   tickets: number;
-  skinsOwned: string[];
-  equippedSkin: string;
+  /**
+   * The layered wardrobe (see server/src/economy/wardrobe.ts) - what
+   * replaced the old `skinsOwned`/`equippedSkin` pair when the 17
+   * monolithic skins were removed. `owned` always contains the free default
+   * body and `equipped.BODY` is always set, so a character can be rendered
+   * from this alone with no special-casing for a new account.
+   */
+  wardrobe: {
+    owned: string[];
+    equipped: Partial<Record<WardrobeSlot, string>>;
+  };
   /** Accessory/pet ids owned (see server/src/economy/itemShop.ts). */
   ownedItems: string[];
   equippedAccessory: string | null;
@@ -70,22 +85,28 @@ export interface PositionResponse {
   y: number;
 }
 
-export interface SkinDto {
+/** One wardrobe piece as the server describes it (server/src/wardrobeCatalog.ts). */
+export interface WardrobePieceDto {
   id: string;
-  textureKey: string;
+  slot: WardrobeSlot;
   name: string;
   price: number;
 }
 
-/** POST /skins/buy */
-export interface BuySkinResponse {
-  skin: SkinDto;
+/** POST /wardrobe/buy */
+export interface BuyWardrobePieceResponse {
+  piece: WardrobePieceDto;
   user: MeResponse;
 }
 
-/** POST /skins/equip */
-export interface EquipSkinResponse {
-  equippedSkin: string;
+/** POST /wardrobe/equip */
+export interface EquipWardrobePieceResponse {
+  piece: WardrobePieceDto;
+  user: MeResponse;
+}
+
+/** POST /wardrobe/unequip */
+export interface UnequipWardrobeSlotResponse {
   user: MeResponse;
 }
 

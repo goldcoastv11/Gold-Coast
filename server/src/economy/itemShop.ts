@@ -1,6 +1,6 @@
 /**
  * Item shop (accessories/pets) backend - server-authoritative, generalizing
- * skinShop.ts's pattern to the ItemOwned/EquippedItem tables (see
+ * the (now-removed) skin shop's pattern to the ItemOwned/EquippedItem tables (see
  * schema.prisma's doc comment on those). Reuses the exact same
  * SKIN_PURCHASE_TICKETS transaction type skins use rather than adding a new
  * enum value - the whole panel is already branded "Item Shop", not "Skin
@@ -50,7 +50,7 @@ export type PurchaseItemOutcome =
  * Attempts to buy item `id` with TICKETS for `userId`. On success, debits
  * the ledger, inserts an items_owned row, and equips it immediately in the
  * same transaction (same "a purchase is always also a wear" product
- * decision skinShop.ts's purchaseSkin makes) - this REPLACES whatever was
+ * decision economy/wardrobe.ts's purchasePiece also makes) - this REPLACES whatever was
  * previously equipped in that item's category, same as buying a new skin
  * replaces the worn one.
  */

@@ -90,9 +90,11 @@ const config: Phaser.Types.Core.GameConfig = {
   backgroundColor: Theme.bgDark,
   pixelArt: true,
   // Phaser's loader defaults to at most 32 concurrent downloads - BootScene
-  // preloads well over that (17 skin spritesheets + tiles/characters + the
-  // 8 sound effects from ui/SoundManager.ts pushed the total past 32 for
-  // the first time). Files queued beyond the cap are only supposed to
+  // preloads well over that (tiles/characters + the 8 sound effects from
+  // ui/SoundManager.ts pushed the total past 32 for the first time, back
+  // when 17 skin spritesheets were also in the queue - those are gone, but
+  // the wardrobe's own art will refill it as real pieces land, so the
+  // raised cap stays). Files queued beyond the cap are only supposed to
   // start as earlier ones finish, but in practice the last few silently
   // never started at all (confirmed live: loader.list left them stuck in
   // the FILE_POPULATED state, never promoted to inflight) - so raise the

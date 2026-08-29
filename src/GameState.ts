@@ -5,12 +5,12 @@
  * POST /auth/login endpoints (see src/api/client.ts) instead of the old
  * localStorage-hashed fake auth, and hydrates this class from the server's
  * response (or GET /me on a silent session restore) via
- * `hydrateFromServer()` below - balances/skins/position/attendant-claim
+ * `hydrateFromServer()` below - balances/wardrobe/position/attendant-claim
  * cooldown are now server-authoritative for a logged-in session. Position
- * saves, skin buy/equip, and the attendant claim are likewise wired to
+ * saves, wardrobe buy/equip, and the attendant claim are likewise wired to
  * their real endpoints from OverworldScene.ts.
  *
- * What's still local/placeholder: the legacy `login()`/`purchaseSkin()`/
+ * What's still local/placeholder: the legacy `login()`/
  * `claimAttendantBonus()` methods and the economy/*.ts ledger they call
  * still exist below, still fully functional, and are still covered by
  * GameState.test.ts etc - they're kept as-is (not removed) because (a) the
@@ -50,9 +50,10 @@ import {
   claimAttendantBonus as claimAttendantBonusInternal
 } from "./economy/attendantClaim";
 import {
-  PurchaseSkinOutcome,
-  purchaseSkin as purchaseSkinInternal
-} from "./economy/skinShop";
+  DEFAULT_BODY_PIECE_ID,
+  EquippedWardrobe,
+  WardrobeSlot
+} from "./wardrobeCatalog";
 import {
   PlaceBetOutcome,
   ResolveBetOutcome,
@@ -63,39 +64,6 @@ import { clearToken } from "./api/client";
 import type { MeResponse } from "./api/types";
 
 export type { Currency, GcMultiplier };
-
-export interface SkinDef {
-  id: string; // also used as the animation prefix, e.g. "skin_000"
-  textureKey: string;
-  name: string;
-  price: number; // 0 = free/default
-}
-
-/** Every skin available in the game. "player_sheet" is the free default. */
-export const SKIN_CATALOG: SkinDef[] = [
-  // textureKey points at the new flat/vector rig (BootScene.ts's
-  // createFlatCharacterSheet) - "player_sheet" (old chibi Kenney pixel art)
-  // is unused now but left loaded rather than removed, same "leave it in
-  // place, no functional benefit to deleting" precedent as adRewards.ts.
-  { id: "player", textureKey: "player_flat_sheet", name: "Classic", price: 0 },
-  { id: "skin_000", textureKey: "skin_000", name: "Outfit 1", price: 400 },
-  { id: "skin_001", textureKey: "skin_001", name: "Outfit 2", price: 250 },
-  { id: "skin_002", textureKey: "skin_002", name: "Outfit 3", price: 1000 },
-  { id: "skin_003", textureKey: "skin_003", name: "Outfit 4", price: 900 },
-  { id: "skin_004", textureKey: "skin_004", name: "Outfit 5", price: 900 },
-  { id: "skin_005", textureKey: "skin_005", name: "Outfit 6", price: 500 },
-  { id: "skin_006", textureKey: "skin_006", name: "Outfit 7", price: 400 },
-  { id: "skin_007", textureKey: "skin_007", name: "Outfit 8", price: 350 },
-  { id: "skin_008", textureKey: "skin_008", name: "Outfit 9", price: 2500 },
-  { id: "skin_009", textureKey: "skin_009", name: "Outfit 10", price: 300 },
-  { id: "skin_010", textureKey: "skin_010", name: "Outfit 11", price: 250 },
-  { id: "skin_011", textureKey: "skin_011", name: "Outfit 12", price: 350 },
-  { id: "skin_012", textureKey: "skin_012", name: "Outfit 13", price: 750 },
-  { id: "skin_013", textureKey: "skin_013", name: "Outfit 14", price: 900 },
-  { id: "skin_014", textureKey: "skin_014", name: "Outfit 15", price: 4000 },
-  { id: "skin_015", textureKey: "skin_015", name: "Outfit 16", price: 250 },
-  { id: "skin_016", textureKey: "skin_016", name: "Outfit 17", price: 750 }
-];
 
 /** Shared bet-size stepper used by every game screen. */
 export const BET_MIN = 5;
@@ -108,8 +76,6 @@ interface StoredProfile {
   passwordHash: string;
   ledger: LedgerState;
   betAmount: number;
-  currentSkin: string;
-  unlockedSkins: string[];
   /**
    * ms-since-epoch of the last successful attendant-claim (#18/#19), or
    * null/absent if never claimed. Optional because profiles saved before
@@ -118,14 +84,26 @@ interface StoredProfile {
   attendantClaimedAt?: number | null;
 }
 
-/** Shape of profiles written before the ledger existed (flat goldCoins/stakeCoins numbers - "stakeCoins" predates the "arcade token" rebrand, back when the second currency was SC/"Sweeps Coins"). */
+/**
+ * Shape of profiles written before the ledger existed (flat goldCoins/
+ * stakeCoins numbers - "stakeCoins" predates the "arcade token" rebrand,
+ * back when the second currency was SC/"Sweeps Coins").
+ *
+ * `currentSkin`/`unlockedSkins` are still declared here, and still ignored
+ * by migrateLegacyProfile below, purely because these are localStorage
+ * blobs written by an older build that this code has no control over - an
+ * old save on a returning player's machine really does still have those
+ * keys in it. Declaring them documents what's actually on disk; the
+ * wardrobe that replaced skins is server-authoritative, so there is nothing
+ * to migrate them into.
+ */
 interface LegacyStoredProfile {
   passwordHash: string;
   goldCoins: number;
   stakeCoins: number;
   betAmount: number;
-  currentSkin: string;
-  unlockedSkins: string[];
+  currentSkin?: string;
+  unlockedSkins?: string[];
 }
 
 type ProfileStore = Record<string, StoredProfile | LegacyStoredProfile>;
@@ -150,8 +128,6 @@ function migrateLegacyProfile(legacy: LegacyStoredProfile): StoredProfile {
     passwordHash: legacy.passwordHash,
     ledger: createLedger(legacy.goldCoins, legacy.stakeCoins),
     betAmount: legacy.betAmount,
-    currentSkin: legacy.currentSkin,
-    unlockedSkins: legacy.unlockedSkins,
     attendantClaimedAt: null
   };
 }
@@ -194,7 +170,6 @@ export type LoginResult =
 
 class GameState {
   private _ledger: LedgerState = createLedger(0, 0);
-  private _currentSkin = "player";
   private _betAmount = 25;
   /** ms-since-epoch of the last successful attendant claim (#18/#19), or null if never claimed. */
   private _attendantClaimedAt: number | null = null;
@@ -209,8 +184,25 @@ class GameState {
    */
   private _adRewardClaimedAt: number | null = null;
 
-  /** Skin ids the player owns. "player" (Classic) is always owned/free. */
-  unlockedSkins: string[] = ["player"];
+  /**
+   * Wardrobe piece ids the player owns (see src/wardrobeCatalog.ts). The
+   * free default body is always in here - server-side it's owned
+   * implicitly, and the default below says so before the first hydrate, so
+   * nothing ever has to render a character with an empty wardrobe.
+   *
+   * Server-hydrated only, like ownedItems below: the layered wardrobe is a
+   * fully server-authoritative feature with no local-ledger equivalent (the
+   * 17 monolithic skins it replaced did have one, which is why they used to
+   * be persisted in the localStorage profile - that's gone with them).
+   */
+  ownedWardrobe: string[] = [DEFAULT_BODY_PIECE_ID];
+
+  /**
+   * What the player is currently wearing, one piece per slot. Always has a
+   * BODY entry for the same reason ownedWardrobe always has the default
+   * body in it. Server-hydrated only.
+   */
+  equippedWardrobe: EquippedWardrobe = { BODY: DEFAULT_BODY_PIECE_ID };
 
   /**
    * Accessory/pet ids owned - see economy/itemShop.ts's server counterpart.
@@ -275,19 +267,13 @@ class GameState {
    * X` silently mint TICKETS with no ledger-level guard.
    *
    * To move TICKETS, use the dedicated ledger-backed methods below:
-   * credit via `resolveBet()` (a game round's win); debit via
-   * `purchaseSkin()` (the Item Shop).
+   * credit via `resolveBet()` (a game round's win). Debits happen
+   * server-side only now - the Item Shop's wardrobe/accessory/pet purchases
+   * all go through their real endpoints (see api/client.ts), so there is no
+   * local debit path left to mirror them.
    */
   get tickets() {
     return getBalance(this._ledger, "TICKETS");
-  }
-
-  get currentSkin() {
-    return this._currentSkin;
-  }
-  set currentSkin(v: string) {
-    this._currentSkin = v;
-    this.save();
   }
 
   /** Current bet size, shared across every game so it only needs to be set
@@ -323,8 +309,8 @@ class GameState {
    * Onboarding tutorial cross-scene coordination (see ui/TutorialGuide.ts
    * and OverworldScene's hands-on tutorial steps). The tutorial's
    * "Play a Game" step sends the player into a real game scene (Dice) -
-   * a real scene transition, not just an overlay panel like the Chip/Skin
-   * Attendant steps - so it needs *some* state that survives the scene
+   * a real scene transition, not just an overlay panel like the Coin Kiosk
+   * / Item Shop steps - so it needs *some* state that survives the scene
    * boundary. Deliberately NOT using Phaser's own scene-data mechanism for
    * this (`scene.start(key, data)`): `Systems.start()` only overwrites
    * `settings.data` `if (data)` is truthy, so a later `scene.start(key)`
@@ -340,8 +326,8 @@ class GameState {
    */
   /** True while the tutorial's "Play a Game" step is waiting for the player to enter and complete one real Coin Flip round - CoinFlipScene.create() checks this to show its own highlight/instruction, and clears it once a real round resolves (or the player walks away without playing). */
   tutorialAwaitingGamePlay = false;
-  /** Set by CoinFlipScene right before returning to the Overworld after a tutorial-triggered round resolves, so OverworldScene resumes the tutorial at the Skin Attendant step instead of doing nothing. Read-and-cleared exactly once, by OverworldScene.create(). */
-  tutorialResumeAtSkinAttendant = false;
+  /** Set by CoinFlipScene right before returning to the Overworld after a tutorial-triggered round resolves, so OverworldScene resumes the tutorial at the Item Shop step instead of doing nothing. Read-and-cleared exactly once, by OverworldScene.create(). */
+  tutorialResumeAtItemShop = false;
 
   // ---- Economy: ledger-backed operations ----
   // These delegate to src/economy/*.ts (pure, unit-testable) and persist
@@ -394,23 +380,18 @@ class GameState {
     return tx;
   }
 
-  ownsSkin(id: string): boolean {
-    return this.unlockedSkins.includes(id);
+  /** True if the player owns wardrobe piece `id`. The free default body always reads true. */
+  ownsWardrobePiece(id: string): boolean {
+    return id === DEFAULT_BODY_PIECE_ID || this.ownedWardrobe.includes(id);
+  }
+
+  /** The piece worn in `slot`, or null for "wearing nothing there". */
+  wornInSlot(slot: WardrobeSlot): string | null {
+    return this.equippedWardrobe[slot] ?? null;
   }
 
   ownsItem(id: string): boolean {
     return this.ownedItems.includes(id);
-  }
-
-  /** Attempts to purchase a skin with TICKETS. Returns false if already owned or can't afford it (see economy/skinShop.ts for the detailed-reason version). */
-  purchaseSkin(id: string): boolean {
-    const outcome: PurchaseSkinOutcome = purchaseSkinInternal(
-      this._ledger,
-      this.unlockedSkins,
-      id
-    );
-    if (outcome.ok) this.save();
-    return outcome.ok;
   }
 
   /**
@@ -514,8 +495,6 @@ class GameState {
       this._ledger = createLedger(existing.ledger.gc, existing.ledger.tickets);
       this._ledger.transactions = [...existing.ledger.transactions];
       this._betAmount = existing.betAmount;
-      this._currentSkin = existing.currentSkin;
-      this.unlockedSkins = [...existing.unlockedSkins];
       this._attendantClaimedAt = existing.attendantClaimedAt ?? null;
       this.activeUsername = username;
       this.save(); // persist migration (if any) immediately
@@ -527,8 +506,6 @@ class GameState {
     // gcMultiplier).
     this._ledger = createLedger(0, 0);
     this._betAmount = 25;
-    this._currentSkin = "player";
-    this.unlockedSkins = ["player"];
     this._attendantClaimedAt = null;
     this.activeUsername = username;
     grantSignupBonus(this._ledger, gcMultiplier);
@@ -537,8 +514,6 @@ class GameState {
       passwordHash: hash,
       ledger: this._ledger,
       betAmount: this._betAmount,
-      currentSkin: this._currentSkin,
-      unlockedSkins: this.unlockedSkins,
       attendantClaimedAt: this._attendantClaimedAt
     };
     writeProfiles(profiles);
@@ -548,10 +523,10 @@ class GameState {
   /**
    * Task #37: loads this class's in-memory/read cache from a server
    * MeResponse (the `user` field of POST /auth/signup, POST /auth/login,
-   * POST /skins/buy|equip, POST /claim-bonus, or a plain GET /me) instead
+   * POST /wardrobe/buy|equip, POST /claim-bonus, or a plain GET /me) instead
    * of a localStorage profile. Call this after every one of those calls
-   * succeeds so every getter below (goldCoins, tickets, unlockedSkins,
-   * currentSkin, lastPlayerPosition, attendantClaim*) reflects the
+   * succeeds so every getter below (goldCoins, tickets, ownedWardrobe,
+   * equippedWardrobe, lastPlayerPosition, attendantClaim*) reflects the
    * server's authoritative state.
    *
    * Deliberately does NOT call `save()` - there is no more local profile to
@@ -565,8 +540,13 @@ class GameState {
   hydrateFromServer(me: MeResponse) {
     this.activeUsername = me.username;
     this._ledger = createLedger(me.goldCoins, me.tickets);
-    this.unlockedSkins = [...me.skinsOwned];
-    this._currentSkin = me.equippedSkin;
+    // Defensive `??` on both halves: an older deployed backend, or one
+    // whose wardrobe migration hasn't been run, must still leave the player
+    // with a body to render rather than an empty stack (the server degrades
+    // to exactly this too - see serializers.ts's getWardrobeState).
+    this.ownedWardrobe = [...(me.wardrobe?.owned ?? [DEFAULT_BODY_PIECE_ID])];
+    this.equippedWardrobe = { ...(me.wardrobe?.equipped ?? { BODY: DEFAULT_BODY_PIECE_ID }) };
+    if (!this.equippedWardrobe.BODY) this.equippedWardrobe.BODY = DEFAULT_BODY_PIECE_ID;
     this.ownedItems = [...me.ownedItems];
     this.equippedAccessory = me.equippedAccessory;
     this.equippedPet = me.equippedPet;
@@ -599,8 +579,6 @@ class GameState {
       passwordHash,
       ledger: this._ledger,
       betAmount: this._betAmount,
-      currentSkin: this._currentSkin,
-      unlockedSkins: this.unlockedSkins,
       attendantClaimedAt: this._attendantClaimedAt
     };
     writeProfiles(profiles);

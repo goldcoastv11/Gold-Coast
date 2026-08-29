@@ -56,7 +56,13 @@ router.post("/signup", asyncHandler(async (req, res) => {
       data: { username, email: email ?? null, passwordHash, lastLoginAt: new Date() }
     });
     await tx.balance.create({ data: { userId: user.id, goldCoins: 0, tickets: 0 } });
-    await tx.equippedSkin.create({ data: { userId: user.id, skinId: "player" } });
+    // No equipped-cosmetics row is seeded here any more. Signup used to
+    // insert an equipped_skin row pointing at the free "player" skin; the
+    // layered wardrobe that replaced skins needs no such row, because the
+    // free default body is owned and worn IMPLICITLY (see
+    // economy/wardrobe.ts) rather than by having a row that says so. One
+    // less write on the signup path, and one less way for a new account to
+    // end up with no body: there is no row that could fail to be created.
 
     const bonus = await grantSignupBonus(tx, user.id, multiplier);
     const me = await serializeMe(tx, user.id, user.username);

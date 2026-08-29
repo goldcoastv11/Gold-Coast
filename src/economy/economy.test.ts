@@ -10,7 +10,6 @@ import { GC_PACKAGES, purchasePackage } from "./packages";
 import { grantSignupBonus } from "./signupBonus";
 import { GC_MULTIPLIER_BASE } from "./gcMultiplier";
 import { AD_REWARD_GC_AMOUNT, claimAdRewardGc } from "./adRewards";
-import { canAffordSkin, ownsSkin, purchaseSkin } from "./skinShop";
 
 describe("ledger", () => {
   it("credits and debits move the right currency and record a transaction", () => {
@@ -106,35 +105,17 @@ describe("ad rewards - GC only, never TICKETS", () => {
   });
 });
 
-describe("Item Shop (skin shop) - TICKETS only, fully separate from GC", () => {
-  it("purchases with TICKETS, unlocks the skin, and never reads/writes GC", () => {
-    const ledger = createLedger(999, 1000);
-    const unlocked: string[] = ["player"];
-
-    expect(canAffordSkin(ledger, "skin_001")).toBe(true); // price 250
-    const outcome = purchaseSkin(ledger, unlocked, "skin_001");
-
-    expect(outcome.ok).toBe(true);
-    expect(getBalance(ledger, "TICKETS")).toBe(750);
-    expect(getBalance(ledger, "GC")).toBe(999); // untouched by a skin purchase
-    expect(ownsSkin(unlocked, "skin_001")).toBe(true);
-  });
-
-  it("refuses to re-purchase an already-owned skin", () => {
-    const ledger = createLedger(0, 1000);
-    const unlocked: string[] = ["player", "skin_001"];
-    const outcome = purchaseSkin(ledger, unlocked, "skin_001");
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.reason).toBe("ALREADY_OWNED");
-    expect(getBalance(ledger, "TICKETS")).toBe(1000);
-  });
-
-  it("refuses a purchase it can't afford, leaving the balance untouched", () => {
-    const ledger = createLedger(0, 10);
-    const unlocked: string[] = ["player"];
-    const outcome = purchaseSkin(ledger, unlocked, "skin_002"); // price 1000
-    expect(outcome.ok).toBe(false);
-    if (!outcome.ok) expect(outcome.reason).toBe("INSUFFICIENT_TICKETS");
-    expect(getBalance(ledger, "TICKETS")).toBe(10);
-  });
-});
+/**
+ * The "Item Shop (skin shop) - TICKETS only" block lived here and covered
+ * src/economy/skinShop.ts, a client-side, in-memory skin purchase path.
+ * Both are gone: the layered wardrobe that replaced skins has no local
+ * purchase path at all - buying a piece is POST /wardrobe/buy, debited
+ * through the real server ledger.
+ *
+ * That is a strictly stronger position than these tests described (a
+ * client-side debit was never authoritative anyway), and the same
+ * guarantees are now asserted against the real ledger and a real database
+ * in server/test/wardrobe.test.ts: TICKETS-only, GC never touched,
+ * already-owned refused, unaffordable refused. The pure layering rules that
+ * DO still live on the client are covered in src/wardrobeCatalog.test.ts.
+ */
