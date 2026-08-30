@@ -141,10 +141,18 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
     openNext();
   };
 
+  // Accessories/Pets removed from here (founder direction, 2026-08-30):
+  // that catalog (src/itemCatalog.ts) is the older cosmetics system the
+  // layered wardrobe replaced - emoji badges and companion pets, no longer
+  // sold or wearable through this menu. Backend/routes/catalog are
+  // untouched (additive-only precedent, see CLAUDE.md) - openItemPanel
+  // below still exists and still works, it's just no longer reachable from
+  // here. A player who already equipped one keeps wearing it (see
+  // OverworldScene's applyEquippedAccessory/applyEquippedPet, still called
+  // unconditionally on scene create - this menu removal doesn't touch
+  // that), they just have no in-game way to take it off any more.
   const buttons: Array<[string, () => void]> = [
-    ["👕 Clothing", () => openWardrobeSlotMenu(host, mode)],
-    ["🎩 Accessories", () => openItemPanel(host, "ACCESSORY", mode)],
-    ["🐾 Pets", () => openItemPanel(host, "PET", mode)]
+    ["👕 Clothing", () => openWardrobeSlotMenu(host, mode)]
   ];
   buttons.forEach(([label, openNext], i) => {
     const btn = makeButton(scene, 400, 250 + i * 50, 260, 42, label, Theme.accent, Theme.accentHover, () =>
