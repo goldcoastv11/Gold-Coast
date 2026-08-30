@@ -223,6 +223,18 @@ model Transaction {
   createdAt    DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
 
   @@index([userId, createdAt])
+  // Added for the GC-earned leaderboard (economy/leaderboard.ts): its daily/
+  // weekly/all-time boards each aggregate SUM(amount) GROUP BY user_id over
+  // WHERE type IN (the ~6 "earned" types) AND created_at >= <window start>.
+  // The existing [userId, createdAt] index above is keyed the wrong way
+  // round for that - it helps "one user's history", not "everyone's rows of
+  // a given type" - so without this the daily/weekly boards would run a
+  // full table scan on every open. [type, createdAt] lets Postgres do an
+  // index range scan per included type (bitmap-OR'd across the IN list) and
+  // narrow straight to the window before it ever has to touch a row, and it
+  // still helps the all-time board (no createdAt filter) by narrowing to
+  // just the matching type instead of scanning the whole table.
+  @@index([type, createdAt])
   @@map("transactions")
 }
 

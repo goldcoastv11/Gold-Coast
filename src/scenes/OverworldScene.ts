@@ -26,6 +26,7 @@ import {
 import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel";
 import { claimableCount } from "../ui/challengeDisplay";
 import { openQuickplayPanel, QuickplayPanelHost } from "../ui/QuickplayPanel";
+import { openLeaderboardPanel, LeaderboardPanelHost } from "../ui/LeaderboardPanel";
 import { uniqueGames } from "../ui/quickplayGrid";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
@@ -916,6 +917,14 @@ export class OverworldScene extends Phaser.Scene {
     // those two buttons' own comments for why this column exists at all.
     makeButton(this, 730, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
       this.openQuickplayPanel()
+    ).container.setScrollFactor(0).setDepth(150);
+
+    // "Leaderboard" corner button - founder ask: "a small button that shows
+    // the Daily, Weekly, and all time leaderboard for GC earned". One more
+    // step down the same corner column at x=730 (see Clothes/Challenges/
+    // Quickplay above), y=305 - still well inside the safe band (y=[130,470]).
+    makeButton(this, 730, 305, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
+      this.openLeaderboardPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
     this.updateHud();
@@ -2232,6 +2241,25 @@ export class OverworldScene extends Phaser.Scene {
         this.panelOpen = open;
       },
       goToGame: (sceneKey) => this.goToGame(sceneKey)
+    };
+  }
+
+  /**
+   * The Leaderboard corner button's handler - same shape as the
+   * Quickplay/Challenges wrappers above: the panel itself lives in
+   * ui/LeaderboardPanel.ts, this is just the named seam.
+   */
+  private openLeaderboardPanel() {
+    openLeaderboardPanel(this.leaderboardPanelHost);
+  }
+
+  /** Everything ui/LeaderboardPanel.ts needs back from this scene. */
+  private get leaderboardPanelHost(): LeaderboardPanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      }
     };
   }
 
