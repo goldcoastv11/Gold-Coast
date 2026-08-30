@@ -183,15 +183,6 @@ export class RoomScene extends Phaser.Scene {
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
     this.interactKey = this.input.keyboard!.addKey("E");
 
-    if (isTouchDevice()) {
-      this.touchControls = createTouchControls(this, () => {
-        if (this._panelOpen) return;
-        if (!this.nearDoor()) return;
-        playSfx(this, "select");
-        this.goToCasino();
-      });
-    }
-
     // Fixed chrome, laid out inside the mobile safe zone (y=[130,470] - see
     // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM), same coordinates OverworldScene
     // uses for its own corner button/prompt so the two scenes' chrome lines
@@ -211,6 +202,21 @@ export class RoomScene extends Phaser.Scene {
     // OverworldScene.ts's identical `worldContentSoFar`/`fixedUiSoFar`
     // split for the full reasoning).
     const worldContentSoFar = [...this.children.list];
+
+    // Created HERE, after the snapshot, not before it - same bug this had
+    // in OverworldScene: the joystick and interact button are screen-fixed
+    // UI, but the split is decided purely by which side of that line an
+    // object is created on, so creating them earlier classified them as
+    // world content. They then scrolled and zoomed with the room and slid
+    // off-screen, leaving a phone with no visible controls.
+    if (isTouchDevice()) {
+      this.touchControls = createTouchControls(this, () => {
+        if (this._panelOpen) return;
+        if (!this.nearDoor()) return;
+        playSfx(this, "select");
+        this.goToCasino();
+      });
+    }
 
     this.balanceText = makeTextChip(this, 70, 155, "", { fontSize: "13px", color: Theme.textGold });
     this.balanceText.container.setScrollFactor(0).setDepth(90);
