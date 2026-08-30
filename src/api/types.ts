@@ -506,6 +506,15 @@ export interface ProgressionResponse extends ProgressionState {
   nextLevelRewardGc: number;
   /** Level -> itemCatalog id granted at that level. JSON object keys are strings even though the server's are numbers. */
   cosmeticUnlocks: Record<string, string>;
+  /**
+   * Non-null when a level-up "stop the marker" minigame is owed and not
+   * yet played - see PendingLevelMinigame below. Optional (not just
+   * nullable) purely so existing test fixtures built before this field
+   * existed (e.g. ui/challengeDisplay.test.ts's `progression()` helper)
+   * don't have to be touched to keep compiling; every real server response
+   * always sends it (see routes/progression.ts's GET /progression).
+   */
+  pendingLevelMinigame?: PendingLevelMinigame;
 }
 
 /** One level's payout, returned when a claim's XP pushed the player over a level boundary. */
@@ -522,5 +531,74 @@ export interface ClaimChallengeResponse {
   progression: ProgressionState;
   /** Empty unless this claim's XP crossed one or more level boundaries. */
   levelsGained: LevelGrant[];
+  /**
+   * Non-null when this claim's level-up(s) now owe a "stop the marker"
+   * minigame (see PendingLevelMinigame below) - the trigger point for
+   * src/scenes/LevelUpMinigameScene.ts. A multi-level jump (a big
+   * achievement claim) still only ever owes ONE game, anchored to the
+   * highest level reached - see schema.prisma's PlayerProgress.pendingMinigameLevel
+   * doc comment for why.
+   */
+  pendingLevelMinigame: PendingLevelMinigame;
   user: MeResponse;
+}
+
+// ---- Level-up "stop the marker" timing minigame ----
+// Mirrors server/src/progression/levelMinigame.ts + levelMinigameSession.ts +
+// the /minigame/levelup/* routes in server/src/routes/progression.ts.
+//
+// ECONOMY: this pays Gold Coins only, never Tickets (repo-root CLAUDE.md) -
+// same rule as every other level/challenge reward.
+//
+// TRUST BOUNDARY: the client never reports an accuracy or elapsed-time
+// number to the server. `POST /minigame/levelup/stop` takes only the
+// sessionId; the server computes elapsed time from its OWN clock
+// (`now() - session.startedAt`, the session's row in the DB) and derives
+// accuracy/reward from that alone. See levelMinigameSession.ts's header
+// comment for the full writeup and its one disclosed caveat: network
+// latency between the player's tap and the request landing shifts the
+// scored moment slightly later than the tap itself, which can cost a
+// hair of accuracy, but gives no way to fabricate a better-than-real
+// result.
+
+/** Owed-but-not-yet-played minigame, or null if nothing is owed. Read from GET /progression and from a challenge claim response. */
+export type PendingLevelMinigame = { level: number } | null;
+
+/** POST /minigame/levelup/start (200) */
+export interface LevelMinigameStartResponse {
+  session: {
+    sessionId: string;
+    /** The level this session's payout is anchored to. */
+    level: number;
+    /** How long one full sweep (end-to-end-to-end) takes, in ms - the client renders its own sweep animation from this, seeded at session receipt. */
+    sweepPeriodMs: number;
+    /** ISO instant the SERVER's clock started this session - lets the client re-derive true elapsed time on RESUMPTION (a reload mid-game re-fetches the same still-running session). */
+    startedAt: string;
+  };
+}
+
+/** POST /minigame/levelup/start (409) - nothing owed right now (also what a forged call with no real level-up gets). */
+export interface LevelMinigameNonePendingError {
+  error: string;
+  code: "NONE_PENDING";
+}
+
+/** POST /minigame/levelup/stop (200) */
+export interface LevelMinigameStopResponse {
+  result: {
+    level: number;
+    /** 0 (stopped at either extreme) to 1 (dead centre), as scored by the SERVER's own clock - never the client's. */
+    accuracy: number;
+    /** Gold Coins credited by this result. Never Tickets. */
+    rewardGc: number;
+    /** Where the marker actually was at the server-scored instant, in [-1, 1] (0 = dead centre) - purely for rendering the result, already baked into rewardGc/accuracy. */
+    position: number;
+  };
+  user: MeResponse;
+}
+
+/** POST /minigame/levelup/stop (409) - this session was already completed (a retry/double-tap/replay); nothing was credited. */
+export interface LevelMinigameAlreadyClaimedError {
+  error: string;
+  code: "ALREADY_CLAIMED";
 }

@@ -213,7 +213,9 @@ import type {
   TripleChancePlayResponse,
   ChallengeBoardResponse,
   ClaimChallengeResponse,
-  ProgressionResponse
+  ProgressionResponse,
+  LevelMinigameStartResponse,
+  LevelMinigameStopResponse
 } from "./types";
 
 export function signup(username: string, password: string, email?: string): Promise<SignupResponse> {
@@ -418,4 +420,21 @@ export function claimChallenge(challengeId: string): Promise<ClaimChallengeRespo
 
 export function getProgression(): Promise<ProgressionResponse> {
   return request<ProgressionResponse>("/progression", { method: "GET" });
+}
+
+// ---- Level-up "stop the marker" minigame ----
+// See src/scenes/LevelUpMinigameScene.ts and server/src/progression/
+// levelMinigameSession.ts. Two requests, same as every other stateful game
+// here: start creates/resumes the one session a player is owed, stop scores
+// it - the client never sends an accuracy/elapsed-time number, only the
+// sessionId (see types.ts's TRUST BOUNDARY note on these two responses).
+
+/** Starts (or resumes) the level-up minigame currently owed, if any - a 409 NONE_PENDING means there is nothing to play (also what a forged call with no real level-up behind it gets). */
+export function startLevelMinigame(): Promise<LevelMinigameStartResponse> {
+  return request<LevelMinigameStartResponse>("/minigame/levelup/start", { method: "POST" });
+}
+
+/** Stops the marker and pays out. Idempotent server-side (a second call for the same sessionId returns 409 ALREADY_CLAIMED rather than paying twice). */
+export function stopLevelMinigame(sessionId: string): Promise<LevelMinigameStopResponse> {
+  return request<LevelMinigameStopResponse>("/minigame/levelup/stop", { method: "POST", body: { sessionId } });
 }

@@ -18,6 +18,7 @@ import { WheelScene } from "./scenes/WheelScene";
 import { HiLoScene } from "./scenes/HiLoScene";
 import { BaccaratScene } from "./scenes/BaccaratScene";
 import { VideoPokerScene } from "./scenes/VideoPokerScene";
+import { LevelUpMinigameScene } from "./scenes/LevelUpMinigameScene";
 import { setUnauthorizedHandler } from "./api/client";
 import { startTracking, track, EVENTS } from "./api/track";
 import { gameState } from "./GameState";
@@ -167,7 +168,11 @@ const config: Phaser.Types.Core.GameConfig = {
     WheelScene,
     HiLoScene,
     BaccaratScene,
-    VideoPokerScene
+    VideoPokerScene,
+    // Not a Stake Original - the founder-directed level-up "stop the
+    // marker" skill minigame (see src/scenes/LevelUpMinigameScene.ts and
+    // src/levelUpMinigameLauncher.ts for how it's reached).
+    LevelUpMinigameScene
   ]
 };
 
