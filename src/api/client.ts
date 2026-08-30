@@ -222,7 +222,8 @@ import type {
   ProgressionResponse,
   LevelMinigameStartResponse,
   LevelMinigameStopResponse,
-  LeaderboardResponse
+  LeaderboardResponse,
+  MagazineResponse
 } from "./types";
 
 export function signup(username: string, password: string, email?: string): Promise<SignupResponse> {
@@ -485,4 +486,11 @@ export function stopLevelMinigame(sessionId: string): Promise<LevelMinigameStopR
 /** Daily/weekly/all-time GC-earned boards, plus the caller's own rank on each - see server/src/economy/leaderboard.ts. */
 export function getLeaderboard(): Promise<LeaderboardResponse> {
   return request<LeaderboardResponse>("/leaderboard", { method: "GET" });
+}
+
+// ---- The Magazine (roadmap/magazine) ----
+
+/** Today's five (or fewer) player rooms - stable for the whole UTC day, a new set the next (see server/src/economy/magazine.ts). */
+export function getMagazine(): Promise<MagazineResponse> {
+  return request<MagazineResponse>("/magazine", { method: "GET" });
 }
