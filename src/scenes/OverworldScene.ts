@@ -856,10 +856,29 @@ export class OverworldScene extends Phaser.Scene {
     // the rest of the chrome system's panel/inset outline treatment instead
     // of Text's flat rectangular backgroundColor. See CHIP_BG_SOFT's comment
     // above for why the per-station labels stay on the simpler path.
-    // Y=435, not the original 550 - main.ts's Scale.ENVELOP-on-mobile crops
-    // the canvas to fill a wide phone screen, so nothing needed on-screen
-    // can sit below y=470 any more (see uiHelpers.ts's SAFE_ZONE_BOTTOM).
-    this.promptText = makeTextChip(this, 400, 435, "", {
+    // Y=435, not the original 550 - kept inside uiHelpers.ts's SAFE_ZONE_
+    // BOTTOM band (see that constant's own comment for why the band itself
+    // stays even though it's no longer strictly required for crop-safety).
+    //
+    // X is `screenCenterX`, not a literal 400: main.ts can now widen the
+    // game's own logical width on a wide phone in landscape (see its scale-
+    // config comment) while this readout, the corner buttons and the HUD
+    // below it are all screen-fixed (scrollFactor(0)) - a literal 400 would
+    // drift away from the true center as the canvas gets wider. Computed
+    // once here at scene-create time from the live `this.scale.width`, not
+    // reactively on resize - see the "Known gap" note on
+    // GAME_SHELL_DISPLAY_CENTER_X in uiHelpers.ts for the same scope
+    // boundary applied here: correct for the shape the device is in when
+    // this scene starts, not live mid-scene window resizing.
+    const screenCenterX = this.scale.width / 2;
+    // Right-edge column for the corner buttons below (Clothes/Challenges/
+    // Quickplay/Leaderboard/Magazine) - `this.scale.width - 70` keeps the
+    // same 70px margin from the true right edge that the original literal
+    // 730 kept from the original fixed 800px-wide canvas, instead of
+    // drifting toward screen-center on a widened canvas.
+    const cornerX = this.scale.width - 70;
+
+    this.promptText = makeTextChip(this, screenCenterX, 435, "", {
       fontSize: "16px",
       color: Theme.textPrimary
     });
@@ -881,11 +900,10 @@ export class OverworldScene extends Phaser.Scene {
 
     // "Clothes" corner button - always available, opens the wardrobe
     // (change any layer you already own). Y=155, not the original 30 -
-    // main.ts's Scale.ENVELOP-on-mobile crops the canvas to fill a wide
-    // phone screen, so nothing needed on-screen can sit outside the
-    // measured safe zone y=[130,470] any more (see uiHelpers.ts's
-    // SAFE_ZONE_TOP/BOTTOM).
-    makeButton(this, 730, 155, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
+    // kept inside the safe zone y=[130,470] (see uiHelpers.ts's
+    // SAFE_ZONE_TOP/BOTTOM). X is `cornerX`, not a literal 730 - see that
+    // constant's own comment above.
+    makeButton(this, cornerX, 155, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
       this.openShopCategoryMenu("wardrobe")
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -899,7 +917,7 @@ export class OverworldScene extends Phaser.Scene {
     // it's correct on walking in, not only after a claim.
     this.challengesButton = makeButton(
       this,
-      730,
+      cornerX,
       205,
       CHALLENGES_BTN_W,
       CHALLENGES_BTN_H,
@@ -914,27 +932,27 @@ export class OverworldScene extends Phaser.Scene {
     // "Quickplay" corner button - founder ask: "a button that changes the
     // layout of the games to one like Stake" (a grid of cards instead of
     // walking the floor). Stacked under Clothes/Challenges at the same
-    // x=730, same w/h, one more step down the safe band (y=130-470) - see
-    // those two buttons' own comments for why this column exists at all.
-    makeButton(this, 730, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
+    // x=cornerX, same w/h, one more step down the safe band (y=130-470) -
+    // see those two buttons' own comments for why this column exists at all.
+    makeButton(this, cornerX, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
       this.openQuickplayPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
     // "Leaderboard" corner button - founder ask: "a small button that shows
     // the Daily, Weekly, and all time leaderboard for GC earned". One more
-    // step down the same corner column at x=730 (see Clothes/Challenges/
+    // step down the same corner column at x=cornerX (see Clothes/Challenges/
     // Quickplay above), y=305 - still well inside the safe band (y=[130,470]).
-    makeButton(this, 730, 305, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
+    makeButton(this, cornerX, 305, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
       this.openLeaderboardPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
     // "Magazine" corner button - founder ask: "a 'Magazine' button that
     // shows 5 players rooms... make it random and change every day." One
     // more step down the same safe-band column as Clothes/Challenges/
-    // Quickplay above (y=130-470, x=730 - see those buttons' own
+    // Quickplay above (y=130-470, x=cornerX - see those buttons' own
     // comments). The Leaderboard button took y=305 when it landed, so this sits one
     // more step down at y=355 - still inside the safe band.
-    makeButton(this, 730, 355, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
+    makeButton(this, cornerX, 355, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
       this.openMagazinePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -2120,9 +2138,11 @@ export class OverworldScene extends Phaser.Scene {
    */
   private showToast(message: string, color: string) {
     this.activeToast?.destroy();
+    // X is the live screen center (this.scale.width / 2), not a literal
+    // 400 - see the promptText/cornerX comment in create() for why.
     const toast = makeTextChip(
       this,
-      400,
+      this.scale.width / 2,
       145,
       message,
       { fontSize: "13px", color, fontStyle: "bold" },
