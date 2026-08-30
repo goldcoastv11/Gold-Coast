@@ -714,6 +714,8 @@ export interface LeaderboardEntry {
   username: string;
   earnedGc: number;
   rank: number;
+  /** What this player currently has equipped, keyed by slot - just enough for ui/LeaderboardPanel.ts to draw a small portrait (see LayeredCharacter.ts). No balances, no email, no progression. BODY is always present. */
+  wardrobe: Partial<Record<WardrobeSlot, string>>;
 }
 
 export interface LeaderboardBoard {

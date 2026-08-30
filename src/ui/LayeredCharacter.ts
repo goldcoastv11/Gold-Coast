@@ -159,6 +159,17 @@ export class LayeredCharacter {
     return this.overlays.map((o) => o.texture.key);
   }
 
+  /**
+   * The base sprite plus every overlay, bottom-to-top in the same order
+   * they're drawn - what a caller needs to reparent the whole stack into a
+   * container (e.g. a scrollable list row) or apply a shared mask/scroll
+   * transform to it. Read-only: nothing here changes what apply()/sync()
+   * already do to these objects, it just hands out references to them.
+   */
+  get displayObjects(): Phaser.GameObjects.Sprite[] {
+    return [this.base, ...this.overlays];
+  }
+
   private createOverlay(layer: WardrobeLayer): Phaser.GameObjects.Sprite {
     // Plain sprite, NOT physics.add.sprite: overlays are moved by sync()
     // every frame and never collide with anything, so an Arcade body would

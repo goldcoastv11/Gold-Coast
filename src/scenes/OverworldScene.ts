@@ -920,21 +920,27 @@ export class OverworldScene extends Phaser.Scene {
       this.openQuickplayPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
+    // "Leaderboard" / "Magazine" corner buttons - founder ask ("the corner
+    // column is crowded") moved these two off the right-side x=730 column
+    // (Clothes/Challenges/Quickplay stay put there) onto its mirror on the
+    // left, x=70 - the same 330px offset from the panels' own CX=400 that
+    // 730 is, so the button sits the same distance inside the opposite
+    // edge of the safe band (y=[130,470]) rather than at an arbitrary spot.
+    // Starts at y=205, one step below the GC-balance hud chip at (85,155)
+    // (see that chip's own comment), using the same 50px vertical rhythm
+    // the right-hand column already established.
+    const LEFT_COL_X = 70;
+
     // "Leaderboard" corner button - founder ask: "a small button that shows
-    // the Daily, Weekly, and all time leaderboard for GC earned". One more
-    // step down the same corner column at x=730 (see Clothes/Challenges/
-    // Quickplay above), y=305 - still well inside the safe band (y=[130,470]).
-    makeButton(this, 730, 305, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
+    // the Daily, Weekly, and all time leaderboard for GC earned".
+    makeButton(this, LEFT_COL_X, 205, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
       this.openLeaderboardPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
     // "Magazine" corner button - founder ask: "a 'Magazine' button that
     // shows 5 players rooms... make it random and change every day." One
-    // more step down the same safe-band column as Clothes/Challenges/
-    // Quickplay above (y=130-470, x=730 - see those buttons' own
-    // comments). The Leaderboard button took y=305 when it landed, so this sits one
-    // more step down at y=355 - still inside the safe band.
-    makeButton(this, 730, 355, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
+    // step down from Leaderboard on the same left-hand column.
+    makeButton(this, LEFT_COL_X, 255, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
       this.openMagazinePanel()
     ).container.setScrollFactor(0).setDepth(150);
 

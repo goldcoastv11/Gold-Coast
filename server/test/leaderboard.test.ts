@@ -14,6 +14,7 @@ import { TransactionType } from "@prisma/client";
 import { applyTransaction } from "../src/economy/ledger";
 import { getLeaderboard, LeaderboardResponse } from "../src/economy/leaderboard";
 import { resetDb, signupUser, authed, SignedUpUser } from "./helpers";
+import { DEFAULT_BODY_PIECE_ID } from "../src/wardrobeCatalog";
 
 beforeEach(resetDb);
 
@@ -138,6 +139,53 @@ describe("GET /leaderboard", () => {
     const board = await getBoard(player.token);
     expect(board.allTime.me?.username).toBe(player.username);
     expect(board.allTime.top[0].username).toBe(player.username);
+  });
+
+  it("carries each listed player's equipped wardrobe - just BODY for an account that never bought anything", async () => {
+    const player = await signupUser();
+    const userId = await userIdFor(player.username);
+    await grantAt(userId, "GAME_WIN_GC", 5, NOW);
+
+    const board = await getBoard(player.token);
+    // A player who never bought a piece still resolves to the free default
+    // body - the "never render an invisible player" invariant applies to
+    // the leaderboard the same way it does everywhere else.
+    expect(board.allTime.top[0].wardrobe).toEqual({ BODY: DEFAULT_BODY_PIECE_ID });
+    expect(board.allTime.me?.wardrobe).toEqual({ BODY: DEFAULT_BODY_PIECE_ID });
+  });
+
+  it("carries what a player bought and wore, and nothing beyond wardrobe/rank/name/earnedGc - no balances, no email, no progression", async () => {
+    const player = await signupUser();
+    const userId = await userIdFor(player.username);
+    await grantAt(userId, "AD_REWARD_GC", 1000, NOW); // bankroll to buy with, and counts as "earned"
+    const buy = await request(app)
+      .post("/wardrobe/buy")
+      .set(authed(player.token))
+      .send({ pieceId: "hair_short" });
+    expect(buy.status).toBe(200);
+
+    const board = await getBoard(player.token);
+    const row = board.allTime.top.find((e) => e.userId === userId)!;
+    expect(row.wardrobe).toEqual({ BODY: DEFAULT_BODY_PIECE_ID, HAIR: "hair_short" });
+    expect(Object.keys(row).sort()).toEqual(["earnedGc", "rank", "userId", "username", "wardrobe"]);
+  });
+
+  it("a second player's wardrobe on the board is THEIR gear, not the caller's", async () => {
+    const a = await signupUser();
+    const b = await signupUser();
+    const aId = await userIdFor(a.username);
+    const bId = await userIdFor(b.username);
+    await grantAt(aId, "GAME_WIN_GC", 100, NOW);
+    await grantAt(bId, "AD_REWARD_GC", 1000, NOW);
+    await grantAt(bId, "GAME_WIN_GC", 50, NOW);
+    const buy = await request(app).post("/wardrobe/buy").set(authed(b.token)).send({ pieceId: "hair_short" });
+    expect(buy.status).toBe(200);
+
+    const board = await getBoard(a.token);
+    const rowA = board.allTime.top.find((e) => e.userId === aId)!;
+    const rowB = board.allTime.top.find((e) => e.userId === bId)!;
+    expect(rowA.wardrobe).toEqual({ BODY: DEFAULT_BODY_PIECE_ID });
+    expect(rowB.wardrobe).toEqual({ BODY: DEFAULT_BODY_PIECE_ID, HAIR: "hair_short" });
   });
 });
 
