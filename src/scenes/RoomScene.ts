@@ -6,6 +6,8 @@ import { bodyBox, idleFrame, resolveRig } from "../characterRig";
 import { Theme } from "../ui/Theme";
 import { makeButton, makeTextChip, TextChip } from "../ui/uiHelpers";
 import { openRoomSlotMenu, RoomPanelHost } from "../ui/RoomPanel";
+import { openFurnitureMenu, FurniturePanelHost } from "../ui/FurniturePanel";
+import { FurnitureSlotId } from "../furnitureCatalog";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { playSfx, playMusic } from "../ui/SoundManager";
 import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
@@ -18,13 +20,14 @@ import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/T
  *
  * ## Scope of this slice
  *
- * Wallpaper + flooring only. FURNITURE is the founder-approved third decor
- * category (placed into fixed slots, not freely dragged - see
- * roomCatalog.ts's header) and is intentionally not in this scene yet; it
- * needs its own placement-slot rendering, which is a large enough addition
- * to be its own follow-up rather than shipped half-working here. The room
- * therefore starts, and stays through this slice, genuinely empty of
- * objects - which is the point (see the design note below), not a gap.
+ * Wallpaper + flooring (player-room-v2), plus furniture (roadmap/
+ * room-furniture) placed into four fixed positions - see
+ * furnitureCatalog.ts's header on why furniture is a genuinely different
+ * shape from wallpaper/flooring, not just a third slot bolted onto the
+ * same pattern. Furniture is purely decorative (no physics body - see
+ * buildFurniture's own comment on why collision was skipped deliberately),
+ * rendered via the same "repaint the texture, don't rebuild the object"
+ * pattern applyRoomDecor already uses for the walls/floor.
  *
  * ## The design point this room exists to serve
  *
@@ -69,6 +72,25 @@ const DOOR_ROW = 33;
 const SPAWN_COL = 25;
 const SPAWN_ROW = 28;
 
+/**
+ * World pixel position for each furniture slot (roadmap/room-furniture) -
+ * the "stable data, not array order" identity furnitureCatalog.ts's header
+ * calls for. Four sensible spots, picked to stay clear of the spawn(25,28)
+ * -to-door(25,33) walking corridor (a straight vertical line around
+ * x=400): two against the side walls at mid-height, one in the top-left
+ * corner, one off to the side of the door rather than in front of it.
+ * Furniture is purely decorative (see buildFurniture) so nothing here
+ * needs to double as a walkable-clearance box, but keeping these off the
+ * corridor still matters for how the room READS - a piece the player has
+ * to walk through would look broken even without a collider.
+ */
+const FURNITURE_SLOT_POSITIONS: Record<FurnitureSlotId, { x: number; y: number }> = {
+  WALL_LEFT: { x: 6 * TILE, y: 19 * TILE },
+  WALL_RIGHT: { x: 44 * TILE, y: 19 * TILE },
+  CORNER: { x: 6 * TILE, y: 6 * TILE },
+  BY_DOOR: { x: 39 * TILE, y: 30 * TILE }
+};
+
 export class RoomScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
   private layeredCharacter?: LayeredCharacter;
@@ -84,6 +106,8 @@ export class RoomScene extends Phaser.Scene {
 
   private floorTiles: Phaser.GameObjects.Image[] = [];
   private wallSprites: Phaser.Physics.Arcade.Sprite[] = [];
+  /** One image per furniture slot, always present (created once, hidden when empty) - see buildFurniture. */
+  private furnitureSprites: Partial<Record<FurnitureSlotId, Phaser.GameObjects.Image>> = {};
 
   constructor() {
     super("RoomScene");
@@ -98,10 +122,12 @@ export class RoomScene extends Phaser.Scene {
 
     this.floorTiles = [];
     this.wallSprites = [];
+    this.furnitureSprites = {};
     this._panelOpen = false;
 
     this.buildFloor();
     this.buildWalls();
+    this.buildFurniture();
 
     const spawnX = SPAWN_COL * TILE;
     const spawnY = SPAWN_ROW * TILE;
@@ -163,6 +189,15 @@ export class RoomScene extends Phaser.Scene {
 
     makeButton(this, 730, 155, 130, 40, "🎨 Decorate", Theme.neutral, Theme.neutralHover, () =>
       this.openDecoratePanel()
+    ).container.setScrollFactor(0).setDepth(150);
+
+    // Second chrome button, stacked directly under Decorate - still inside
+    // the mobile safe zone (y=[130,470]). A separate button rather than a
+    // third row inside openRoomSlotMenu: furniture's picker (RoomPanel.ts
+    // ui/FurniturePanel.ts) is a slot-position grid, not a per-category
+    // piece list, different enough to be its own entry point.
+    makeButton(this, 730, 200, 130, 40, "🪑 Furniture", Theme.neutral, Theme.neutralHover, () =>
+      this.openFurniturePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
     this.promptText = makeTextChip(this, 400, 435, "Press E to return to the casino", {
@@ -258,6 +293,31 @@ export class RoomScene extends Phaser.Scene {
     }
   }
 
+  /**
+   * One image per FURNITURE_SLOT_POSITIONS entry, created once (hidden if
+   * the slot is empty) and repainted in place by applyFurniture - same
+   * "build the object graph once, only swap textures/visibility later"
+   * shape buildFloor/buildWalls already use, so buy/place/remove never
+   * needs a destroy/rebuild.
+   *
+   * No physics body: these are purely decorative, not solid. All four
+   * slot positions were picked to sit off the spawn-to-door walking
+   * corridor (see FURNITURE_SLOT_POSITIONS's own comment), so there's
+   * nothing here a collider would actually be protecting the player from -
+   * adding one would only be extra bookkeeping (staticGroup membership,
+   * refreshBody() on every place/remove) for a piece the player was never
+   * going to walk into in the first place.
+   */
+  private buildFurniture() {
+    for (const slotDef of Object.keys(FURNITURE_SLOT_POSITIONS) as FurnitureSlotId[]) {
+      const { x, y } = FURNITURE_SLOT_POSITIONS[slotDef];
+      const pieceId = gameState.furniturePieceInSlot(slotDef);
+      const image = this.add.image(x, y, pieceId ?? "furniture_armchair").setOrigin(0.5, 0.9);
+      image.setVisible(pieceId !== null);
+      this.furnitureSprites[slotDef] = image;
+    }
+  }
+
   private updateHud() {
     this.balanceText.setText(`🪙 ${gameState.goldCoins}`);
   }
@@ -265,6 +325,11 @@ export class RoomScene extends Phaser.Scene {
   private openDecoratePanel() {
     playSfx(this, "click");
     openRoomSlotMenu(this.roomPanelHost);
+  }
+
+  private openFurniturePanel() {
+    playSfx(this, "click");
+    openFurnitureMenu(this.furniturePanelHost);
   }
 
   /**
@@ -283,6 +348,20 @@ export class RoomScene extends Phaser.Scene {
       updateHud: () => this.updateHud(),
       showToast: (message, color) => this.showToast(message, color),
       applyRoomDecor: () => this.applyRoomDecor()
+    };
+  }
+
+  /** Same seam as roomPanelHost above, for ui/FurniturePanel.ts. */
+  private get furniturePanelHost(): FurniturePanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this._panelOpen = open;
+        this.touchControls?.setVisible(!open);
+      },
+      updateHud: () => this.updateHud(),
+      showToast: (message, color) => this.showToast(message, color),
+      applyFurniture: () => this.applyFurniture()
     };
   }
 
@@ -324,5 +403,19 @@ export class RoomScene extends Phaser.Scene {
     const wallKey = gameState.roomPieceInSlot("WALLPAPER");
     this.floorTiles.forEach((t) => t.setTexture(floorKey));
     this.wallSprites.forEach((w) => w.setTexture(wallKey));
+  }
+
+  /** Repaints every furniture slot's image from the current gameState.placedFurniture - same "swap texture/visibility in place" pattern as applyRoomDecor, called after a buy/place/remove. */
+  private applyFurniture() {
+    for (const slotDef of Object.keys(FURNITURE_SLOT_POSITIONS) as FurnitureSlotId[]) {
+      const image = this.furnitureSprites[slotDef];
+      if (!image) continue;
+      const pieceId = gameState.furniturePieceInSlot(slotDef);
+      if (pieceId) {
+        image.setTexture(pieceId).setVisible(true);
+      } else {
+        image.setVisible(false);
+      }
+    }
   }
 }

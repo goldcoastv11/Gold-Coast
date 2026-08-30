@@ -55,6 +55,7 @@ import {
   WardrobeSlot
 } from "./wardrobeCatalog";
 import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, EquippedRoom, RoomSlot } from "./roomCatalog";
+import { FurnitureSlotId, PlacedFurniture } from "./furnitureCatalog";
 import {
   PlaceBetOutcome,
   ResolveBetOutcome,
@@ -221,6 +222,20 @@ class GameState {
     WALLPAPER: ROOM_DEFAULT_PIECE_ID.WALLPAPER,
     FLOORING: ROOM_DEFAULT_PIECE_ID.FLOORING
   };
+
+  /**
+   * Furniture piece ids the player owns (see src/furnitureCatalog.ts).
+   * Unlike ownedRoomDecor, there's no free default to seed this with -
+   * furniture starts genuinely empty. Server-hydrated only.
+   */
+  ownedFurniture: string[] = [];
+
+  /**
+   * What's currently placed, one entry per OCCUPIED slot only - a missing
+   * key means that slot is genuinely empty, not "falls back to a default"
+   * the way equippedRoom works. Server-hydrated only.
+   */
+  placedFurniture: PlacedFurniture = {};
 
   /**
    * Accessory/pet ids owned - see economy/itemShop.ts's server counterpart.
@@ -418,6 +433,24 @@ class GameState {
     return this.equippedRoom[slot] ?? ROOM_DEFAULT_PIECE_ID[slot];
   }
 
+  /** True if the player owns furniture piece `id`. No free defaults here - furniture always has to be bought. */
+  ownsFurniturePiece(id: string): boolean {
+    return this.ownedFurniture.includes(id);
+  }
+
+  /** The piece placed in `slot`, or null - unlike roomPieceInSlot, a furniture slot is normally empty. */
+  furniturePieceInSlot(slot: FurnitureSlotId): string | null {
+    return this.placedFurniture[slot] ?? null;
+  }
+
+  /** Which slot (if any) furniture piece `id` currently occupies - a piece can only ever be in one slot at a time. */
+  furnitureSlotOf(id: string): FurnitureSlotId | null {
+    const entry = (Object.entries(this.placedFurniture) as [FurnitureSlotId, string][]).find(
+      ([, pieceId]) => pieceId === id
+    );
+    return entry ? entry[0] : null;
+  }
+
   ownsItem(id: string): boolean {
     return this.ownedItems.includes(id);
   }
@@ -589,6 +622,13 @@ class GameState {
     };
     if (!this.equippedRoom.WALLPAPER) this.equippedRoom.WALLPAPER = ROOM_DEFAULT_PIECE_ID.WALLPAPER;
     if (!this.equippedRoom.FLOORING) this.equippedRoom.FLOORING = ROOM_DEFAULT_PIECE_ID.FLOORING;
+    // No defensive `??` fallback needed here the way wardrobe/room have one:
+    // furniture has no free default to degrade to, so an older backend or
+    // an unmigrated environment correctly reporting "nothing owned, every
+    // slot empty" (see serializers.ts's getFurnitureState) is already the
+    // right client-side state, not a gap to paper over.
+    this.ownedFurniture = [...(me.furniture?.owned ?? [])];
+    this.placedFurniture = { ...(me.furniture?.placed ?? {}) };
     this.ownedItems = [...me.ownedItems];
     this.equippedAccessory = me.equippedAccessory;
     this.equippedPet = me.equippedPet;

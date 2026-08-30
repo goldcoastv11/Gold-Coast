@@ -5,12 +5,15 @@
  *
  * ## Scope of this slice
  *
- * Furniture is the founder-approved third decor category, but it needs
- * fixed placement SLOTS (a slot INDEX per placed item, not just "one piece
- * per category" the way wallpaper/flooring work) - a different enough
- * shape that it's scoped as its own follow-up rather than bolted on here
- * half-finished. This file, RoomScene.ts and the server's mirror
- * (server/src/roomCatalog.ts) cover wallpaper + flooring only.
+ * Wallpaper + flooring only. Furniture (roadmap/room-furniture) is the
+ * third decor category and lives in its own file, src/furnitureCatalog.ts
+ * (server mirror: server/src/furnitureCatalog.ts) - deliberately NOT a
+ * third RoomSlot value here, because it needs fixed placement SLOTS (a
+ * slot INDEX per placed item, not just "one piece per category" the way
+ * wallpaper/flooring work) and has no free default / always-decorated
+ * invariant, a different enough shape to be its own file rather than
+ * bolted onto this one. See furnitureCatalog.ts's header for the full
+ * comparison.
  *
  * ## Why this mirrors wardrobeCatalog.ts, not itemCatalog.ts
  *
@@ -37,7 +40,7 @@
  * actually charged and persisted; this one is what's shown and rendered.
  */
 
-/** The two decor categories this slice covers. FURNITURE is a planned third slot - see this file's header. */
+/** The two decor categories this slice covers. Furniture is a separate, third category - see this file's header and src/furnitureCatalog.ts. */
 export type RoomSlot = "WALLPAPER" | "FLOORING";
 
 export interface RoomSlotDef {

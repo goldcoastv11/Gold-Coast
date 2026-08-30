@@ -264,6 +264,11 @@ export class BootScene extends Phaser.Scene {
     // is needed there.
     this.createRoomWallpaperTextures();
     this.createRoomFlooringTextures();
+    // Player Room furniture (roadmap/room-furniture) - one texture per
+    // piece in furnitureCatalog.ts's FURNITURE_CATALOG, same
+    // id-is-texture-key convention as the wallpaper/flooring generators
+    // above.
+    this.createFurnitureTextures();
     this.createMinesTexture();
     this.createDiceTexture();
     this.createLimboTexture();
@@ -623,6 +628,193 @@ export class BootScene extends Phaser.Scene {
       g.fillStyle(PALETTE.litEdge, 0.05);
       for (let y = 1; y < s; y += 2) g.fillRect(0, y, s, 1);
       g.generateTexture("room_floor_rug", s, s);
+      g.destroy();
+    }
+  }
+
+  /**
+   * Player Room furniture (roadmap/room-furniture) - one small standalone
+   * prop per piece in furnitureCatalog.ts's FURNITURE_CATALOG, drawn at a
+   * fixed 32x40 footprint and rendered centered on its slot's world
+   * position by RoomScene.ts (see that file's buildFurniture). Same warm
+   * PALETTE and "outline + lit/shade edge" technique as every other prop
+   * in this file - kept small and simple since these sit on the floor
+   * alongside a full-size character and shouldn't compete with it.
+   *
+   * Purely decorative (see RoomScene.ts's header on why furniture has no
+   * collision): the four slot positions were picked to stay clear of the
+   * spawn-to-door walking corridor, so there's nothing here that needs to
+   * physically block the player.
+   */
+  private createFurnitureTextures() {
+    const w = 32;
+    const h = 40;
+
+    // Armchair - a rounded seat back + cushion, warm coral upholstery.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+      g.fillEllipse(16, 37, 22, 6);
+      // back
+      g.fillStyle(PALETTE.coral, 1);
+      g.fillRoundedRect(4, 10, 24, 22, 6);
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokeRoundedRect(4, 10, 24, 22, 6);
+      // seat cushion
+      g.fillStyle(PALETTE.cream, 1);
+      g.fillRoundedRect(6, 24, 20, 10, 3);
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokeRoundedRect(6, 24, 20, 10, 3);
+      // stubby legs
+      g.fillStyle(PALETTE.outline, 1);
+      g.fillRect(7, 34, 3, 5);
+      g.fillRect(22, 34, 3, 5);
+      // lit edge
+      g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+      g.fillRoundedRect(4, 10, 24, 4, 4);
+      g.generateTexture("furniture_armchair", w, h);
+      g.destroy();
+    }
+
+    // Floor Lamp - a thin pole with a warm glowing shade.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+      g.fillEllipse(16, 37, 14, 4);
+      // base
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillRoundedRect(10, 34, 12, 4, 2);
+      g.lineStyle(1.5, PALETTE.outline, 1);
+      g.strokeRoundedRect(10, 34, 12, 4, 2);
+      // pole
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillRect(15, 12, 2, 22);
+      // shade (trapezoid)
+      g.fillStyle(PALETTE.gold, 1);
+      g.fillPoints(
+        [
+          { x: 6, y: 12 },
+          { x: 26, y: 12 },
+          { x: 22, y: 2 },
+          { x: 10, y: 2 }
+        ],
+        true
+      );
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokePoints(
+        [
+          { x: 6, y: 12 },
+          { x: 26, y: 12 },
+          { x: 22, y: 2 },
+          { x: 10, y: 2 }
+        ],
+        true
+      );
+      // glow
+      g.fillStyle(PALETTE.litEdge, 0.35);
+      g.fillTriangle(16, 4, 11, 11, 21, 11);
+      g.generateTexture("furniture_floor_lamp", w, h);
+      g.destroy();
+    }
+
+    // Bookshelf - a tall cabinet with three shelves of colored book spines.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+      g.fillEllipse(16, 37, 24, 5);
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillRoundedRect(3, 3, 26, 32, 3);
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokeRoundedRect(3, 3, 26, 32, 3);
+      const shelfColors = [PALETTE.coral, PALETTE.mint, PALETTE.sky, PALETTE.gold, PALETTE.danger];
+      for (let row = 0; row < 3; row++) {
+        const shelfY = 7 + row * 9;
+        g.fillStyle(PALETTE.cream, 1);
+        g.fillRect(5, shelfY, 22, 7);
+        let x = 6;
+        let i = 0;
+        while (x < 25) {
+          const bw = 2 + (i % 2);
+          g.fillStyle(shelfColors[(row + i) % shelfColors.length], 1);
+          g.fillRect(x, shelfY + 1, bw, 5);
+          x += bw + 1;
+          i++;
+        }
+        g.lineStyle(1, PALETTE.outline, 0.6);
+        g.strokeRect(5, shelfY, 22, 7);
+      }
+      g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+      g.fillRect(3, 3, 26, 2);
+      g.generateTexture("furniture_bookshelf", w, h);
+      g.destroy();
+    }
+
+    // Potted Plant - a compact version of createPlantTexture's shape,
+    // resized to this slot's smaller footprint (that texture is 48x64,
+    // sized for the outdoor plaza; a room slot piece needs to match the
+    // others here).
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+      g.fillEllipse(16, 37, 16, 5);
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillPoints(
+        [
+          { x: 9, y: 26 },
+          { x: 23, y: 26 },
+          { x: 20, y: 36 },
+          { x: 12, y: 36 }
+        ],
+        true
+      );
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokePoints(
+        [
+          { x: 9, y: 26 },
+          { x: 23, y: 26 },
+          { x: 20, y: 36 },
+          { x: 12, y: 36 }
+        ],
+        true
+      );
+      g.fillStyle(PALETTE.cabinet, 1);
+      g.fillRoundedRect(7, 23, 18, 5, 2);
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokeRoundedRect(7, 23, 18, 5, 2);
+      const clumps: Array<[number, number, number, number]> = [
+        [16, 15, 9, PALETTE.mint],
+        [9, 19, 6, PALETTE.mintBright],
+        [23, 19, 6, PALETTE.mint],
+        [16, 6, 6, PALETTE.mintBright]
+      ];
+      for (const [cx, cy, r, color] of clumps) {
+        g.fillStyle(color, 1);
+        g.fillCircle(cx, cy, r);
+        g.lineStyle(1.5, PALETTE.outline, 1);
+        g.strokeCircle(cx, cy, r);
+      }
+      g.generateTexture("furniture_potted_plant", w, h);
+      g.destroy();
+    }
+
+    // Side Table - a small round-topped table, low enough to read as a
+    // side piece rather than competing with the bookshelf/armchair.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.shadeEdge, CONTACT_SHADOW_ALPHA);
+      g.fillEllipse(16, 37, 18, 5);
+      // legs
+      g.fillStyle(PALETTE.outline, 1);
+      g.fillRect(9, 24, 2, 11);
+      g.fillRect(21, 24, 2, 11);
+      // tabletop
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillRoundedRect(5, 18, 22, 8, 3);
+      g.lineStyle(2, PALETTE.outline, 1);
+      g.strokeRoundedRect(5, 18, 22, 8, 3);
+      g.fillStyle(PALETTE.litEdge, LIT_ALPHA);
+      g.fillRoundedRect(5, 18, 22, 3, 3);
+      g.generateTexture("furniture_side_table", w, h);
       g.destroy();
     }
   }
