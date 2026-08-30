@@ -26,6 +26,7 @@
  */
 
 import { applyTransaction, getBalance, TxClient } from "./ledger";
+import { awardXp, progressionAvailable, XP_ITEM_PURCHASE } from "../progression/progress";
 import {
   DEFAULT_PIECE_ID,
   getPiece,
@@ -110,6 +111,13 @@ export async function purchasePiece(
   });
   await tx.roomOwned.create({ data: { userId, pieceId: id } });
   await equipPiece(tx, userId, id);
+
+  // Flat XP for buying - see economy/wardrobe.ts's purchasePiece for why
+  // this is guarded separately (keeps the purchase itself working on an
+  // environment where the progression migration hasn't landed yet).
+  if (await progressionAvailable()) {
+    await awardXp(tx, userId, XP_ITEM_PURCHASE);
+  }
 
   return { ok: true, piece, transaction };
 }
