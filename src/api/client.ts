@@ -221,7 +221,8 @@ import type {
   ClaimChallengeResponse,
   ProgressionResponse,
   LevelMinigameStartResponse,
-  LevelMinigameStopResponse
+  LevelMinigameStopResponse,
+  LeaderboardResponse
 } from "./types";
 
 export function signup(username: string, password: string, email?: string): Promise<SignupResponse> {
@@ -477,4 +478,11 @@ export function startLevelMinigame(): Promise<LevelMinigameStartResponse> {
 /** Stops the marker and pays out. Idempotent server-side (a second call for the same sessionId returns 409 ALREADY_CLAIMED rather than paying twice). */
 export function stopLevelMinigame(sessionId: string): Promise<LevelMinigameStopResponse> {
   return request<LevelMinigameStopResponse>("/minigame/levelup/stop", { method: "POST", body: { sessionId } });
+}
+
+// ---- GC-earned leaderboard ----
+
+/** Daily/weekly/all-time GC-earned boards, plus the caller's own rank on each - see server/src/economy/leaderboard.ts. */
+export function getLeaderboard(): Promise<LeaderboardResponse> {
+  return request<LeaderboardResponse>("/leaderboard", { method: "GET" });
 }
