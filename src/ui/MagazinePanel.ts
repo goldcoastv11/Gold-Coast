@@ -7,6 +7,7 @@ import { ApiError, NetworkError } from "../api/client";
 import type { MagazineResponse, MagazineRoomEntry } from "../api/types";
 import { buildFloorTiles, buildFurnitureImages, buildWallImages } from "../roomRenderer";
 import { fitRoomScale, wrapIndex } from "./magazineGeometry";
+import { isolateFixedUi } from "./sceneCameraSplit";
 
 /**
  * The Magazine (roadmap/magazine) - "a Magazine button that shows 5
@@ -42,8 +43,11 @@ export interface MagazinePanelHost {
 
 // --- Geometry. Panel spans y 126-474, same budget as ChallengesPanel/
 // QuickplayPanel - every element sits inside 130-470 (uiHelpers.ts's
-// SAFE_ZONE_TOP/BOTTOM). ---
-const CX = 400;
+// SAFE_ZONE_TOP/BOTTOM). The panel's center X (`cx` below) is computed
+// inside openMagazinePanel from the live canvas width, not a fixed module
+// const - main.ts can widen the canvas well past 800 on a wide mobile-
+// landscape phone (see its own scale-config comment), and a fixed cx=400
+// would leave this panel left-of-true-center there. ---
 const PANEL_W = 664;
 const PANEL_H = 348;
 const DEPTH_PANEL = 200;
@@ -64,6 +68,10 @@ export function openMagazinePanel(host: MagazinePanelHost) {
   const scene = host.scene;
   host.setPanelOpen(true);
   playSfx(scene, "open");
+
+  // See the "Geometry" block above for why this is computed here instead of
+  // as a module const.
+  const cx = scene.scale.width / 2;
 
   let elements: Phaser.GameObjects.GameObject[] = [];
   let status: "loading" | "ready" | "empty" | "error" = "loading";
@@ -94,14 +102,16 @@ export function openMagazinePanel(host: MagazinePanelHost) {
   const add = <T extends Phaser.GameObjects.GameObject>(obj: T, depth = DEPTH_CONTENT): T => {
     (obj as unknown as { setScrollFactor: (v: number) => void }).setScrollFactor(0);
     (obj as unknown as { setDepth: (v: number) => void }).setDepth(depth);
+    // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+    isolateFixedUi(scene, obj);
     elements.push(obj);
     return obj;
   };
 
   const renderShell = (subtitle: string) => {
-    add(makePanel(scene, CX, 300, PANEL_W, PANEL_H, DEPTH_PANEL), DEPTH_PANEL);
+    add(makePanel(scene, cx, 300, PANEL_W, PANEL_H, DEPTH_PANEL), DEPTH_PANEL);
     add(
-      makeText(scene, CX - PANEL_W / 2 + Tokens.space.xl, 144, "📖 MAGAZINE", {
+      makeText(scene, cx - PANEL_W / 2 + Tokens.space.xl, 144, "📖 MAGAZINE", {
         size: Tokens.type.size.lg,
         weight: Tokens.type.weight.semibold,
         color: Tokens.text.secondary,
@@ -110,7 +120,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
     );
     if (subtitle) {
       add(
-        makeText(scene, CX + PANEL_W / 2 - Tokens.space.xl, 144, subtitle, {
+        makeText(scene, cx + PANEL_W / 2 - Tokens.space.xl, 144, subtitle, {
           size: Tokens.type.size.sm,
           color: Tokens.text.muted,
           align: "right",
@@ -123,7 +133,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
   const addCloseButton = () => {
     const closeBtn = makeButton(
       scene,
-      CX,
+      cx,
       452,
       140,
       32,
@@ -141,7 +151,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
     cleanup();
     renderShell("");
     add(
-      makeText(scene, CX, 280, message, {
+      makeText(scene, cx, 280, message, {
         size: Tokens.type.size.md,
         color: Tokens.text.secondary,
         align: "center",
@@ -152,7 +162,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
     if (retry) {
       const retryBtn = makeButton(
         scene,
-        CX,
+        cx,
         336,
         160,
         32,
@@ -170,7 +180,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
 
   /** Draws one room, scaled to fit the well, inside a plain Container - see this file's header on why this reuses roomRenderer.ts rather than a second art pipeline. Read-only: nothing drawn here is interactive. */
   const drawRoom = (entry: MagazineRoomEntry, w: number, h: number, scale: number) => {
-    const originX = CX - w / 2;
+    const originX = cx - w / 2;
     const originY = WELL_CY - h / 2;
 
     const frame = scene.add.graphics();
@@ -197,7 +207,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
     const { scale, w, h } = fitRoomScale(WELL_MAX_W, WELL_MAX_H);
 
     add(
-      makeText(scene, CX, 164, entry.username, {
+      makeText(scene, cx, 164, entry.username, {
         size: Tokens.type.size.xxl,
         weight: Tokens.type.weight.semibold,
         color: Tokens.text.primary,
@@ -209,8 +219,8 @@ export function openMagazinePanel(host: MagazinePanelHost) {
     drawRoom(entry, w, h, scale);
 
     if (data.rooms.length > 1) {
-      const wellLeft = CX - w / 2;
-      const wellRight = CX + w / 2;
+      const wellLeft = cx - w / 2;
+      const wellRight = cx + w / 2;
 
       const prevBtn = makeButton(
         scene,
@@ -249,7 +259,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
       add(nextBtn.container);
 
       add(
-        makeText(scene, CX, WELL_CY + h / 2 + 18, `${index + 1} / ${data.rooms.length}`, {
+        makeText(scene, cx, WELL_CY + h / 2 + 18, `${index + 1} / ${data.rooms.length}`, {
           size: Tokens.type.size.sm,
           color: Tokens.text.muted,
           align: "center",

@@ -41,6 +41,7 @@ import {
   InstructionHandle
 } from "../ui/TutorialGuide";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
+import { registerUiCamera, isolateFixedUi, isolateWorldObject } from "../ui/sceneCameraSplit";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
@@ -432,6 +433,8 @@ export class OverworldScene extends Phaser.Scene {
    * handleMovement()) is what keeps the clothes from trailing the body.
    */
   private layeredCharacter?: LayeredCharacter;
+  /** Second camera, zoom pinned at 1, that every screen-fixed UI element renders through instead of the zoomed main camera - see updateCameraZoom()/ui/sceneCameraSplit.ts. */
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private wasd!: Record<string, Phaser.Input.Keyboard.Key>;
   private interactKey!: Phaser.Input.Keyboard.Key;
@@ -817,13 +820,33 @@ export class OverworldScene extends Phaser.Scene {
     this.cameras.main.setBounds(0, 0, MAP_COLS * TILE, MAP_ROWS * TILE);
     this.physics.world.setBounds(0, 0, MAP_COLS * TILE, MAP_ROWS * TILE);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
-    // NOTE: deliberately NOT zooming this camera. Phaser zoom scales the
-    // position of every object relative to the camera's center - including
-    // scrollFactor(0) "screen-fixed" UI. Only elements sitting exactly at
-    // the canvas center (400,300) happened to look right; anything off-
-    // center (like a corner button) silently rendered off-screen. The map
-    // is large enough (80x56 tiles vs an 800x600 viewport) that exploring
-    // it still requires walking around even without an extra zoom.
+
+    // Camera zoom (2026-08 responsive-zoom pass) + the screen-fixed-UI
+    // camera split it needs - see this class's own updateCameraZoom() and
+    // ui/sceneCameraSplit.ts's header for the full mechanics/reasoning.
+    // Previously this camera deliberately never zoomed at all (Phaser zoom
+    // scales scrollFactor(0) "screen-fixed" UI right along with the world -
+    // only an element sitting exactly at the camera's own center rendered
+    // correctly, anything off-center silently ended up off-screen). That's
+    // solved now by rendering fixed UI through `uiCamera` (zoom pinned at
+    // 1) instead, so the main camera is free to zoom - added second/on top
+    // so it draws over the world, `transparent` so the world shows through
+    // beneath it.
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.setName("ui");
+    this.uiCamera.transparent = true;
+    registerUiCamera(this, this.uiCamera);
+    this.updateCameraZoom();
+    // Keeps the zoom (and the ui camera's own viewport size) correct if the
+    // live canvas width changes while this scene is up - main.ts can widen
+    // it mid-session (a rotation, or the 400ms poll catching up after a
+    // scene transition landed before it did - see main.ts's own comment on
+    // why that poll exists).
+    const onResize = () => this.updateCameraZoom();
+    this.scale.on(Phaser.Scale.Events.RESIZE, onResize);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, onResize);
+    });
 
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<
@@ -852,6 +875,15 @@ export class OverworldScene extends Phaser.Scene {
       });
     }
 
+    // Everything created ABOVE this line is world-space (tilemap, floor,
+    // decorations, walls, stations, ambient NPCs, the player, zone signs) -
+    // snapshotted here so it can be excluded from `uiCamera` below (see
+    // ui/sceneCameraSplit.ts's header - otherwise it would render a second,
+    // unzoomed, duplicate copy through that camera). Everything created
+    // BELOW this line through the end of create() is screen-fixed UI, and
+    // gets the opposite treatment a little further down.
+    const worldContentSoFar = [...this.children.list];
+
     // UI (fixed to camera) - rounded warm-cream chips (makeTextChip), matching
     // the rest of the chrome system's panel/inset outline treatment instead
     // of Text's flat rectangular backgroundColor. See CHIP_BG_SOFT's comment
@@ -871,12 +903,6 @@ export class OverworldScene extends Phaser.Scene {
     // boundary applied here: correct for the shape the device is in when
     // this scene starts, not live mid-scene window resizing.
     const screenCenterX = this.scale.width / 2;
-    // Right-edge column for the corner buttons below (Clothes/Challenges/
-    // Quickplay/Leaderboard/Magazine) - `this.scale.width - 70` keeps the
-    // same 70px margin from the true right edge that the original literal
-    // 730 kept from the original fixed 800px-wide canvas, instead of
-    // drifting toward screen-center on a widened canvas.
-    const cornerX = this.scale.width - 70;
 
     this.promptText = makeTextChip(this, screenCenterX, 435, "", {
       fontSize: "16px",
@@ -891,19 +917,56 @@ export class OverworldScene extends Phaser.Scene {
     // see main.ts's Scale.ENVELOP note) that pushed it above the measured
     // safe band and it got cropped off-screen, so players couldn't see
     // their own GC balance. Pinned at a static spot inside y=[130,470]
-    // instead, same fix pattern as the "Clothes" button below.
+    // instead, same fix pattern as the top button row below - kept at its
+    // own y=155 (below the button row's y=100) so the two never collide,
+    // per founder direction ("make sure they don't collide with the coin/
+    // level HUD").
     this.hudText = makeTextChip(this, 85, 155, "", { fontSize: "13px", color: Theme.textGold }, {
       paddingX: 8,
       paddingY: 4
     });
     this.hudText.container.setScrollFactor(0).setDepth(150);
 
+    // Top button row - Clothes/Challenges/Quickplay/Leaderboard/Magazine,
+    // founder direction ("all the buttons need to be across the top of the
+    // screen, not the sides"): previously two separate vertical columns
+    // (Clothes/Challenges/Quickplay pinned to the right edge, Leaderboard/
+    // Magazine mirrored on the left), replaced here with one row.
+    //
+    // Fixed button width + gap (not 5 even slots across the live width):
+    // every button stays the same physical size on every device, and the
+    // whole row is centered on the live canvas and grows its OUTER margins
+    // on a wider phone instead of stretching - same "extra width becomes
+    // margin, not a bigger control" choice every modal panel in this
+    // codebase already makes (see e.g. ChallengesPanel.ts's PANEL_W
+    // comment). At the narrowest supported width (800, desktop or a phone
+    // pinned to the floor - see main.ts's LANDSCAPE_MIN_WIDTH) the row's
+    // total width (5*130 + 4*12 = 698) still leaves real margin on both
+    // sides, so this never runs off-canvas.
+    const TOP_ROW_Y = 100;
+    const TOP_ROW_BTN_W = 130;
+    const TOP_ROW_BTN_H = 40;
+    const TOP_ROW_GAP = 12;
+    const topRowCount = 5;
+    const topRowTotalW = TOP_ROW_BTN_W * topRowCount + TOP_ROW_GAP * (topRowCount - 1);
+    const topRowLeft = this.scale.width / 2 - topRowTotalW / 2;
+    const topRowX = (i: number) => topRowLeft + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
+
+    // "Leaderboard" corner button - founder ask: "a small button that shows
+    // the Daily, Weekly, and all time leaderboard for GC earned".
+    makeButton(this, topRowX(0), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
+      this.openLeaderboardPanel()
+    ).container.setScrollFactor(0).setDepth(150);
+
+    // "Magazine" corner button - founder ask: "a 'Magazine' button that
+    // shows 5 players rooms... make it random and change every day."
+    makeButton(this, topRowX(1), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
+      this.openMagazinePanel()
+    ).container.setScrollFactor(0).setDepth(150);
+
     // "Clothes" corner button - always available, opens the wardrobe
-    // (change any layer you already own). Y=155, not the original 30 -
-    // kept inside the safe zone y=[130,470] (see uiHelpers.ts's
-    // SAFE_ZONE_TOP/BOTTOM). X is `cornerX`, not a literal 730 - see that
-    // constant's own comment above.
-    makeButton(this, cornerX, 155, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
+    // (change any layer you already own).
+    makeButton(this, topRowX(2), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
       this.openShopCategoryMenu("wardrobe")
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -917,8 +980,8 @@ export class OverworldScene extends Phaser.Scene {
     // it's correct on walking in, not only after a claim.
     this.challengesButton = makeButton(
       this,
-      cornerX,
-      205,
+      topRowX(3),
+      TOP_ROW_Y,
       CHALLENGES_BTN_W,
       CHALLENGES_BTN_H,
       "🏆 Challenges",
@@ -931,36 +994,22 @@ export class OverworldScene extends Phaser.Scene {
 
     // "Quickplay" corner button - founder ask: "a button that changes the
     // layout of the games to one like Stake" (a grid of cards instead of
-    // walking the floor). Stacked under Clothes/Challenges at the same
-    // x=cornerX, same w/h, one more step down the safe band (y=130-470) -
-    // see those two buttons' own comments for why this column exists at all.
-    makeButton(this, cornerX, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
+    // walking the floor).
+    makeButton(this, topRowX(4), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
       this.openQuickplayPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
-    // "Leaderboard" / "Magazine" corner buttons - founder ask ("the corner
-    // column is crowded") moved these two off the right-side x=730 column
-    // (Clothes/Challenges/Quickplay stay put there) onto its mirror on the
-    // left, x=70 - the same 330px offset from the panels' own CX=400 that
-    // 730 is, so the button sits the same distance inside the opposite
-    // edge of the safe band (y=[130,470]) rather than at an arbitrary spot.
-    // Starts at y=205, one step below the GC-balance hud chip at (85,155)
-    // (see that chip's own comment), using the same 50px vertical rhythm
-    // the right-hand column already established.
-    const LEFT_COL_X = 70;
-
-    // "Leaderboard" corner button - founder ask: "a small button that shows
-    // the Daily, Weekly, and all time leaderboard for GC earned".
-    makeButton(this, LEFT_COL_X, 205, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
-      this.openLeaderboardPanel()
-    ).container.setScrollFactor(0).setDepth(150);
-
-    // "Magazine" corner button - founder ask: "a 'Magazine' button that
-    // shows 5 players rooms... make it random and change every day." One
-    // step down from Leaderboard on the same left-hand column.
-    makeButton(this, LEFT_COL_X, 255, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
-      this.openMagazinePanel()
-    ).container.setScrollFactor(0).setDepth(150);
+    // Second half of the world/fixed-UI split started at
+    // `worldContentSoFar` above - everything created between the two
+    // snapshots (promptText/hudText/the top button row) is screen-fixed, so
+    // the main camera skips it and it renders via `uiCamera` instead. The
+    // tutorial dialogue kicked off below is NOT included here - its own
+    // panel calls isolateFixedUi() itself (see ui/TutorialGuide.ts), since
+    // whether it shows up synchronously or not shouldn't matter to this
+    // snapshot's timing.
+    const fixedUiSoFar = this.children.list.filter((obj) => !worldContentSoFar.includes(obj));
+    isolateWorldObject(this, worldContentSoFar);
+    isolateFixedUi(this, fixedUiSoFar);
 
     this.updateHud();
 
@@ -1184,6 +1233,42 @@ export class OverworldScene extends Phaser.Scene {
    * specifically bypass this gate without reopening that whole class of
    * bug - proximity/interaction/HUD stay blocked no matter what.
    */
+
+  /**
+   * Sets the main camera's zoom, and keeps `uiCamera` sized to match the
+   * live canvas.
+   *
+   * Founder report ("it needs to be zoomed in more, right now it is too
+   * overwhelming for the player because you can see everything"): on a
+   * wide mobile-landscape phone, main.ts widens this game's own logical
+   * canvas to match the device's aspect ratio (see its own scale-config
+   * comment) so nothing gets cropped - but at a flat zoom of 1, that
+   * widened canvas reveals MORE of the world horizontally than this game's
+   * original fixed-800-wide design (or a desktop browser, which never
+   * widens) ever showed. Zooming the main camera in by exactly `live width
+   * / 800` cancels that extra reveal back out, so a wide phone always
+   * shows the SAME amount of world horizontally as desktop does - scaling
+   * with the viewport rather than one fixed zoom value that would only
+   * ever be correct for one specific aspect ratio (per the founder's own
+   * follow-up: "scale the zoom to the viewport"). Desktop
+   * (`isTouchDevice()` false) never resizes past 800 in the first place -
+   * see main.ts's LANDSCAPE_MIN_WIDTH - so this always computes to exactly
+   * 1 there, i.e. unchanged from before this pass, per the founder's
+   * "desktop should stay close to how it looks today."
+   *
+   * `uiCamera`'s own viewport is kept matched to the live canvas size (NOT
+   * zoomed - see ui/sceneCameraSplit.ts) so every screen-fixed element
+   * (HUD, top button row, modals, the touch joystick) stays positioned by
+   * its own already-live-width-aware math (see e.g. `cornerX`/
+   * `screenCenterX` above) and simply isn't touched by the main camera's
+   * zoom at all.
+   */
+  private updateCameraZoom() {
+    const zoom = isTouchDevice() ? this.scale.width / 800 : 1;
+    this.cameras.main.setZoom(zoom);
+    this.uiCamera.setSize(this.scale.width, this.scale.height);
+  }
+
   update() {
     this.updateAmbientNpcs();
 
@@ -1688,9 +1773,15 @@ export class OverworldScene extends Phaser.Scene {
 
   private showComingSoonPanel(label: string) {
     this.panelOpen = true;
-    const panel = makePanel(this, 400, 300, 380, 170, 200).setScrollFactor(0);
+    // X from the live canvas, not a literal 400 - see create()'s
+    // screenCenterX comment for why (main.ts can widen the canvas on a wide
+    // mobile-landscape phone). Y stays literal: canvas height never varies
+    // (see main.ts's scale-config comment), so 300/275/305/350 already are
+    // "the live center" on every device.
+    const cx = this.scale.width / 2;
+    const panel = makePanel(this, cx, 300, 380, 170, 200).setScrollFactor(0);
     const title = this.add
-      .text(400, 275, `🚧 ${label}`, {
+      .text(cx, 275, `🚧 ${label}`, {
         fontSize: "19px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -1699,14 +1790,14 @@ export class OverworldScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(201);
     const sub = this.add
-      .text(400, 305, "This game is on its way. Check back soon!", {
+      .text(cx, 305, "This game is on its way. Check back soon!", {
         fontSize: "13px",
         color: Theme.textMuted
       })
       .setOrigin(0.5)
       .setScrollFactor(0)
       .setDepth(201);
-    const okBtn = makeButton(this, 400, 350, 120, 40, "OK", Theme.neutral, Theme.neutralHover, () => {
+    const okBtn = makeButton(this, cx, 350, 120, 40, "OK", Theme.neutral, Theme.neutralHover, () => {
       panel.destroy();
       title.destroy();
       sub.destroy();
@@ -1714,6 +1805,8 @@ export class OverworldScene extends Phaser.Scene {
       this.panelOpen = false;
     });
     okBtn.container.setScrollFactor(0).setDepth(201);
+    // Screen-fixed - see updateCameraZoom()/ui/sceneCameraSplit.ts.
+    isolateFixedUi(this, [panel, title, sub, okBtn.container]);
   }
 
   /**
@@ -1774,9 +1867,11 @@ export class OverworldScene extends Phaser.Scene {
     }
     this.panelOpen = true;
     playSfx(this, "open");
+    // X from the live canvas, not a literal 400 - see create()'s
+    // screenCenterX comment. Y stays literal (canvas height never varies).
     offerCoinKiosk(
       this,
-      400,
+      this.scale.width / 2,
       300,
       () => this.runAttendantClaimShuffle(),
       () => {
@@ -1881,9 +1976,12 @@ export class OverworldScene extends Phaser.Scene {
     // hit COOLDOWN returned above and is never counted.
     track(EVENTS.KIOSK_CLAIM, { gcAmount: result.granted.gcAmount });
 
-    const panel = makePanel(this, 400, 300, 420, 260, 200).setScrollFactor(0);
+    // X from the live canvas, not a literal 400 - see create()'s
+    // screenCenterX comment.
+    const cx = this.scale.width / 2;
+    const panel = makePanel(this, cx, 300, 420, 260, 200).setScrollFactor(0);
     const title = this.add
-      .text(400, 195, "🪙 Coin Kiosk's Shuffle", {
+      .text(cx, 195, "🪙 Coin Kiosk's Shuffle", {
         fontSize: "17px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -1894,7 +1992,7 @@ export class OverworldScene extends Phaser.Scene {
 
     const handle = createShuffleCupReveal(
       this,
-      400,
+      cx,
       302,
       GC_MULTIPLIER_BASE,
       () => {
@@ -1909,6 +2007,8 @@ export class OverworldScene extends Phaser.Scene {
       result.granted.gcMultiplier
     );
     handle.container.setScrollFactor(0).setDepth(201);
+    // Screen-fixed - see updateCameraZoom()/ui/sceneCameraSplit.ts.
+    isolateFixedUi(this, [panel, title, handle.container]);
     handle.start();
   }
 
@@ -1926,7 +2026,9 @@ export class OverworldScene extends Phaser.Scene {
    */
   private runTripleChanceOffer(startingAmount: number): Promise<TripleChanceOutcome> {
     return new Promise((resolve) => {
-      offerTripleChance(this, 400, 300, startingAmount, resolve, () => this.updateHud());
+      // X from the live canvas, not a literal 400 - see create()'s
+      // screenCenterX comment.
+      offerTripleChance(this, this.scale.width / 2, 300, startingAmount, resolve, () => this.updateHud());
     });
   }
 
@@ -1945,10 +2047,14 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private showResultPanel(message: string) {
-    const panel = makePanel(this, 400, 300, 420, 220, 200).setScrollFactor(0);
+    // X from the live canvas, not a literal 400 - see create()'s
+    // screenCenterX comment. The two buttons below keep their original
+    // +/-60/70 offsets from this center rather than literal 340/470.
+    const cx = this.scale.width / 2;
+    const panel = makePanel(this, cx, 300, 420, 220, 200).setScrollFactor(0);
 
     const title = this.add
-      .text(400, 255, message, {
+      .text(cx, 255, message, {
         fontSize: "22px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -1958,7 +2064,7 @@ export class OverworldScene extends Phaser.Scene {
       .setDepth(201);
 
     const balance = this.add
-      .text(400, 288, `🪙 Gold Coins: ${gameState.goldCoins}`, {
+      .text(cx, 288, `🪙 Gold Coins: ${gameState.goldCoins}`, {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -1978,12 +2084,12 @@ export class OverworldScene extends Phaser.Scene {
     // Same cooldown-aware button as the very first claim, and same ad-gate
     // (watch another ad, then the shuffle cups run again) - the ad-watch is
     // the gate every claim goes through now, not just the first.
-    const againBtn = this.createAttendantClaimButton(340, 340, 140, 44, "Claim Again", () => {
+    const againBtn = this.createAttendantClaimButton(cx - 60, 340, 140, 44, "Claim Again", () => {
       cleanup();
       this.panelOpen = true;
       offerCoinKiosk(
         this,
-        400,
+        cx,
         300,
         () => this.runAttendantClaimShuffle(),
         () => {
@@ -1993,7 +2099,7 @@ export class OverworldScene extends Phaser.Scene {
     });
     againBtn.container.setScrollFactor(0).setDepth(201);
 
-    const doneBtn = makeButton(this, 470, 340, 100, 44, "Done", Theme.neutral, Theme.neutralHover, () => {
+    const doneBtn = makeButton(this, cx + 70, 340, 100, 44, "Done", Theme.neutral, Theme.neutralHover, () => {
       cleanup();
       this.panelOpen = false;
       this.updateHud();
@@ -2015,6 +2121,8 @@ export class OverworldScene extends Phaser.Scene {
       this.events.emit("tutorial:kioskClaimed");
     });
     doneBtn.container.setScrollFactor(0).setDepth(201);
+    // Screen-fixed - see updateCameraZoom()/ui/sceneCameraSplit.ts.
+    isolateFixedUi(this, [panel, title, balance, againBtn.container, doneBtn.container]);
   }
 
   private updateHud() {
@@ -2155,6 +2263,8 @@ export class OverworldScene extends Phaser.Scene {
       { paddingX: 10, paddingY: 5 }
     );
     toast.container.setScrollFactor(0).setDepth(210).setAlpha(0);
+    // Screen-fixed - see updateCameraZoom()/ui/sceneCameraSplit.ts.
+    isolateFixedUi(this, toast.container);
     this.activeToast = toast;
 
     this.tweens.add({

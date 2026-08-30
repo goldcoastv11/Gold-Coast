@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { FURNITURE_CATALOG, FURNITURE_SLOTS, FurniturePieceDef, FurnitureSlotId, getFurnitureSlotDef } from "../furnitureCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
+import { isolateFixedUi } from "./sceneCameraSplit";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
@@ -62,24 +63,30 @@ export function openFurnitureMenu(host: FurniturePanelHost) {
   host.setPanelOpen(true);
   playSfx(scene, "open");
 
+  // X from the live canvas, not a literal 400 - main.ts can widen the
+  // canvas well past 800 on a wide mobile-landscape phone (see its own
+  // scale-config comment), and a fixed 400 would leave this panel
+  // left-of-true-center there.
+  const cx = scene.scale.width / 2;
+
   const elements: Phaser.GameObjects.GameObject[] = [];
   const cleanup = () => elements.forEach((e) => e.destroy());
 
   const panelHeight = 100 + FURNITURE_SLOTS.length * 60 + 60;
-  const panel = makePanel(scene, 400, 300, 420, panelHeight, 200).setScrollFactor(0);
+  const panel = makePanel(scene, cx, 300, 420, panelHeight, 200).setScrollFactor(0);
   elements.push(panel);
 
   const panelTop = 300 - panelHeight / 2;
 
   const title = scene.add
-    .text(400, panelTop + 30, "🪑 Furniture", { fontSize: "20px", color: Theme.textGold, fontStyle: "bold" })
+    .text(cx, panelTop + 30, "🪑 Furniture", { fontSize: "20px", color: Theme.textGold, fontStyle: "bold" })
     .setOrigin(0.5)
     .setScrollFactor(0)
     .setDepth(201);
   elements.push(title);
 
   const sub = scene.add
-    .text(400, panelTop + 52, "Tap a spot to fill, move or clear it", {
+    .text(cx, panelTop + 52, "Tap a spot to fill, move or clear it", {
       fontSize: "12px",
       color: Theme.textMuted
     })
@@ -95,7 +102,7 @@ export function openFurnitureMenu(host: FurniturePanelHost) {
 
     const btn = makeButton(
       scene,
-      400,
+      cx,
       y,
       340,
       48,
@@ -113,7 +120,7 @@ export function openFurnitureMenu(host: FurniturePanelHost) {
 
   const closeBtn = makeButton(
     scene,
-    400,
+    cx,
     panelTop + 88 + FURNITURE_SLOTS.length * 60 + 4,
     140,
     40,
@@ -127,12 +134,17 @@ export function openFurnitureMenu(host: FurniturePanelHost) {
   );
   closeBtn.container.setScrollFactor(0).setDepth(201);
   elements.push(closeBtn.container);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, elements);
 }
 
 /** One slot's piece list - buy an unowned piece (inventory only, does not place), place/move an owned one here, or remove the slot's current occupant. */
 export function openFurniturePiecePanel(host: FurniturePanelHost, slot: FurnitureSlotId) {
   const scene = host.scene;
   playSfx(scene, "open");
+  // X from the live canvas, not a literal 400 - see openFurnitureMenu's own
+  // comment above.
+  const cx = scene.scale.width / 2;
   let elements: Phaser.GameObjects.GameObject[] = [];
 
   const slotName = getFurnitureSlotDef(slot)?.name ?? slot;
@@ -148,13 +160,13 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
 
     const occupantId = gameState.furniturePieceInSlot(slot);
     const panelHeight = 60 + pieces.length * 58 + (occupantId ? 106 : 60);
-    const panel = makePanel(scene, 400, 300, 460, panelHeight, 200).setScrollFactor(0);
+    const panel = makePanel(scene, cx, 300, 460, panelHeight, 200).setScrollFactor(0);
     elements.push(panel);
 
     const panelTop = 300 - panelHeight / 2;
 
     const title = scene.add
-      .text(400, panelTop + 30, `🪑 ${slotName}`, {
+      .text(cx, panelTop + 30, `🪑 ${slotName}`, {
         fontSize: "20px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -165,7 +177,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
     elements.push(title);
 
     const sub = scene.add
-      .text(400, panelTop + 52, `You have ${gameState.goldCoins} Gold Coins`, {
+      .text(cx, panelTop + 52, `You have ${gameState.goldCoins} Gold Coins`, {
         fontSize: "13px",
         color: Theme.textMuted
       })
@@ -174,13 +186,19 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
       .setDepth(201);
     elements.push(sub);
 
+    // Row-relative x's below (swatch/name/price/buy-place) were literal
+    // absolute positions (219/245/540) derived from the panel's old fixed
+    // center 400 (panel left edge 400-230=170, so e.g. 219=170+49) - now
+    // offset from the live `cx` the same way instead (see RoomPanel.ts's
+    // identical comment - this is the same layout, adapted for furniture).
+    const rowLeft = cx - 230;
     pieces.forEach((def: FurniturePieceDef, i: number) => {
       const y = panelTop + 78 + i * 58;
-      const row = makeInset(scene, 400, y, 400, 48, 10);
+      const row = makeInset(scene, cx, y, 400, 48, 10);
       row.setScrollFactor(0).setDepth(200);
       elements.push(row);
 
-      const swatch = scene.add.rectangle(219, y, 28, 28, def.placeholderColor).setScrollFactor(0).setDepth(201);
+      const swatch = scene.add.rectangle(rowLeft + 49, y, 28, 28, def.placeholderColor).setScrollFactor(0).setDepth(201);
       swatch.setStrokeStyle(1, Theme.outline, 0.4);
       elements.push(swatch);
 
@@ -189,7 +207,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
       const placedHere = placedSlot === slot;
 
       const nameLabel = scene.add
-        .text(245, y, `${def.name}${placedHere ? " (here)" : ""}`, {
+        .text(rowLeft + 75, y, `${def.name}${placedHere ? " (here)" : ""}`, {
           fontSize: "14px",
           color: placedHere ? Theme.textAccent : Theme.textPrimary,
           fontStyle: placedHere ? "bold" : "normal"
@@ -201,7 +219,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
 
       if (!owned) {
         const priceLabel = scene.add
-          .text(245, y + 16, `${def.price} Gold Coins`, { fontSize: "12px", color: Theme.textMuted })
+          .text(rowLeft + 75, y + 16, `${def.price} Gold Coins`, { fontSize: "12px", color: Theme.textMuted })
           .setOrigin(0, 0.5)
           .setScrollFactor(0)
           .setDepth(201);
@@ -210,7 +228,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
         const canAfford = gameState.goldCoins >= def.price;
         const buyBtn = makeButton(
           scene,
-          540,
+          rowLeft + 370,
           y,
           90,
           42,
@@ -243,7 +261,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
         const label = placedHere ? "Here" : placedSlot ? "Move here" : "Place";
         const placeBtn = makeButton(
           scene,
-          540,
+          rowLeft + 370,
           y,
           90,
           42,
@@ -275,7 +293,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
     if (occupantId) {
       const removeBtn = makeButton(
         scene,
-        400,
+        cx,
         panelTop + 78 + pieces.length * 58 + 24,
         280,
         42,
@@ -304,7 +322,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
 
     const backBtn = makeButton(
       scene,
-      400,
+      cx,
       panelTop + 78 + pieces.length * 58 + (occupantId ? 74 : 20),
       140,
       40,
@@ -318,6 +336,8 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
     );
     backBtn.container.setScrollFactor(0).setDepth(201);
     elements.push(backBtn.container);
+    // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+    isolateFixedUi(scene, elements);
   };
 
   render();

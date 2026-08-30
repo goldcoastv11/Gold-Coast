@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { Theme } from "./Theme";
 import { makeButton, makePanel } from "./uiHelpers";
 import { createShuffleCupReveal } from "./ShuffleCupReveal";
+import { isolateFixedUi } from "./sceneCameraSplit";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 
@@ -157,6 +158,10 @@ function showOffer(
     }
   );
   noBtn.container.setScrollFactor(0).setDepth(401);
+
+  // Screen-fixed - safe to call even in a scene with no zoomed main camera
+  // (e.g. LoginScene) - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, [panel, title, sub, yesBtn.container, noBtn.container, ...(errorText ? [errorText] : [])]);
 }
 
 function playRound(
@@ -180,6 +185,8 @@ function playRound(
     .setOrigin(0.5)
     .setScrollFactor(0)
     .setDepth(401);
+  // Screen-fixed - see showOffer's identical comment above.
+  isolateFixedUi(scene, [statusPanel, statusTitle]);
 
   api
     .playTripleChance(amount)
@@ -211,6 +218,10 @@ function playRound(
         TRIPLE_CHANCE_DISPLAY_SET
       );
       handle.container.setScrollFactor(0).setDepth(401);
+      // Screen-fixed - see showOffer's identical comment above. Done here,
+      // not at playRound's own top-level isolateFixedUi call, since this
+      // handle is only created once the request resolves (async).
+      isolateFixedUi(scene, handle.container);
       handle.start();
     })
     .catch((err) => {

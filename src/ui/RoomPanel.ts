@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { ROOM_SLOTS, RoomPieceDef, RoomSlot, getSlotDef, listPiecesBySlot } from "../roomCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
+import { isolateFixedUi } from "./sceneCameraSplit";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
@@ -65,14 +66,20 @@ export function openRoomSlotMenu(host: RoomPanelHost) {
   host.setPanelOpen(true);
   playSfx(scene, "open");
 
+  // X from the live canvas, not a literal 400 - main.ts can widen the
+  // canvas well past 800 on a wide mobile-landscape phone (see its own
+  // scale-config comment), and a fixed 400 would leave this panel
+  // left-of-true-center there.
+  const cx = scene.scale.width / 2;
+
   const elements: Phaser.GameObjects.GameObject[] = [];
   const cleanup = () => elements.forEach((e) => e.destroy());
 
-  const panel = makePanel(scene, 400, 300, 380, 260, 200).setScrollFactor(0);
+  const panel = makePanel(scene, cx, 300, 380, 260, 200).setScrollFactor(0);
   elements.push(panel);
 
   const title = scene.add
-    .text(400, 210, "🎨 Decorate", { fontSize: "20px", color: Theme.textGold, fontStyle: "bold" })
+    .text(cx, 210, "🎨 Decorate", { fontSize: "20px", color: Theme.textGold, fontStyle: "bold" })
     .setOrigin(0.5)
     .setScrollFactor(0)
     .setDepth(201);
@@ -82,7 +89,7 @@ export function openRoomSlotMenu(host: RoomPanelHost) {
     const y = 260 + i * 60;
     const btn = makeButton(
       scene,
-      400,
+      cx,
       y,
       280,
       48,
@@ -98,18 +105,23 @@ export function openRoomSlotMenu(host: RoomPanelHost) {
     elements.push(btn.container);
   });
 
-  const closeBtn = makeButton(scene, 400, 260 + ROOM_SLOTS.length * 60 + 4, 140, 40, "Close", Theme.neutral, Theme.neutralHover, () => {
+  const closeBtn = makeButton(scene, cx, 260 + ROOM_SLOTS.length * 60 + 4, 140, 40, "Close", Theme.neutral, Theme.neutralHover, () => {
     cleanup();
     host.setPanelOpen(false);
   });
   closeBtn.container.setScrollFactor(0).setDepth(201);
   elements.push(closeBtn.container);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, elements);
 }
 
 /** One slot's piece list - buy an unowned piece (which also applies it) or apply an already-owned one. */
 export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
   const scene = host.scene;
   playSfx(scene, "open");
+  // X from the live canvas, not a literal 400 - see openRoomSlotMenu's own
+  // comment above.
+  const cx = scene.scale.width / 2;
   let elements: Phaser.GameObjects.GameObject[] = [];
 
   const slotDef = getSlotDef(slot);
@@ -124,13 +136,13 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
   const render = () => {
     cleanup();
 
-    const panel = makePanel(scene, 400, 300, 460, 60 + pieces.length * 58 + 60, 200).setScrollFactor(0);
+    const panel = makePanel(scene, cx, 300, 460, 60 + pieces.length * 58 + 60, 200).setScrollFactor(0);
     elements.push(panel);
 
     const panelTop = 300 - (60 + pieces.length * 58 + 60) / 2;
 
     const title = scene.add
-      .text(400, panelTop + 30, `${SLOT_EMOJI[slot]} ${slotName}`, {
+      .text(cx, panelTop + 30, `${SLOT_EMOJI[slot]} ${slotName}`, {
         fontSize: "20px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -141,7 +153,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
     elements.push(title);
 
     const sub = scene.add
-      .text(400, panelTop + 52, `You have ${gameState.goldCoins} Gold Coins`, {
+      .text(cx, panelTop + 52, `You have ${gameState.goldCoins} Gold Coins`, {
         fontSize: "13px",
         color: Theme.textMuted
       })
@@ -150,13 +162,18 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
       .setDepth(201);
     elements.push(sub);
 
+    // Row-relative x's below (swatch/name/price/buy-apply) were literal
+    // absolute positions (219/245/540) derived from the panel's old fixed
+    // center 400 (panel left edge 400-230=170, so e.g. 219=170+49) - now
+    // offset from the live `cx` the same way instead.
+    const rowLeft = cx - 230;
     pieces.forEach((def: RoomPieceDef, i: number) => {
       const y = panelTop + 78 + i * 58;
-      const row = makeInset(scene, 400, y, 400, 48, 10);
+      const row = makeInset(scene, cx, y, 400, 48, 10);
       row.setScrollFactor(0).setDepth(200);
       elements.push(row);
 
-      const swatch = scene.add.rectangle(219, y, 28, 28, def.placeholderColor).setScrollFactor(0).setDepth(201);
+      const swatch = scene.add.rectangle(rowLeft + 49, y, 28, 28, def.placeholderColor).setScrollFactor(0).setDepth(201);
       swatch.setStrokeStyle(1, Theme.outline, 0.4);
       elements.push(swatch);
 
@@ -164,7 +181,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
       const applied = gameState.roomPieceInSlot(slot) === def.id;
 
       const nameLabel = scene.add
-        .text(245, y, `${def.name}${applied ? " (applied)" : ""}`, {
+        .text(rowLeft + 75, y, `${def.name}${applied ? " (applied)" : ""}`, {
           fontSize: "14px",
           color: applied ? Theme.textAccent : Theme.textPrimary,
           fontStyle: applied ? "bold" : "normal"
@@ -176,7 +193,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
 
       if (!owned) {
         const priceLabel = scene.add
-          .text(245, y + 16, `${def.price} Gold Coins`, { fontSize: "12px", color: Theme.textMuted })
+          .text(rowLeft + 75, y + 16, `${def.price} Gold Coins`, { fontSize: "12px", color: Theme.textMuted })
           .setOrigin(0, 0.5)
           .setScrollFactor(0)
           .setDepth(201);
@@ -185,7 +202,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
         const canAfford = gameState.goldCoins >= def.price;
         const buyBtn = makeButton(
           scene,
-          540,
+          rowLeft + 370,
           y,
           90,
           42,
@@ -218,7 +235,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
       } else {
         const applyBtn = makeButton(
           scene,
-          540,
+          rowLeft + 370,
           y,
           90,
           42,
@@ -248,7 +265,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
 
     const backBtn = makeButton(
       scene,
-      400,
+      cx,
       panelTop + 78 + pieces.length * 58 + 20,
       140,
       40,
@@ -262,6 +279,8 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
     );
     backBtn.container.setScrollFactor(0).setDepth(201);
     elements.push(backBtn.container);
+    // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+    isolateFixedUi(scene, elements);
   };
 
   render();

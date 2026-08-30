@@ -507,8 +507,12 @@ export function makeBetControl(
   // Standalone DOM Element at this control's absolute scene position (not
   // nested inside `container`) - matches LoginScene's approach exactly, and
   // sidesteps any question of whether a Container's own transform correctly
-  // composes into a child DOM Element's position.
-  const input = scene.add.dom(x + fieldCx + Tokens.space.xs, y, el);
+  // composes into a child DOM Element's position. Screen-fixed - this
+  // control is exclusively used inside makeGameShell's sidebar (see
+  // makeGameShell's own "CENTERING ON WIDE CANVASES" doc comment), which
+  // scrolls the camera to re-center each game's board on wide canvases; this
+  // must stay put through that scroll same as the rest of the sidebar.
+  const input = scene.add.dom(x + fieldCx + Tokens.space.xs, y, el).setScrollFactor(0);
 
   const refresh = () => {
     if (document.activeElement !== el) {
@@ -549,6 +553,8 @@ export function makeBetControl(
     plusBtn.container,
     doubleBtn.container
   ]);
+  // Screen-fixed - see the `input` DOM Element's own comment just above.
+  container.setScrollFactor(0);
 
   return {
     container,
@@ -577,28 +583,40 @@ export function makeBetControl(
  * Center of the game shell's right-side display area (see makeGameShell) -
  * scenes using the shell should center their grid/tower/card visuals here
  * instead of the canvas center (400,300), since the left sidebar occupies
- * the left third of the screen. Unchanged by the restyle on purpose: all 14
- * scenes lay their boards out around these two numbers.
+ * the left third of the screen. Stays this fixed "design" value on purpose:
+ * all 14 games compute their own board layout (card/tile/grid positions)
+ * from this constant at MODULE load time (e.g. `const DX =
+ * GAME_SHELL_DISPLAY_CENTER_X;` at the top of BaccaratScene.ts and its
+ * siblings), not inside a method that runs per-scene-instance, so the
+ * constant itself can't become live-width-aware without rewriting that
+ * board-layout math in all 14 files.
  *
- * Known gap (2026-08 responsive pass): stays a fixed 570, not derived from
- * the live canvas width, even though main.ts can now widen the game's
- * logical width well past 800 on a wide phone (see its own scale-config
- * comment). That's deliberate for THIS pass, not an oversight: every one of
- * the 14 games computes its own board layout (card/tile/grid positions)
- * from this constant at MODULE load time, not inside a method that runs
- * per-scene-instance - e.g. `const DX = GAME_SHELL_DISPLAY_CENTER_X;` at
- * the top of BaccaratScene.ts and its siblings. Making this genuinely
- * dynamic means restructuring that board-layout math in all 14 files to
- * compute from the live width at scene-create time instead, which is a
- * much larger and riskier change than fits in one clean pass alongside the
- * actual reported bug (cropping) - see this PR's description. The
- * consequence is cosmetic, not a regression: on a wide phone the board
- * still renders complete and fully reachable at its original size and
- * position, just left-of-true-center rather than perfectly centered in the
- * extra width. Left as explicit follow-up work rather than attempted here.
+ * 2026-08 responsive-centering pass: fixed the resulting off-center board
+ * WITHOUT touching those 14 files, via `makeGameShell`'s own camera-scroll
+ * trick instead - see that function's "CENTERING ON WIDE CANVASES" comment
+ * for how. This constant, and everything the 14 games derive from it,
+ * keeps meaning exactly what it always meant (the correct center for an
+ * 800-wide canvas); the shell transparently shifts the rendered result to
+ * the true live center at runtime.
  */
 export const GAME_SHELL_DISPLAY_CENTER_X = 570;
 export const GAME_SHELL_DISPLAY_CENTER_Y = 300;
+
+/**
+ * The X a game's display-area content SHOULD be centered on for the live
+ * canvas width - i.e. what `GAME_SHELL_DISPLAY_CENTER_X` would be if it
+ * were computed fresh for this device instead of fixed at the 800-wide
+ * design value. `345` is the sidebar's own right edge (`SIDEBAR_CX +
+ * SIDEBAR_W/2` = 180+165, both below) - the display area runs from there to
+ * the live canvas's right edge, so its center is the midpoint of those two.
+ * Exported for anything that wants to reason about the live center
+ * directly (nothing in this codebase currently needs to); `makeGameShell`
+ * uses it internally to compute its camera-scroll shift.
+ */
+export function liveGameShellDisplayCenterX(scene: Phaser.Scene): number {
+  const sidebarRightEdge = SIDEBAR_CX + SIDEBAR_W / 2;
+  return (sidebarRightEdge + scene.scale.width) / 2;
+}
 
 export interface GameShellHandle {
   balanceText: Phaser.GameObjects.Text;
@@ -662,6 +680,32 @@ const COL_W = COL_RIGHT - COL_LEFT;
  * (same pattern every game already used) - callers still call
  * `.setLabel()`/`.setEnabled()`/`.container.setVisible()` on them directly
  * for round-state transitions.
+ *
+ * CENTERING ON WIDE CANVASES (2026-08 responsive-centering pass): all 14
+ * games lay their own board content out around (GAME_SHELL_DISPLAY_CENTER_X,
+ * GAME_SHELL_DISPLAY_CENTER_Y) = (570, 300), computed once at each file's
+ * MODULE load time - correct for the original fixed 800-wide canvas, but on
+ * a wide mobile-landscape phone main.ts widens the canvas well past 800 (see
+ * its own scale-config comment), leaving the board left-of-true-center in
+ * the extra width. Rewriting all 14 files' board-layout math to compute
+ * from the live width per scene-instance would be a much larger, riskier
+ * change than this fix needs.
+ *
+ * Fixed here instead, in one place, via a camera trick rather than touching
+ * any of the 14 files: every sidebar element this function creates gets
+ * `.setScrollFactor(0)` (screen-fixed, immune to camera scroll), while
+ * everything each game draws for its OWN board/display content keeps the
+ * default scrollFactor of 1. The camera's `scrollX` is then set to exactly
+ * the distance between the fixed 570 the 14 files assume and where display-
+ * area center actually belongs on this device's live width
+ * (`liveGameShellDisplayCenterX`) - which, for a scrollFactor-1 object,
+ * shifts its rendered screen position by that same distance, while leaving
+ * every scrollFactor-0 sidebar element completely unmoved. The net result:
+ * the board visually re-centers on the live canvas, the sidebar stays
+ * exactly where it always was, and none of the 14 games' own board-layout
+ * code needs to know any of this happened. On the original 800-wide canvas
+ * (desktop, or a phone at the width floor) the live center already equals
+ * 570, so the shift is 0 and nothing changes from before this pass.
  */
 export function makeGameShell(
   scene: Phaser.Scene,
@@ -686,7 +730,9 @@ export function makeGameShell(
   // layout, so a hardcoded 800x600 fill would leave the extra width on a
   // wide phone showing raw canvas backgroundColor (Theme.bgDark, a
   // different colour to this token ground) instead of this surface.
-  const ground = scene.add.graphics().setDepth(-1000);
+  // Every element in this function is sidebar chrome - screen-fixed (see
+  // this function's own "CENTERING ON WIDE CANVASES" doc comment above).
+  const ground = scene.add.graphics().setDepth(-1000).setScrollFactor(0);
   ground.fillStyle(Tokens.color.bg, 1);
   ground.fillRect(0, 0, scene.scale.width, scene.scale.height);
 
@@ -696,7 +742,7 @@ export function makeGameShell(
   // element below breathing room inside the band.
   const panelTop = SAFE_ZONE_TOP - Tokens.space.md;
   const panelBottom = SAFE_ZONE_BOTTOM + Tokens.space.md + Tokens.space.xxs;
-  makePanel(scene, SIDEBAR_CX, (panelTop + panelBottom) / 2, SIDEBAR_W, panelBottom - panelTop);
+  makePanel(scene, SIDEBAR_CX, (panelTop + panelBottom) / 2, SIDEBAR_W, panelBottom - panelTop).setScrollFactor(0);
 
   // --- Title row -----------------------------------------------------
   makeText(scene, COL_LEFT, 140, title.toUpperCase(), {
@@ -704,22 +750,22 @@ export function makeGameShell(
     weight: Tokens.type.weight.semibold,
     color: Tokens.text.secondary,
     tracking: Tokens.type.tracking.caps
-  });
-  makeDivider(scene, COL_LEFT, 158, COL_RIGHT);
+  }).setScrollFactor(0);
+  makeDivider(scene, COL_LEFT, 158, COL_RIGHT).setScrollFactor(0);
 
   // --- Balance row: muted label left, live value right ---------------
   makeText(scene, COL_LEFT, 180, "Balance", {
     size: Tokens.type.size.sm,
     color: Tokens.text.muted,
     tracking: Tokens.type.tracking.label
-  });
+  }).setScrollFactor(0);
   const balanceText = makeText(scene, COL_RIGHT, 180, "", {
     size: Tokens.type.size.lg,
     weight: Tokens.type.weight.medium,
     color: Tokens.text.primary,
     align: "right",
     originX: 1
-  });
+  }).setScrollFactor(0);
 
   // --- Bet amount ----------------------------------------------------
   // "Gold Coins" spelled out: GC is the play currency, spent on every bet
@@ -729,7 +775,9 @@ export function makeGameShell(
     size: Tokens.type.size.sm,
     color: Tokens.text.muted,
     tracking: Tokens.type.tracking.label
-  });
+  }).setScrollFactor(0);
+  // makeBetControl pins its own container + real DOM <input> to the screen
+  // itself (it's exclusively used here) - see its own doc comment.
   const betControl = makeBetControl(scene, SIDEBAR_CX, 238, handlers.onBetChange ?? (() => {}));
 
   // --- Readout line (multiplier / target / profit, per game) ---------
@@ -739,7 +787,7 @@ export function makeGameShell(
     size: Tokens.type.size.xl,
     weight: Tokens.type.weight.semibold,
     color: Tokens.text.primary
-  });
+  }).setScrollFactor(0);
 
   // --- Message line --------------------------------------------------
   // Top-anchored so multi-line messages grow downward into the whitespace
@@ -749,7 +797,7 @@ export function makeGameShell(
     color: Tokens.text.secondary,
     wordWrapWidth: COL_W,
     originY: 0
-  });
+  }).setScrollFactor(0);
 
   // --- Actions -------------------------------------------------------
   // The primary action is the only saturated colour on the screen
@@ -782,6 +830,8 @@ export function makeGameShell(
   );
   cashOutBtn.setEnabled(false);
   cashOutBtn.container.setVisible(false);
+  startBtn.container.setScrollFactor(0);
+  cashOutBtn.container.setScrollFactor(0);
 
   // Walk Away is a quiet secondary: a raised surface, muted label, no red.
   // Leaving a game is not a destructive action and should not shout.
@@ -798,6 +848,15 @@ export function makeGameShell(
     Tokens.text.secondary,
     Tokens.radius.sm
   );
+  walkAwayBtn.container.setScrollFactor(0);
+
+  // See this function's "CENTERING ON WIDE CANVASES" doc comment above -
+  // this is the one line that actually re-centers every game's board on the
+  // live canvas width, now that the sidebar above is fully screen-fixed and
+  // immune to it. 0 on the original 800-wide canvas (desktop, or a phone at
+  // the width floor), since liveGameShellDisplayCenterX already equals 570
+  // there - main.ts only ever widens the canvas, never narrows it below 800.
+  scene.cameras.main.scrollX = GAME_SHELL_DISPLAY_CENTER_X - liveGameShellDisplayCenterX(scene);
 
   return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }

@@ -8,6 +8,7 @@ import type { LeaderboardBoard, LeaderboardEntry, LeaderboardResponse } from "..
 import { formatNumber } from "./challengeDisplay";
 import { createCharacterPortrait } from "./characterPortrait";
 import { clampScroll } from "./quickplayGrid";
+import { isolateFixedUi } from "./sceneCameraSplit";
 import {
   leaderboardContentHeight,
   leaderboardRowY,
@@ -78,27 +79,27 @@ const TABS: Array<{ key: TabKey; label: string }> = [
 ];
 
 // --- Geometry. Panel spans y 126-474; every element sits inside 130-470 -
-// same budget and CX/PANEL_W/COL_L/COL_R as ChallengesPanel.ts/
-// QuickplayPanel.ts so the three panels' content columns line up. ---
-const CX = 400;
+// same budget and PANEL_W/colL/colR as ChallengesPanel.ts/QuickplayPanel.ts
+// so the three panels' content columns line up. cx/colL/colR/rankX/
+// portraitX/nameX are computed inside openLeaderboardPanel from the live
+// canvas width, not fixed module consts (main.ts can widen the canvas well
+// past 800 on a wide mobile-landscape phone - see its own scale-config
+// comment - and a fixed cx=400 would leave this panel left-of-true-center
+// there); everything below that's a pure OFFSET from those (the LOCAL_*
+// constants) is unaffected and stays fixed. ---
 const PANEL_W = 664;
 const PANEL_H = 348;
-const COL_L = CX - PANEL_W / 2 + Tokens.space.xl;
-const COL_R = CX + PANEL_W / 2 - Tokens.space.xl;
 const ROW_W = 624;
 
-// Column x's, in the SAME absolute space the static header (RANK/PLAYER
-// labels) is drawn in. The scrollable row list below draws at the LOCAL
-// equivalents (see LOCAL_* below) since its content container is anchored
-// at (COL_L, VIEW_TOP) - see openLeaderboardPanel's `listContainer`.
-const RANK_X = COL_L + Tokens.space.sm;
-const PORTRAIT_X = COL_L + 40;
-const NAME_X = COL_L + 68;
-
-const LOCAL_RANK_X = RANK_X - COL_L;
-const LOCAL_PORTRAIT_X = PORTRAIT_X - COL_L;
-const LOCAL_NAME_X = NAME_X - COL_L;
-const LOCAL_EARNED_X = COL_R - COL_L; // == ROW_W
+// LOCAL_* are pure offsets (e.g. LOCAL_RANK_X = (colL + space.sm) - colL =
+// space.sm) so they don't actually depend on colL's value and can stay
+// fixed module consts even though colL itself is now computed per-call -
+// see openLeaderboardPanel's own rankX/portraitX/nameX for the absolute
+// (non-local) versions the static header draws with.
+const LOCAL_RANK_X = Tokens.space.sm;
+const LOCAL_PORTRAIT_X = 40;
+const LOCAL_NAME_X = 68;
+const LOCAL_EARNED_X = ROW_W; // == colR - colL
 
 /** Row highlight background height - a little short of ROW_STEP so consecutive rows keep a hairline gap. */
 const ROW_BG_H = 30;
@@ -145,6 +146,14 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
   host.setPanelOpen(true);
   playSfx(scene, "open");
 
+  // See the "Geometry" block above for why these are computed here instead
+  // of as module consts.
+  const cx = scene.scale.width / 2;
+  const colL = cx - PANEL_W / 2 + Tokens.space.xl;
+  const colR = cx + PANEL_W / 2 - Tokens.space.xl;
+  const rankX = colL + Tokens.space.sm;
+  const nameX = colL + 68;
+
   let elements: Phaser.GameObjects.GameObject[] = [];
   let data: LeaderboardResponse | null = null;
   let status: "loading" | "ready" | "error" = "loading";
@@ -161,10 +170,14 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
   // content height. ---
   let scrollY = 0;
   let contentH = 0;
-  const listContainer = scene.add.container(COL_L, VIEW_TOP).setScrollFactor(0).setDepth(DEPTH_CONTENT);
+  const listContainer = scene.add.container(colL, VIEW_TOP).setScrollFactor(0).setDepth(DEPTH_CONTENT);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header. maskShape itself
+  // doesn't need this - it's never added to the display list (`false`
+  // above), only used to build the geometry mask below.
+  isolateFixedUi(scene, listContainer);
   const maskShape = scene.make.graphics(undefined, false).setScrollFactor(0);
   maskShape.fillStyle(0xffffff, 1);
-  maskShape.fillRect(COL_L, VIEW_TOP, ROW_W, VIEW_H);
+  maskShape.fillRect(colL, VIEW_TOP, ROW_W, VIEW_H);
   listContainer.setMask(maskShape.createGeometryMask());
 
   let dragging = false;
@@ -238,6 +251,8 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
   const add = <T extends Phaser.GameObjects.GameObject>(obj: T, depth = DEPTH_CONTENT): T => {
     (obj as unknown as { setScrollFactor: (v: number) => void }).setScrollFactor(0);
     (obj as unknown as { setDepth: (v: number) => void }).setDepth(depth);
+    // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+    isolateFixedUi(scene, obj);
     elements.push(obj);
     return obj;
   };
@@ -252,9 +267,9 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
   // ------------------------------------------------------------------
 
   const renderShell = () => {
-    add(makePanel(scene, CX, 300, PANEL_W, PANEL_H, DEPTH_PANEL), DEPTH_PANEL);
+    add(makePanel(scene, cx, 300, PANEL_W, PANEL_H, DEPTH_PANEL), DEPTH_PANEL);
     add(
-      makeText(scene, COL_L, 144, "LEADERBOARD", {
+      makeText(scene, colL, 144, "LEADERBOARD", {
         size: Tokens.type.size.lg,
         weight: Tokens.type.weight.semibold,
         color: Tokens.text.secondary,
@@ -262,7 +277,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
       })
     );
     add(
-      makeText(scene, COL_R, 144, "Gold Coins earned", {
+      makeText(scene, colR, 144, "Gold Coins earned", {
         size: Tokens.type.size.sm,
         color: Tokens.text.muted,
         align: "right",
@@ -276,7 +291,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
     listContainer.removeAll(true);
     renderShell();
     add(
-      makeText(scene, CX, 290, message, {
+      makeText(scene, cx, 290, message, {
         size: Tokens.type.size.md,
         color: Tokens.text.secondary,
         align: "center",
@@ -287,7 +302,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
     if (retry) {
       const retryBtn = makeButton(
         scene,
-        CX,
+        cx,
         350,
         160,
         32,
@@ -303,7 +318,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
     add(
       makeButton(
         scene,
-        CX,
+        cx,
         430,
         140,
         32,
@@ -404,7 +419,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
       const selected = t.key === tab;
       const btn = makeButton(
         scene,
-        CX + (i - 1) * (tabW + Tokens.space.sm),
+        cx + (i - 1) * (tabW + Tokens.space.sm),
         180,
         tabW,
         28,
@@ -422,16 +437,16 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
       add(btn.container);
     });
 
-    add(makeDivider(scene, COL_L, 200, COL_R));
+    add(makeDivider(scene, colL, 200, colR));
     add(
-      makeText(scene, RANK_X, 207, "RANK", {
+      makeText(scene, rankX, 207, "RANK", {
         size: Tokens.type.size.xs,
         color: Tokens.text.muted,
         tracking: Tokens.type.tracking.caps
       })
     );
     add(
-      makeText(scene, NAME_X, 207, "PLAYER", {
+      makeText(scene, nameX, 207, "PLAYER", {
         size: Tokens.type.size.xs,
         color: Tokens.text.muted,
         tracking: Tokens.type.tracking.caps
@@ -442,9 +457,9 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
     // with ~5 real players most boards will genuinely be short. ---
     if (board.top.length === 0) {
       contentH = 0;
-      add(makeInset(scene, CX, 300, ROW_W, 100, Tokens.radius.md));
+      add(makeInset(scene, cx, 300, ROW_W, 100, Tokens.radius.md));
       add(
-        makeText(scene, CX, 300, "Nobody's earned any Gold Coins in this window yet.", {
+        makeText(scene, cx, 300, "Nobody's earned any Gold Coins in this window yet.", {
           size: Tokens.type.size.md,
           color: Tokens.text.muted,
           align: "center",
@@ -508,7 +523,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
     add(
       makeButton(
         scene,
-        CX,
+        cx,
         452,
         140,
         32,

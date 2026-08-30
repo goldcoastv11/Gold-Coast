@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { Tokens } from "./DesignTokens";
 import { makeButton, makePanel, makeInset, makeDivider, makeText, UIButton } from "./uiHelpers";
 import { showClaimCelebration, showLevelUpCelebration } from "./ClaimCelebration";
+import { isolateFixedUi } from "./sceneCameraSplit";
 import { playSfx } from "./SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -74,12 +75,19 @@ const TABS: Array<{ key: TabKey; label: string }> = [
 ];
 
 // --- Geometry. Panel spans y 126-474; every element sits inside 130-470. ---
-const CX = 400;
+// The panel's own center X, and everything derived from it, used to be a
+// fixed module-scope `CX = 400` constant (matching the original 800-wide
+// canvas). Moved inside openChallengesPanel below instead (as `cx`/`colL`/
+// `colR`/`barL`/`barR`/`actionCx`), computed fresh from the LIVE canvas
+// width: main.ts can widen the canvas well past 800 on a wide mobile-
+// landscape phone (see its own scale-config comment), and a fixed 400 would
+// leave this panel left-of-true-center there. See PANEL_W's own comment for
+// why the panel's WIDTH stays fixed even though its center now doesn't.
+/** Deliberately NOT derived from the live width - a wide phone gets more
+ * side margin instead of a stretched panel, matching every other modal in
+ * this codebase (see e.g. ShopPanel.ts). */
 const PANEL_W = 664;
 const PANEL_H = 348;
-/** Left/right edges of the panel's single content column. */
-const COL_L = CX - PANEL_W / 2 + Tokens.space.xl;
-const COL_R = CX + PANEL_W / 2 - Tokens.space.xl;
 /** Inner padding from the content column to text sitting inside a well. */
 const WELL_PAD = Tokens.space.md;
 
@@ -89,11 +97,7 @@ const ROW_W = 624;
 const ROW_Y0 = 300;
 const ROW_STEP = 38;
 
-/** Where a challenge row's progress bar lives, and where its action sits. */
-const BAR_L = 400;
-const BAR_R = 610;
 const BAR_H = 8;
-const ACTION_CX = 662;
 const ACTION_W = 84;
 const ACTION_H = 28;
 
@@ -160,6 +164,15 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
   host.setPanelOpen(true);
   playSfx(scene, "open");
 
+  // See the "Geometry" block above for why these are computed here instead
+  // of as module consts.
+  const cx = scene.scale.width / 2;
+  const colL = cx - PANEL_W / 2 + Tokens.space.xl;
+  const colR = cx + PANEL_W / 2 - Tokens.space.xl;
+  const barL = cx;
+  const barR = cx + 210;
+  const actionCx = cx + 262;
+
   let elements: Phaser.GameObjects.GameObject[] = [];
   let board: ChallengeBoardResponse | null = null;
   let progression: ProgressionResponse | null = null;
@@ -207,6 +220,9 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
   const add = <T extends Phaser.GameObjects.GameObject>(obj: T, depth = DEPTH_CONTENT): T => {
     (obj as unknown as { setScrollFactor: (v: number) => void }).setScrollFactor(0);
     (obj as unknown as { setDepth: (v: number) => void }).setDepth(depth);
+    // Screen-fixed - see ui/sceneCameraSplit.ts's header (no-op in a scene
+    // with no zoomed main camera, e.g. RoomScene doesn't open this panel).
+    isolateFixedUi(scene, obj);
     elements.push(obj);
     return obj;
   };
@@ -216,9 +232,9 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
   // ------------------------------------------------------------------
 
   const renderShell = () => {
-    add(makePanel(scene, CX, 300, PANEL_W, PANEL_H, DEPTH_PANEL), DEPTH_PANEL);
+    add(makePanel(scene, cx, 300, PANEL_W, PANEL_H, DEPTH_PANEL), DEPTH_PANEL);
     add(
-      makeText(scene, COL_L, 144, "CHALLENGES", {
+      makeText(scene, colL, 144, "CHALLENGES", {
         size: Tokens.type.size.lg,
         weight: Tokens.type.weight.semibold,
         color: Tokens.text.secondary,
@@ -231,7 +247,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     cleanup();
     renderShell();
     add(
-      makeText(scene, CX, 290, message, {
+      makeText(scene, cx, 290, message, {
         size: Tokens.type.size.md,
         color: Tokens.text.secondary,
         align: "center",
@@ -242,7 +258,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     if (retry) {
       const retryBtn = makeButton(
         scene,
-        CX,
+        cx,
         350,
         160,
         ACTION_H + Tokens.space.xs,
@@ -259,7 +275,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     }
     const closeBtn = makeButton(
       scene,
-      CX,
+      cx,
       430,
       140,
       32,
@@ -278,10 +294,10 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
   // ------------------------------------------------------------------
 
   const renderLevelStrip = (p: ProgressionResponse) => {
-    add(makeInset(scene, CX, 190, ROW_W, 76, Tokens.radius.md));
+    add(makeInset(scene, cx, 190, ROW_W, 76, Tokens.radius.md));
 
     add(
-      makeText(scene, COL_L + WELL_PAD, 170, `LEVEL ${p.level}`, {
+      makeText(scene, colL + WELL_PAD, 170, `LEVEL ${p.level}`, {
         size: Tokens.type.size.xxl,
         weight: Tokens.type.weight.bold,
         color: Tokens.text.primary,
@@ -301,7 +317,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
 
     const nextLevel = formatNextLevelReward(p);
     add(
-      makeText(scene, COL_R - WELL_PAD, 164, nextLevel ?? `Max level (${p.maxLevel}) reached`, {
+      makeText(scene, colR - WELL_PAD, 164, nextLevel ?? `Max level (${p.maxLevel}) reached`, {
         size: Tokens.type.size.sm,
         color: Tokens.text.secondary,
         align: "right",
@@ -311,7 +327,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
 
     const nextUnlock = formatNextUnlock(p);
     add(
-      makeText(scene, COL_R - WELL_PAD, 186, nextUnlock ?? "Every cosmetic unlocked", {
+      makeText(scene, colR - WELL_PAD, 186, nextUnlock ?? "Every cosmetic unlocked", {
         size: Tokens.type.size.sm,
         color: Tokens.text.muted,
         align: "right",
@@ -323,7 +339,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     // reached. Gives the level number something to aim at rather than
     // leaving "levels unlock cosmetics" as an unevidenced claim.
     add(
-      makeText(scene, COL_L + WELL_PAD, 208, "UNLOCKS", {
+      makeText(scene, colL + WELL_PAD, 208, "UNLOCKS", {
         size: Tokens.type.size.xs,
         color: Tokens.text.muted,
         tracking: Tokens.type.tracking.caps
@@ -332,7 +348,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     const milestones = milestoneLevels(p.cosmeticUnlocks);
     if (milestones.length > 0) {
       const railL = 210;
-      const railR = COL_R - WELL_PAD;
+      const railR = colR - WELL_PAD;
       const step = milestones.length > 1 ? (railR - railL) / (milestones.length - 1) : 0;
       const dots = scene.add.graphics();
       milestones.forEach((level, i) => {
@@ -371,34 +387,34 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
       // row still reads as part of one dark list (direction note 2).
       const bg = scene.add.graphics();
       bg.fillStyle(Tokens.color.positiveMuted, 1);
-      bg.fillRoundedRect(CX - ROW_W / 2, y - ROW_H / 2, ROW_W, ROW_H, Tokens.radius.sm);
+      bg.fillRoundedRect(cx - ROW_W / 2, y - ROW_H / 2, ROW_W, ROW_H, Tokens.radius.sm);
       add(bg, DEPTH_PANEL);
     } else {
-      add(makeInset(scene, CX, y, ROW_W, ROW_H, Tokens.radius.sm), DEPTH_PANEL);
+      add(makeInset(scene, cx, y, ROW_W, ROW_H, Tokens.radius.sm), DEPTH_PANEL);
     }
 
     add(
-      makeText(scene, COL_L + WELL_PAD, y - 9, c.name, {
+      makeText(scene, colL + WELL_PAD, y - 9, c.name, {
         size: Tokens.type.size.md,
         weight: Tokens.type.weight.semibold,
         color: c.claimed ? Tokens.text.muted : Tokens.text.primary
       })
     );
     add(
-      makeText(scene, COL_L + WELL_PAD, y + 9, c.description, {
+      makeText(scene, colL + WELL_PAD, y + 9, c.description, {
         size: Tokens.type.size.xs,
         color: Tokens.text.muted
       })
     );
 
     add(
-      makeText(scene, BAR_L, y - 9, formatReward(c), {
+      makeText(scene, barL, y - 9, formatReward(c), {
         size: Tokens.type.size.xs,
         color: claimable ? Tokens.text.accent : Tokens.text.secondary
       })
     );
     add(
-      makeText(scene, BAR_R, y - 9, `${formatNumber(c.progress)} / ${formatNumber(c.target)}`, {
+      makeText(scene, barR, y - 9, `${formatNumber(c.progress)} / ${formatNumber(c.target)}`, {
         size: Tokens.type.size.xs,
         color: Tokens.text.muted,
         align: "right",
@@ -408,8 +424,8 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     add(
       drawBar(
         scene,
-        BAR_L,
-        BAR_R,
+        barL,
+        barR,
         y + 8,
         progressFraction(c),
         // A claimed bar goes quiet: it is history, not an outstanding reward.
@@ -420,7 +436,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     if (claimable) {
       const btn = makeButton(
         scene,
-        ACTION_CX,
+        actionCx,
         y,
         ACTION_W,
         ACTION_H,
@@ -435,7 +451,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
       add(btn.container);
     } else if (c.claimed) {
       add(
-        makeText(scene, ACTION_CX, y, "Claimed", {
+        makeText(scene, actionCx, y, "Claimed", {
           size: Tokens.type.size.xs,
           color: Tokens.text.muted,
           align: "center",
@@ -573,7 +589,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     renderShell();
 
     add(
-      makeText(scene, COL_R, 144, `${formatNumber(gameState.goldCoins)} Gold Coins`, {
+      makeText(scene, colR, 144, `${formatNumber(gameState.goldCoins)} Gold Coins`, {
         size: Tokens.type.size.lg,
         weight: Tokens.type.weight.medium,
         color: Tokens.text.primary,
@@ -594,7 +610,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
       const label = ready > 0 ? `${t.label} (${ready})` : t.label;
       const btn = makeButton(
         scene,
-        CX + (i - 1) * (tabW + Tokens.space.sm),
+        cx + (i - 1) * (tabW + Tokens.space.sm),
         250,
         tabW,
         28,
@@ -621,7 +637,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
 
     if (totalPages > 1) {
       add(
-        makeText(scene, COL_L, 276, `Page ${page + 1} / ${totalPages}`, {
+        makeText(scene, colL, 276, `Page ${page + 1} / ${totalPages}`, {
           size: Tokens.type.size.xs,
           color: Tokens.text.muted
         })
@@ -631,20 +647,20 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
     // expiry is the group's. Lifetime achievements have none.
     const resetLine = items.length > 0 ? formatResetIn(items[0].periodEndsAt) : null;
     add(
-      makeText(scene, COL_R, 276, resetLine ?? "Achievements never expire", {
+      makeText(scene, colR, 276, resetLine ?? "Achievements never expire", {
         size: Tokens.type.size.xs,
         color: Tokens.text.muted,
         align: "right",
         originX: 1
       })
     );
-    add(makeDivider(scene, COL_L, 286, COL_R));
+    add(makeDivider(scene, colL, 286, colR));
 
     // --- Rows ---
     const claimButtons: UIButton[] = [];
     if (pageItems.length === 0) {
       add(
-        makeText(scene, CX, ROW_Y0 + ROW_STEP, "Nothing here yet - go play a round.", {
+        makeText(scene, cx, ROW_Y0 + ROW_STEP, "Nothing here yet - go play a round.", {
           size: Tokens.type.size.md,
           color: Tokens.text.muted,
           align: "center",
@@ -701,7 +717,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
 
     const closeBtn = makeButton(
       scene,
-      CX,
+      cx,
       452,
       140,
       32,

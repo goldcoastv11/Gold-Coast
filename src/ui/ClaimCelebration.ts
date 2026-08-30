@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { Tokens } from "./DesignTokens";
 import { makeText } from "./uiHelpers";
 import { playSfx } from "./SoundManager";
+import { isolateFixedUi } from "./sceneCameraSplit";
 
 /**
  * The payoff moment for a challenge claim, and the level-up that a claim can
@@ -73,6 +74,8 @@ export function showClaimCelebration(scene: Phaser.Scene, rewardGc: number, rewa
   });
   group.add([amount, xp]);
   group.setScale(0.86).setAlpha(0);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, [flash, group]);
 
   // Pop -> hold -> fade. The emphasis ease is allowed here for the same
   // reason uiHelpers' popIn allows it: this is a result number settling
@@ -163,6 +166,8 @@ function showOneLevelUp(
 
   container.add([plate, heading, detail]);
   container.setAlpha(0).setY(cy - Tokens.space.md);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, container);
 
   scene.tweens.chain({
     targets: container,
