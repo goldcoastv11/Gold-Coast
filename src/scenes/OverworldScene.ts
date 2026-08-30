@@ -879,6 +879,22 @@ export class OverworldScene extends Phaser.Scene {
     >;
     this.interactKey = this.input.keyboard!.addKey("E");
 
+    // Everything created ABOVE this line is world-space (tilemap, floor,
+    // decorations, walls, stations, ambient NPCs, the player, zone signs) -
+    // snapshotted here so it can be excluded from `uiCamera` below (see
+    // ui/sceneCameraSplit.ts's header - otherwise it would render a second,
+    // unzoomed, duplicate copy through that camera). Everything created
+    // BELOW this line through the end of create() is screen-fixed UI, and
+    // gets the opposite treatment a little further down.
+    const worldContentSoFar = [...this.children.list];
+
+    // Touch controls are created HERE, deliberately after the snapshot
+    // above, not before it. They are screen-fixed UI, not world content -
+    // but the split is decided purely by which side of that line an object
+    // is created on, so creating them earlier silently classified the
+    // joystick and interact button as world objects. They then scrolled and
+    // zoomed with the world and slid off-screen, making the game
+    // unplayable on a phone (reported from real play).
     // Mobile: virtual joystick + interact button (see ui/TouchControls.ts).
     // Only on an actual touch device - desktop keeps keyboard-only, no
     // controls cluttering the screen. handleMovement()/handleInteraction()
@@ -898,15 +914,6 @@ export class OverworldScene extends Phaser.Scene {
         this.activeInteractable.onInteract();
       });
     }
-
-    // Everything created ABOVE this line is world-space (tilemap, floor,
-    // decorations, walls, stations, ambient NPCs, the player, zone signs) -
-    // snapshotted here so it can be excluded from `uiCamera` below (see
-    // ui/sceneCameraSplit.ts's header - otherwise it would render a second,
-    // unzoomed, duplicate copy through that camera). Everything created
-    // BELOW this line through the end of create() is screen-fixed UI, and
-    // gets the opposite treatment a little further down.
-    const worldContentSoFar = [...this.children.list];
 
     // UI (fixed to camera) - rounded warm-cream chips (makeTextChip), matching
     // the rest of the chrome system's panel/inset outline treatment instead
