@@ -490,7 +490,7 @@ export class KenoScene extends Phaser.Scene {
     const picksCount = res.result.picks.length;
     if (payout > 0) {
       this.messageText
-        .setText(`${hits}/${picksCount} matched - ${multiplier}x! +${payout} Tickets`)
+        .setText(`${hits}/${picksCount} matched - ${multiplier}x! +${payout} Gold Coins`)
         .setColor(Tokens.text.accent);
       showWinCelebration(this, payout);
     } else {
@@ -525,6 +525,6 @@ export class KenoScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

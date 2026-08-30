@@ -1,28 +1,39 @@
 // Prisma schema for casino-poc's server-authoritative backend.
 //
 // Mirrors the client's economy shapes (src/economy/*.ts) - see that code and
-// repo-root CLAUDE.md for the current "arcade token" economy rules:
-//   - GC (spend to play) and TICKETS (won from playing, spent in the Item
-//     Shop) are separate ledgers (balances.gold_coins / balances.tickets)
+// repo-root CLAUDE.md for the current GC-only economy rules:
+//   - GC (Gold Coins) is the ONLY live currency - spent on every bet, win or
+//     lose, and paid straight back out as GC on a win (GAME_WIN_GC). It also
+//     grows via the Coin Kiosk's ad-gated claim, a real-money package
+//     purchase, or a challenge/level reward.
 //   - every balance change is one row in `transactions` (currency/type mirror
 //     ledger.ts's Currency/TransactionType unions) - nothing else may write
 //     gold_coins/tickets
-//   - skins are TICKETS-only and structurally separate from GC
+//   - the wardrobe and Item Shop (accessories/pets) are GC-only now too,
+//     debited via SHOP_PURCHASE_GC
 //
 // History: this used to be a GC/SC ("Sweeps Coin") sweepstakes-style model
 // with a 1x playthrough requirement and real-money SC redemption
 // (playthrough_progress table, REDEMPTION_SC/SIGNUP_BONUS_SC/etc.
-// transaction types, MIN_SC_REDEMPTION). That model is retired - see the
-// Currency/TransactionType enums and PlaythroughProgress model below for
-// what's kept around unused rather than destructively migrated away (same
-// philosophy as the ROUND_REFUND_GC/SC values already had: additive-only
-// schema changes, no enum-value removal or table drops for a pure
-// after-the-fact cleanup with no functional benefit). The `Balance.tickets`
-// field is intentionally still mapped to the physical `stake_coins` column
-// for the same reason - only the Prisma-side name changed, not the
-// database - the numeric value carries over as-is, same "no meaningful
-// mapping better than a direct carry-over for existing data" call made on
-// the client (see GameState.ts's migrateLegacyProfile doc comment).
+// transaction types, MIN_SC_REDEMPTION). That model was retired for a
+// two-currency GC/TICKETS "arcade token" model (GC to play, TICKETS won from
+// playing, spent in the Item Shop). TICKETS is now ALSO retired (2026-08-29,
+// founder direction: "get rid of tickets, only GC, for games, prizes,
+// everything") - every game now pays its win out in GC instead, and the
+// wardrobe/Item Shop are priced in GC. See the Currency/TransactionType
+// enums and PlaythroughProgress model below for what's kept around unused
+// rather than destructively migrated away (same philosophy as the
+// ROUND_REFUND_GC/SC values already had: additive-only schema changes, no
+// enum-value removal or table drops for a pure after-the-fact cleanup with
+// no functional benefit). The `Balance.tickets` field is intentionally still
+// mapped to the physical `stake_coins` column for the same reason - only the
+// Prisma-side name changed, not the database - the numeric value carries
+// over as-is, same "no meaningful mapping better than a direct carry-over
+// for existing data" call made on the client (see GameState.ts's
+// migrateLegacyProfile doc comment). Every account's TICKETS balance was
+// zeroed out (via a balancing TICKETS_RETIRED ledger transaction, not a
+// silent UPDATE) once this migration landed in production - see
+// prisma/migrations/20260829120100_zero_tickets_balances.
 
 generator client {
   provider = "prisma-client-js"
@@ -73,11 +84,12 @@ model User {
   @@map("users")
 }
 
-// One row per user. Two independent balances - never conflated, never
+// One row per user. `goldCoins` is the one live balance now (GC-only
+// economy). `tickets` is retired - kept, always 0 going forward, rather than
+// dropped (see this file's header comment) - and is intentionally still
+// mapped to the old `stake_coins` physical column. Neither column may be
 // mutated directly outside the ledger core (see src/economy/ledger.ts on
 // the server, which is the only code allowed to touch these two columns).
-// `tickets` is intentionally still mapped to the old `stake_coins` physical
-// column - see this file's header comment.
 model Balance {
   userId    String @id @map("user_id")
   user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -89,6 +101,10 @@ model Balance {
 
 enum Currency {
   GC
+  // Retired 2026-08-29 (see this file's header comment) - GC-only economy
+  // now. Kept for historical transaction rows (every account's balance was
+  // zeroed via a TICKETS_RETIRED transaction, not deleted) rather than a
+  // destructive enum-type recreation. No new code may credit or debit this.
   TICKETS
   // Retired (see this file's header comment) - kept, unused, rather than a
   // destructive enum-type recreation.
@@ -104,13 +120,38 @@ enum TransactionType {
   AD_REWARD_GC
   WAGER_GC
   ADJUST_GC
-  // The only way TICKETS are ever credited - a game round's win.
+  // Retired 2026-08-29 (GC-only economy, see this file's header comment) -
+  // TICKETS may no longer be credited by anything, including this. Kept for
+  // historical rows written before the retirement.
   GAME_WIN_TICKETS
-  // The only way TICKETS are ever debited - an Item Shop purchase.
+  // Retired 2026-08-29, same reason as GAME_WIN_TICKETS above.
   SKIN_PURCHASE_TICKETS
+  // A game round's win, GC-only (replaces GAME_WIN_TICKETS above as of the
+  // 2026-08-29 GC-only economy restructure) - every one of the 14 games'
+  // shared settlement helpers (games/shared.ts's settleSingleShotBet/
+  // settlePayout) credits its payout through this. Distinct from the
+  // now-retired GAME_WIN_TICKETS rather than reusing it (that type is
+  // TICKETS-currency only) and distinct from PAYOUT_GC (Triple Chance's own
+  // type) so a real game win stays separable from Triple Chance's
+  // double-or-nothing bonus round in the ledger and in any metrics query.
+  GAME_WIN_GC
+  // A wardrobe or Item Shop (accessories/pets) purchase, GC-only (replaces
+  // SKIN_PURCHASE_TICKETS above). Reused across both economy/wardrobe.ts and
+  // economy/itemShop.ts, same "the whole panel is one Item Shop" call
+  // SKIN_PURCHASE_TICKETS's own doc comment made - not the same enum value
+  // as the unrelated, already-retired SKIN_PURCHASE_GC below (that one was
+  // the old monolithic-skin model's GC-priced purchase type, from before the
+  // TICKETS-priced era; this is a fresh value for the current GC-only one).
+  SHOP_PURCHASE_GC
+  // The one-time balancing debit that zeroed every account's TICKETS
+  // balance when TICKETS was retired (2026-08-29) - see
+  // prisma/migrations/20260829120100_zero_tickets_balances. Never anything but a debit that
+  // exactly offsets a balance to 0; economy/ledger.ts's applyTransaction
+  // enforces both of those at runtime. Not reused for anything else.
+  TICKETS_RETIRED
   // Challenges & levels (see src/progression/*). Both are GC-ONLY grants -
-  // deliberately NOT TICKETS, because TICKETS may only ever be credited by
-  // GAME_WIN_TICKETS (a real game win); see repo-root CLAUDE.md and
+  // deliberately NOT TICKETS (now moot, since TICKETS can't be credited by
+  // anything any more - see above); see repo-root CLAUDE.md and
   // economy/ledger.ts's applyTransaction, which enforces that at runtime.
   // Distinct from AD_REWARD_GC rather than reusing it so a challenge/level
   // payout is separable from a Coin Kiosk claim in the ledger and in any
@@ -119,8 +160,13 @@ enum TransactionType {
   LEVEL_REWARD_GC
   // A GC payout - NOT retired, still used by Triple Chance
   // (routes/games.ts), which is GC-in/GC-out (double-or-nothing on GC just
-  // received from the Coin Kiosk), not one of the 14 GC-wager/TICKETS-
-  // payout games that go through GAME_WIN_TICKETS instead.
+  // received from the Coin Kiosk). Now that every other game also pays GC
+  // (GAME_WIN_GC above), Triple Chance is no longer a special case
+  // economically - it just keeps its own pre-existing direct ledger calls
+  // rather than being rewired through games/shared.ts, since unifying it
+  // would also pull it through progression/challenge tracking that was
+  // deliberately scoped to exclude it (see routes/games.ts's comment on the
+  // Triple Chance route).
   PAYOUT_GC
   // Retired (see this file's header comment) - the old GC/SC sweepstakes
   // model's SC-side transaction types, kept unused rather than a
@@ -202,10 +248,10 @@ model EquippedSkin {
 // images drawn in a fixed order over one shared body, and players buy the
 // individual pieces: hair, shirt, trousers, shoes, hat.
 //
-// TICKETS-only, exactly as skins were (repo-root CLAUDE.md's economy rule) -
-// Gold Coins buy plays, Tickets buy looks. Purchases debit through
-// SKIN_PURCHASE_TICKETS, the same transaction type the accessory/pet Item
-// Shop already reuses; see economy/wardrobe.ts on why no new enum value.
+// GC-only (2026-08-29: Gold Coins now buy both plays and looks - TICKETS is
+// retired). Purchases debit through SHOP_PURCHASE_GC, the same transaction
+// type the accessory/pet Item Shop reuses; see economy/wardrobe.ts on why no
+// separate enum value per shop.
 //
 // The slot list mirrors the catalog's WardrobeSlot union 1:1. Adding a slot
 // is a destructive enum migration, so the six below were chosen to cover the
@@ -253,8 +299,8 @@ model EquippedWardrobe {
 // Cosmetic equip-slot categories beyond skins (see server/src/itemCatalog.ts
 // and economy/itemShop.ts) - a floating emoji badge worn above the head
 // (ACCESSORY) and a small companion sprite that follows the player around
-// the Overworld (PET). Both are TICKETS-only, same economy rule as skins
-// (repo-root CLAUDE.md) - structurally separate tables from SkinOwned/
+// the Overworld (PET). Both are GC-only (TICKETS is retired, see this
+// file's header comment) - structurally separate tables from SkinOwned/
 // EquippedSkin rather than folding into them, since unlike a skin (always
 // exactly one equipped, defaulting to "player") these can be equipped OR
 // NOT - "wearing nothing" is a valid, common state for both.
@@ -479,7 +525,7 @@ model PlayerProgress {
 // midnight comes back correct on its own.
 //
 // `counter` covers count/sum metrics (rounds played, wins, GC wagered,
-// TICKETS won). `seen` covers distinct-set metrics ("play 5 different
+// GC won). `seen` covers distinct-set metrics ("play 5 different
 // games") - progress there is the array's length, so re-playing the same
 // game can't inflate it.
 //

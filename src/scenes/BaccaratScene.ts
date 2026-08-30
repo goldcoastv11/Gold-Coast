@@ -334,15 +334,15 @@ export class BaccaratScene extends Phaser.Scene {
 
     if (payout > 0) {
       if (multiplier === PUSH_MULT) {
-        // A push still pays out TICKETS = the GC bet amount (the GC wager
-        // itself was already spent at deal time, same as any other outcome
-        // here - there's no "bet returned" in this currency, just a payout).
+        // A push still pays out Gold Coins = the GC bet amount (the GC
+        // wager itself was already spent at deal time, same as any other
+        // outcome here - there's no "bet returned", just a payout).
         this.messageText
-          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - push! +${payout} Tickets`)
+          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal}) - push! +${payout} Gold Coins`)
           .setColor(Tokens.text.secondary);
       } else {
         this.messageText
-          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} Tickets`)
+          .setText(`${winnerLabel} (${playerTotal}-${bankerTotal})! +${payout} Gold Coins`)
           .setColor(Tokens.text.accent);
         popIn(this, this.messageText);
       }
@@ -375,6 +375,6 @@ export class BaccaratScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

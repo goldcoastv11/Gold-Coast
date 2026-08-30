@@ -9,16 +9,15 @@ import { ITEM_CATALOG } from "../src/itemCatalog";
 beforeEach(resetDb);
 
 /**
- * Items (accessories/pets), like skins, are purchased with TICKETS, and
- * TICKETS can only ever be credited via a real game win (GAME_WIN_TICKETS -
- * see ledger.test.ts's "one sanctioned path" test). Seed a TICKETS bankroll
- * directly through the real ledger function, same as skins.test.ts's
- * topUpTickets.
+ * Items (accessories/pets), like the wardrobe, are purchased with GC
+ * (2026-08-29 GC-only economy restructure - TICKETS is retired). Seed a
+ * bankroll through the real ledger (ADJUST_GC), same helper wardrobe.test.ts
+ * uses.
  */
-async function topUpTickets(username: string, amount: number): Promise<void> {
+async function topUpGc(username: string, amount: number): Promise<void> {
   const user = await prisma.user.findUniqueOrThrow({ where: { username } });
   await prisma.$transaction((tx) =>
-    applyTransaction(tx, user.id, "TICKETS", "GAME_WIN_TICKETS", amount, { reason: "test bankroll top-up" })
+    applyTransaction(tx, user.id, "GC", "ADJUST_GC", amount, { reason: "test bankroll top-up" })
   );
 }
 
@@ -26,30 +25,30 @@ const accessory = ITEM_CATALOG.find((i) => i.id === "acc_bow")!; // price 150
 const pet = ITEM_CATALOG.find((i) => i.id === "pet_buddy")!; // price 500
 
 describe("POST /items/buy", () => {
-  it("buys an affordable accessory with TICKETS and never touches GC", async () => {
+  it("buys an affordable accessory with GC (TICKETS is retired - stays untouched at 0)", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, accessory.price);
+    await topUpGc(username, accessory.price);
 
     const before = await request(app).get("/me").set(authed(token));
 
     const res = await request(app).post("/items/buy").set(authed(token)).send({ itemId: accessory.id });
 
     expect(res.status).toBe(200);
-    expect(res.body.user.tickets).toBe(before.body.tickets - accessory.price);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins); // GC untouched
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - accessory.price);
+    expect(res.body.user.tickets).toBe(before.body.tickets); // TICKETS untouched - retired
     expect(res.body.user.ownedItems).toContain(accessory.id);
     expect(res.body.user.equippedAccessory).toBe(accessory.id);
 
     const user = await prisma.user.findUniqueOrThrow({ where: { username } });
-    const tx = await prisma.transaction.findFirst({ where: { userId: user.id, type: "SKIN_PURCHASE_TICKETS" } });
+    const tx = await prisma.transaction.findFirst({ where: { userId: user.id, type: "SHOP_PURCHASE_GC" } });
     expect(tx).not.toBeNull();
-    expect(tx!.currency).toBe("TICKETS");
+    expect(tx!.currency).toBe("GC");
     expect(tx!.amount).toBe(-accessory.price);
   });
 
   it("buying a pet doesn't touch the accessory slot, and vice versa", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, accessory.price + pet.price);
+    await topUpGc(username, accessory.price + pet.price);
 
     await request(app).post("/items/buy").set(authed(token)).send({ itemId: accessory.id });
     const res = await request(app).post("/items/buy").set(authed(token)).send({ itemId: pet.id });
@@ -63,7 +62,7 @@ describe("POST /items/buy", () => {
   it("buying a second accessory replaces the equipped one but keeps both owned", async () => {
     const { token, username } = await signupUser();
     const other = ITEM_CATALOG.find((i) => i.category === "ACCESSORY" && i.id !== accessory.id)!;
-    await topUpTickets(username, accessory.price + other.price);
+    await topUpGc(username, accessory.price + other.price);
 
     await request(app).post("/items/buy").set(authed(token)).send({ itemId: accessory.id });
     const res = await request(app).post("/items/buy").set(authed(token)).send({ itemId: other.id });
@@ -74,16 +73,22 @@ describe("POST /items/buy", () => {
   });
 
   it("rejects buying an item that can't be afforded", async () => {
-    const { token } = await signupUser();
-    const expensive = ITEM_CATALOG.find((i) => i.id === "acc_crown")!; // price 800, above a fresh signup's 0 TICKETS
+    const { token, username } = await signupUser();
+    // Signup GC is randomized (500/1000/2000 - see gcMultiplier.ts), so
+    // drain it to exactly 0 first rather than assuming any particular item
+    // is unaffordable at every possible starting balance.
+    const before = await request(app).get("/me").set(authed(token));
+    await topUpGc(username, -before.body.goldCoins);
+
+    const expensive = ITEM_CATALOG.find((i) => i.id === "acc_crown")!; // price 800
     const res = await request(app).post("/items/buy").set(authed(token)).send({ itemId: expensive.id });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("INSUFFICIENT_TICKETS");
+    expect(res.body.code).toBe("INSUFFICIENT_GC");
   });
 
   it("rejects buying an item already owned", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, 1000);
+    await topUpGc(username, 1000);
     await request(app).post("/items/buy").set(authed(token)).send({ itemId: accessory.id });
 
     const res = await request(app).post("/items/buy").set(authed(token)).send({ itemId: accessory.id });
@@ -101,7 +106,7 @@ describe("POST /items/buy", () => {
 describe("POST /items/equip", () => {
   it("equips an owned item", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, 1000);
+    await topUpGc(username, 1000);
     await request(app).post("/items/buy").set(authed(token)).send({ itemId: pet.id });
     await request(app).post("/items/unequip").set(authed(token)).send({ category: "PET" });
 
@@ -129,7 +134,7 @@ describe("POST /items/equip", () => {
 describe("POST /items/unequip", () => {
   it("clears the equipped item for a category - unlike skins, 'nothing' is a valid state", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, accessory.price);
+    await topUpGc(username, accessory.price);
     await request(app).post("/items/buy").set(authed(token)).send({ itemId: accessory.id });
 
     const res = await request(app).post("/items/unequip").set(authed(token)).send({ category: "ACCESSORY" });

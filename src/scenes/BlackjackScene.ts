@@ -394,14 +394,14 @@ export class BlackjackScene extends Phaser.Scene {
 
   private resolveMessage(outcome: BlackjackOutcome | null, payout: number) {
     if (outcome === "win") {
-      this.messageText.setText(`You win! +${payout} Tickets`).setColor(Tokens.text.accent);
+      this.messageText.setText(`You win! +${payout} Gold Coins`).setColor(Tokens.text.accent);
       popIn(this, this.messageText);
       showWinCelebration(this, payout);
     } else if (outcome === "push") {
-      // A push still pays TICKETS = the GC bet amount (the GC wager itself
-      // was already spent at start time) - no "bet returned" in this
-      // currency, just a payout.
-      this.messageText.setText(`Push! +${payout} Tickets`).setColor(Tokens.text.muted);
+      // A push still pays out Gold Coins = the GC bet amount (the GC wager
+      // itself was already spent at start time) - no "bet returned", just a
+      // payout.
+      this.messageText.setText(`Push! +${payout} Gold Coins`).setColor(Tokens.text.muted);
       showWinCelebration(this, payout);
     } else {
       this.messageText.setText("Dealer wins").setColor(Tokens.text.negative);
@@ -514,7 +514,7 @@ export class BlackjackScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }
 

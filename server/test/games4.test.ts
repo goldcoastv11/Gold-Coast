@@ -22,13 +22,14 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
     if (res.body.state.playerTotal === 21) {
       // Natural blackjack - the round auto-stands, dealer plays out and pays
       // out within this same /start call. The GC wager is spent regardless
-      // (-20 flat); any win (win=40, push=20) is credited as TICKETS, not GC.
+      // (-20 flat); any win (win=40, push=20) is credited straight back as
+      // GC too - TICKETS is retired and never moves.
       expect(res.body.state.status).toBe("resolved");
       expect(res.body.state.dealerHand).not.toBeNull();
       expect(["win", "push"]).toContain(res.body.state.outcome);
       expect(res.body.payout).toBe(res.body.state.outcome === "win" ? 40 : 20);
-      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20);
-      expect(res.body.user.tickets).toBe(before.body.tickets + res.body.payout);
+      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20 + res.body.payout);
+      expect(res.body.user.tickets).toBe(before.body.tickets);
     } else {
       expect(res.body.state.status).toBe("playing");
       expect(res.body.state.dealerHand).toBeNull();
@@ -120,7 +121,7 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
     expect(res.status).toBe(404);
   });
 
-  it("standing runs the dealer to >=17 and settles win/push/lose, with any payout in TICKETS", async () => {
+  it("standing runs the dealer to >=17 and settles win/push/lose, with any payout in GC", async () => {
     const { token } = await signupUser();
 
     let roundId: string | null = null;
@@ -142,8 +143,8 @@ describe("POST /games/blackjack/* (stateful: start / hit / stand)", () => {
 
     const expectedMult = res.body.state.outcome === "win" ? 2 : res.body.state.outcome === "push" ? 1 : 0;
     expect(res.body.payout).toBe(10 * expectedMult);
-    expect(res.body.user.goldCoins).toBe(before!.body.goldCoins - 10);
-    expect(res.body.user.tickets).toBe(before!.body.tickets + res.body.payout);
+    expect(res.body.user.goldCoins).toBe(before!.body.goldCoins - 10 + res.body.payout);
+    expect(res.body.user.tickets).toBe(before!.body.tickets); // TICKETS is retired - never moves
 
     // Round is closed now - a further stand or hit must 404, not double-pay.
     const again = await request(app).post("/games/blackjack/stand").set(authed(token)).send({ roundId });
@@ -179,7 +180,7 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
     expect(second.status).toBe(409);
   });
 
-  it("holding all 5 cards on draw returns the exact same hand, scores it as dealt, and pays TICKETS", async () => {
+  it("holding all 5 cards on draw returns the exact same hand, scores it as dealt, and pays GC", async () => {
     const { token } = await signupUser();
     const deal = await request(app).post("/games/videopoker/deal").set(authed(token)).send({ betAmount: 10 });
     const dealtHand = deal.body.hand;
@@ -197,9 +198,10 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
     const expectedEntry = VIDEO_POKER_PAYTABLE.find((e) => e.rank === res.body.rank)!;
     expect(res.body.multiplier).toBe(expectedEntry.mult);
     expect(res.body.payout).toBe(10 * expectedEntry.mult);
-    // The GC wager was already spent at deal() - draw's payout is TICKETS.
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins);
-    expect(res.body.user.tickets).toBe(before.body.tickets + res.body.payout);
+    // The GC wager was already spent at deal() - draw's payout is credited
+    // on top of that as GC too. TICKETS is retired and never moves.
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins + res.body.payout);
+    expect(res.body.user.tickets).toBe(before.body.tickets);
   });
 
   it("holding nothing draws 5 fresh cards and scores according to the paytable", async () => {

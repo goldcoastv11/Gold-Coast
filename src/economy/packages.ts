@@ -3,10 +3,11 @@
  *
  * History: these used to each carry a non-linearly-scaled SC ("Sweeps
  * Coin") bonus gift, back when this game used a two-currency sweepstakes
- * model with a real-money redemption path. That whole model was replaced
- * with the current "arcade token" one (GC to play, TICKETS won from
- * playing, spent in the Item Shop, no real-money value at all) - see
- * repo-root CLAUDE.md and ledger.ts's doc comment. Packages are now a
+ * model with a real-money redemption path. That model was replaced by a
+ * two-currency "arcade token" one (GC to play, TICKETS won from playing,
+ * spent in the Item Shop), which is itself now retired in favor of the
+ * current GC-only economy (2026-08-29 restructure - see repo-root
+ * CLAUDE.md and ledger.ts's doc comment). Packages are, and remain, a
  * plain GC top-up, nothing else attached.
  *
  * priceUsd is a display-only figure for this POC - there is no real

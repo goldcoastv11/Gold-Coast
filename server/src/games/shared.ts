@@ -6,14 +6,15 @@
  * function -> settle the bet", not a re-implementation of the ledger calls
  * each time.
  *
- * "Arcade token" model (see repo-root CLAUDE.md and economy/ledger.ts's
- * doc comment): every bet is GC, spent regardless of outcome, and every
- * win pays out TICKETS - there's no currency choice any more (used to be
- * GC or SC), so these functions no longer take a `currency` parameter at
- * all. This is the ONLY place that mapping happens - every one of the 14
- * games' route handlers funnels through these three functions, so this
- * file is the entire currency-wiring surface for the whole economy
- * restructure.
+ * GC-only economy (2026-08-29 restructure, see repo-root CLAUDE.md and
+ * economy/ledger.ts's doc comment): every bet is GC, spent regardless of
+ * outcome, and every win now pays out GC too (GAME_WIN_GC) - TICKETS is
+ * retired. Before this restructure, a win paid out TICKETS instead (a
+ * separate currency); that's gone, but these functions still take no
+ * `currency` parameter, since GC is the only one there ever is now. This is
+ * the ONLY place that wiring happens - every one of the 14 games' route
+ * handlers funnels through these three functions, so this file is the
+ * entire currency-wiring surface for the whole economy.
  *
  * Challenge/XP progress (progression/progress.ts) is recorded from here for
  * exactly that reason: these three functions are the only place a real,
@@ -24,9 +25,15 @@
  * written on the caller's same `tx`, so it commits or rolls back with the
  * round's ledger entries.
  *
- * Triple Chance is (correctly) invisible to all of this: it settles via its
- * own direct ledger calls in routes/games.ts, not through these helpers, and
- * per repo-root CLAUDE.md it isn't one of "the games" for economy purposes.
+ * Triple Chance settles via its own direct ledger calls in routes/games.ts,
+ * not through these helpers - it was the one deliberate GC-in/GC-out
+ * exception under the old TICKETS-payout model, and now that every game pays
+ * GC it isn't economically special any more, but it still isn't rewired
+ * through here: doing so would also pull it through the challenge/progress
+ * tracking below, which was deliberately scoped to exclude it, and changing
+ * that is a product call, not a side effect of a currency migration. See
+ * routes/games.ts's comment on the Triple Chance route for the full
+ * reasoning.
  */
 
 import { z } from "zod";
@@ -43,7 +50,7 @@ export const BET_MAX = 500;
 export const BetAmountSchema = z.number().int().min(BET_MIN).max(BET_MAX);
 
 /**
- * Debits `betAmount` GC as a wager, then credits `payout` (if > 0) TICKETS
+ * Debits `betAmount` GC as a wager, then credits `payout` (if > 0) GC back
  * as the win. Every single-shot game's whole round is exactly this shape.
  */
 export async function settleSingleShotBet(
@@ -58,7 +65,7 @@ export async function settleSingleShotBet(
   await recordWager(tx, userId, game, betAmount);
 
   if (payout > 0) {
-    await applyTransaction(tx, userId, "TICKETS", "GAME_WIN_TICKETS", payout, { game, ...meta });
+    await applyTransaction(tx, userId, "GC", "GAME_WIN_GC", payout, { game, ...meta });
     await recordWin(tx, userId, game, payout);
   }
 }
@@ -75,7 +82,7 @@ export async function placeWager(
   await recordWager(tx, userId, game, betAmount);
 }
 
-/** Just the payout leg (TICKETS credit), for stateful games' resolution/cashout endpoints. No-op if payout <= 0. */
+/** Just the payout leg (GC credit), for stateful games' resolution/cashout endpoints. No-op if payout <= 0. */
 export async function settlePayout(
   tx: TxClient,
   userId: string,
@@ -84,6 +91,6 @@ export async function settlePayout(
   meta: Record<string, unknown>
 ): Promise<void> {
   if (payout <= 0) return;
-  await applyTransaction(tx, userId, "TICKETS", "GAME_WIN_TICKETS", payout, { game, ...meta });
+  await applyTransaction(tx, userId, "GC", "GAME_WIN_GC", payout, { game, ...meta });
   await recordWin(tx, userId, game, payout);
 }

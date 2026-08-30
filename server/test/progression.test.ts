@@ -328,10 +328,11 @@ describe("POST /challenges/claim", () => {
     expect(ledgerRow!.currency).toBe("GC");
     expect(ledgerRow!.amount).toBe(100);
 
-    // Nothing in this feature may ever mint Tickets: the only TICKETS
-    // credits on this account are real game wins.
+    // Nothing in this feature may ever touch Tickets: it's retired, and
+    // nothing on this account - including the dice win above - should have
+    // written a single TICKETS row.
     const ticketRows = await prisma.transaction.findMany({ where: { userId, currency: "TICKETS" } });
-    expect(ticketRows.every((t) => t.type === "GAME_WIN_TICKETS")).toBe(true);
+    expect(ticketRows).toHaveLength(0);
   });
 
   it("cannot be claimed twice", async () => {
@@ -503,16 +504,16 @@ describe("levels", () => {
 // =====================================================================
 
 describe("economy rule", () => {
-  it("makes it impossible for a challenge or level reward to mint Tickets", async () => {
+  it("makes it impossible for a challenge or level reward to mint Tickets (retired - nothing may credit it any more)", async () => {
     const { username } = await signupUser();
     const userId = await userIdFor(username);
 
     await expect(
       prisma.$transaction((tx) => applyTransaction(tx, userId, "TICKETS", "CHALLENGE_REWARD_GC", 100))
-    ).rejects.toThrow(/GAME_WIN_TICKETS/);
+    ).rejects.toThrow(/TICKETS is retired/);
 
     await expect(
       prisma.$transaction((tx) => applyTransaction(tx, userId, "TICKETS", "LEVEL_REWARD_GC", 100))
-    ).rejects.toThrow(/GAME_WIN_TICKETS/);
+    ).rejects.toThrow(/TICKETS is retired/);
   });
 });

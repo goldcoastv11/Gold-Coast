@@ -9,17 +9,17 @@ import { WARDROBE_CATALOG, WARDROBE_SLOTS, DEFAULT_BODY_PIECE_ID } from "../src/
 beforeEach(resetDb);
 
 /**
- * Wardrobe pieces, like the accessories/pets before them, are bought with
- * TICKETS - and TICKETS can only ever be credited by a real game win
- * (GAME_WIN_TICKETS, enforced in the ledger itself - see ledger.test.ts's
- * "one sanctioned path" test). So a test bankroll has to be seeded through
- * that same real path, not by writing a balance directly. Same helper the
- * deleted skins.test.ts and the surviving items.test.ts both use.
+ * Wardrobe pieces, like the accessories/pets before them, are bought with GC
+ * (2026-08-29 GC-only economy restructure - TICKETS is retired). Seed a
+ * test bankroll through the real ledger (ADJUST_GC) rather than writing a
+ * balance directly, same helper games.test.ts's topUpGold uses - a fresh
+ * signup's GC (500/1000/2000) isn't always enough to cover the pricier
+ * pieces below.
  */
-async function topUpTickets(username: string, amount: number): Promise<void> {
+async function topUpGc(username: string, amount: number): Promise<void> {
   const user = await prisma.user.findUniqueOrThrow({ where: { username } });
   await prisma.$transaction((tx) =>
-    applyTransaction(tx, user.id, "TICKETS", "GAME_WIN_TICKETS", amount, { reason: "test bankroll top-up" })
+    applyTransaction(tx, user.id, "GC", "ADJUST_GC", amount, { reason: "test bankroll top-up" })
   );
 }
 
@@ -60,25 +60,25 @@ describe("GET /wardrobe/catalog", () => {
 });
 
 describe("POST /wardrobe/buy", () => {
-  it("buys an affordable piece with TICKETS and never touches GC", async () => {
+  it("buys an affordable piece with GC (TICKETS is retired - stays untouched at 0)", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price);
+    await topUpGc(username, shirt.price);
 
     const before = await request(app).get("/me").set(authed(token));
 
     const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
 
     expect(res.status).toBe(200);
-    expect(res.body.user.tickets).toBe(before.body.tickets - shirt.price);
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins); // GC untouched
+    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - shirt.price);
+    expect(res.body.user.tickets).toBe(before.body.tickets); // TICKETS untouched - retired
     expect(res.body.user.wardrobe.owned).toContain(shirt.id);
 
     const user = await prisma.user.findUniqueOrThrow({ where: { username } });
     const tx = await prisma.transaction.findFirst({
-      where: { userId: user.id, type: "SKIN_PURCHASE_TICKETS" }
+      where: { userId: user.id, type: "SHOP_PURCHASE_GC" }
     });
     expect(tx).not.toBeNull();
-    expect(tx!.currency).toBe("TICKETS");
+    expect(tx!.currency).toBe("GC");
     expect(tx!.amount).toBe(-shirt.price);
     // The slot/piece is recorded in meta for audit rather than in a new
     // transaction type - see economy/wardrobe.ts's header.
@@ -87,7 +87,7 @@ describe("POST /wardrobe/buy", () => {
 
   it("wears the piece immediately - buying it means wearing it", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price);
+    await topUpGc(username, shirt.price);
 
     const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     expect(res.body.user.wardrobe.equipped.TORSO).toBe(shirt.id);
@@ -95,7 +95,7 @@ describe("POST /wardrobe/buy", () => {
 
   it("buying a piece for one slot leaves the other slots alone", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price + trousers.price + hat.price);
+    await topUpGc(username, shirt.price + trousers.price + hat.price);
 
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: trousers.id });
@@ -116,7 +116,7 @@ describe("POST /wardrobe/buy", () => {
 
   it("buying a second piece for the same slot swaps what's worn but keeps both owned", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price + otherShirt.price);
+    await topUpGc(username, shirt.price + otherShirt.price);
 
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: otherShirt.id });
@@ -126,15 +126,21 @@ describe("POST /wardrobe/buy", () => {
   });
 
   it("rejects a piece that can't be afforded", async () => {
-    const { token } = await signupUser(); // 0 TICKETS - they're only won by playing
+    const { token, username } = await signupUser();
+    // Signup GC is randomized (500/1000/2000 - see gcMultiplier.ts), so
+    // drain it to exactly 0 first rather than assuming any particular
+    // piece is unaffordable at every possible starting balance.
+    const before = await request(app).get("/me").set(authed(token));
+    await topUpGc(username, -before.body.goldCoins);
+
     const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     expect(res.status).toBe(400);
-    expect(res.body.code).toBe("INSUFFICIENT_TICKETS");
+    expect(res.body.code).toBe("INSUFFICIENT_GC");
   });
 
   it("rejects buying a piece already owned", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price * 2);
+    await topUpGc(username, shirt.price * 2);
 
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
@@ -145,7 +151,7 @@ describe("POST /wardrobe/buy", () => {
 
   it("rejects buying the free default body - it's already owned by everyone", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, 500);
+    await topUpGc(username, 500);
     const res = await request(app)
       .post("/wardrobe/buy")
       .set(authed(token))
@@ -165,7 +171,7 @@ describe("POST /wardrobe/buy", () => {
 describe("POST /wardrobe/equip", () => {
   it("equips a piece the player owns", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price + otherShirt.price);
+    await topUpGc(username, shirt.price + otherShirt.price);
 
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: otherShirt.id });
@@ -181,7 +187,7 @@ describe("POST /wardrobe/equip", () => {
 
   it("swapping the body keeps everything else worn", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, shirt.price + body.price);
+    await topUpGc(username, shirt.price + body.price);
 
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
     const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: body.id });
@@ -218,7 +224,7 @@ describe("POST /wardrobe/equip", () => {
 describe("POST /wardrobe/unequip", () => {
   it("takes off an optional slot, leaving the piece owned but not worn", async () => {
     const { token, username } = await signupUser();
-    await topUpTickets(username, hat.price);
+    await topUpGc(username, hat.price);
     await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: hat.id });
 
     const res = await request(app).post("/wardrobe/unequip").set(authed(token)).send({ slot: "HAT" });

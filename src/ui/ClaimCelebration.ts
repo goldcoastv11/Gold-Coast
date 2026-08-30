@@ -19,9 +19,10 @@ import { playSfx } from "./SoundManager";
  * Purely presentational. Callers pass amounts the SERVER already confirmed
  * and credited; nothing here touches the ledger or decides anything.
  *
- * ECONOMY: challenge and level rewards are Gold Coins plus XP, never Tickets
- * (repo-root CLAUDE.md) - hence the wording below, which must not be
- * "generalised" into a currency-agnostic amount.
+ * ECONOMY: challenge and level rewards are Gold Coins plus XP - the only
+ * currency there is now (repo-root CLAUDE.md; TICKETS is retired) - hence
+ * the wording below, which must not be "generalised" into a
+ * currency-agnostic amount.
  */
 
 /** Above every panel in the calling scene, and above the toast (depth 210). Matches WinCelebration's band. */

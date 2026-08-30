@@ -293,7 +293,7 @@ export class DiceScene extends Phaser.Scene {
     const { roll, target, won, payout } = res.result;
 
     // Retention Leg 1 - see src/api/track.ts. Server-settled result only;
-    // betAmount is Gold Coins, payout is Tickets (separate ledgers).
+    // betAmount and payout are both Gold Coins (GC-only economy).
     track(EVENTS.GAME_ROUND_PLAYED, {
       game: "dice",
       betAmount: bet,
@@ -306,7 +306,7 @@ export class DiceScene extends Phaser.Scene {
 
     if (won) {
       this.rollText.setColor(Tokens.text.accent);
-      this.messageText.setText(`Under ${target} - you win ${payout} Tickets.`).setColor(Tokens.text.accent);
+      this.messageText.setText(`Under ${target} - you win ${payout} Gold Coins.`).setColor(Tokens.text.accent);
       popIn(this, this.rollText);
       showWinCelebration(this, payout);
     } else {
@@ -344,6 +344,6 @@ export class DiceScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

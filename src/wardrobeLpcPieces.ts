@@ -10,8 +10,8 @@
  * under CC0 or OGA-BY. Attribution for the OGA-BY pieces ships with the game
  * in public/assets/characters/lpc/CREDITS.txt.
  *
- * Prices are in TICKETS and are spend-only: TICKETS are still credited
- * solely by GAME_WIN_TICKETS, which the import does not touch.
+ * Prices are in Gold Coins (GC-only economy - TICKETS is retired, see
+ * repo-root CLAUDE.md). This import does not touch the ledger.
  */
 
 import type { WardrobePieceDef } from "./wardrobeCatalog";

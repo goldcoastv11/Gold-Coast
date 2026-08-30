@@ -27,8 +27,8 @@
  *               pieces by id. (The ids that predate the art import are kept
  *               deliberately, so nobody loses a purchase.)
  *  - `slot`     which wardrobe layer it draws on.
- *  - `price`    TICKETS. Spend-only; TICKETS are still credited solely by
- *               GAME_WIN_TICKETS, which this import does not touch.
+ *  - `price`    Gold Coins (GC-only economy - TICKETS is retired, see
+ *               repo-root CLAUDE.md). This import does not touch the ledger.
  *  - `def`      path under the generator's `sheet_definitions/`. This is what
  *               carries the licence and the art's location.
  *  - `color`    palette ramp to recolour into (LPC ships every sheet in one

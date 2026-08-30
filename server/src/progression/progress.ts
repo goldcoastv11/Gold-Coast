@@ -212,7 +212,7 @@ export async function recordWin(
     if (def.minPayout !== undefined && payout < def.minPayout) continue;
     await bumpCounter(tx, userId, def.id, periodKeyFor(def.period, now), 1);
   }
-  for (const def of matchingChallenges("TICKETS_WON", game)) {
+  for (const def of matchingChallenges("GC_WON", game)) {
     await bumpCounter(tx, userId, def.id, periodKeyFor(def.period, now), Math.floor(payout));
   }
 }

@@ -155,7 +155,7 @@ export function formatNextUnlock(p: ProgressionResponse): string | null {
   return `Next unlock: ${cosmeticName(next.itemId)} at Level ${next.level}`;
 }
 
-/** "Next level: +800 Gold Coins", or null at max level. Gold Coins, never Tickets - see api/types.ts. */
+/** "Next level: +800 Gold Coins", or null at max level. Gold Coins - the only currency now (see api/types.ts). */
 export function formatNextLevelReward(p: ProgressionResponse): string | null {
   if (p.atMaxLevel) return null;
   return `Next level: +${formatNumber(p.nextLevelRewardGc)} Gold Coins`;

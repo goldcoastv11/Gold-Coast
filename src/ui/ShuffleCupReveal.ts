@@ -20,14 +20,15 @@ import { GC_MULTIPLIERS } from "../economy/gcMultiplier";
  *
  * Currency wording: the status text names "Gold Coins" outright rather
  * than showing a bare number. Every call site of this component pays GOLD
- * COINS and only Gold Coins - the signup bonus (SIGNUP_BONUS_GC, see
- * economy/signupBonus.ts), the Coin Kiosk claim (AD_REWARD_GC, see
- * economy/attendantClaim.ts), and Triple Chance (WAGER_GC/PAYOUT_GC, the
- * deliberate GC-in/GC-out exception in server/src/routes/games.ts) - so a
- * bare "You got 1000!" was ambiguous between the game's two real,
- * displayed currencies. It is NOT a TICKETS reveal and must never be
- * reused as one without threading a currency label through first; TICKETS
- * are only ever credited by a game win via GAME_WIN_TICKETS.
+ * COINS - the signup bonus (SIGNUP_BONUS_GC, see economy/signupBonus.ts),
+ * the Coin Kiosk claim (AD_REWARD_GC, see economy/attendantClaim.ts), and
+ * Triple Chance (WAGER_GC/PAYOUT_GC, see server/src/routes/games.ts) - and,
+ * since the 2026-08-29 GC-only economy restructure, Gold Coins is the only
+ * currency there is (TICKETS is retired - see repo-root CLAUDE.md). This
+ * wording was written back when a second currency existed and a bare "You
+ * got 1000!" would have been ambiguous between the two; that ambiguity is
+ * gone now, but naming the currency explicitly is still clearer than a bare
+ * number, so the wording stays.
  *
  * Mechanics: 3 cups, each secretly assigned one of MULTIPLIERS (fixed set,
  * one cup per value - always exactly one 0.5x, one 1x, one 2x). A fast

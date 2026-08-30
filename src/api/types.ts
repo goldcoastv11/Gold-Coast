@@ -17,6 +17,14 @@ export type { WardrobeSlot };
 export interface MeResponse {
   username: string;
   goldCoins: number;
+  /**
+   * Retired (GC-only economy, 2026-08-29 restructure - see repo-root
+   * CLAUDE.md). Always 0 now and never grows; kept on the wire only because
+   * the server's Balance/serializer still sends it and dropping the field
+   * would be a needless wire-shape change for a value nothing reads any
+   * more. Don't display this - see ShopPanel.ts/uiHelpers.ts's formatBalance
+   * for what replaced the old two-currency display.
+   */
   tickets: number;
   /**
    * The layered wardrobe (see server/src/economy/wardrobe.ts) - what
@@ -178,7 +186,13 @@ export interface ApiErrorBody {
 
 // ---- Games (#36 - server-authoritative RNG/payout) ----
 
-/** Every `payout` field below is now TICKETS, not GC - see repo-root CLAUDE.md's "arcade token" model. */
+/**
+ * Every `payout` field below is GC (GC-only economy, 2026-08-29 restructure
+ * - see repo-root CLAUDE.md). Before that restructure, a payout used to be
+ * TICKETS, a separate currency; that's retired now, but the union below
+ * keeps the "TICKETS" member for wire-shape compatibility with old
+ * historical data, not because a response can still report it.
+ */
 export type Currency = "GC" | "TICKETS";
 
 /** POST /games/dice/play */
@@ -448,10 +462,9 @@ export interface AbandonRoundNotFoundError {
 
 // ---- Challenges, XP and levels ----
 // Mirrors server/src/progression/* and server/src/routes/progression.ts.
-// ECONOMY: every reward below is GOLD COINS plus XP, never Tickets - the
-// ledger hard-enforces that TICKETS can only ever be credited by a real game
-// win (see repo-root CLAUDE.md). Nothing in this section should ever grow a
-// Tickets field.
+// ECONOMY: every reward below is GOLD COINS plus XP - the only currency
+// there is now (TICKETS is retired; the ledger no longer credits it at all
+// - see repo-root CLAUDE.md).
 
 export type ChallengePeriod = "DAILY" | "WEEKLY" | "LIFETIME";
 
@@ -466,7 +479,7 @@ export interface ChallengeView {
   target: number;
   complete: boolean;
   claimed: boolean;
-  /** Gold Coins paid on claim. Never Tickets. */
+  /** Gold Coins paid on claim - the only currency there is now. */
   rewardGc: number;
   rewardXp: number;
   /** ISO instant this challenge's period rolls over, or null for lifetime achievements. */

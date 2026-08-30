@@ -27,8 +27,10 @@ import { ApiError, NetworkError } from "../api/client";
  *
  * Repeatable/chainable by design: a win re-offers Triple Chance on the new
  * (tripled) amount; the player can stop and keep their winnings at any
- * point, or a loss ends the chain at 0. GC only - never touches TICKETS, the
- * server route doesn't even accept a currency param.
+ * point, or a loss ends the chain at 0. GC only - the server route doesn't
+ * even accept a currency param (there's only ever been one currency this
+ * round could touch, and since the 2026-08-29 GC-only economy restructure
+ * that's true of every game, not just this one - see repo-root CLAUDE.md).
  */
 
 const TRIPLE_CHANCE_DISPLAY_SET = [0, 0, 3] as const;
@@ -101,11 +103,13 @@ function showOffer(
   const sub = scene.add
     // "Gold Coins", not the internal "GC" abbreviation - this is the
     // player-facing name of the currency (see repo-root CLAUDE.md). Gold
-    // Coins on BOTH sides is correct and deliberate: Triple Chance is the
-    // one GC-in/GC-out exception (server/src/routes/games.ts's
-    // /games/triplechance/play debits WAGER_GC and credits PAYOUT_GC, and
-    // never goes through games/shared.ts's GC-wager/TICKETS-payout split),
-    // so it must NOT say "Tickets" on the win side like the 14 games do.
+    // Coins on BOTH sides is correct: Triple Chance debits WAGER_GC and
+    // credits PAYOUT_GC (server/src/routes/games.ts's
+    // /games/triplechance/play), its own direct ledger calls rather than
+    // games/shared.ts's helpers - and since the 2026-08-29 GC-only economy
+    // restructure, every one of the 14 games also pays its win in Gold
+    // Coins (GAME_WIN_GC), so this is no longer a special case, just the
+    // one place still worded to say so explicitly.
     .text(x, y - 44, `Risk your ${amount} Gold Coins for a 1-in-3 shot at ${amount * 3} Gold Coins - lose it all otherwise.`, {
       fontSize: "12px",
       color: Theme.textMuted,

@@ -44,7 +44,7 @@ export interface WardrobePieceDef {
   id: string;
   slot: WardrobeSlot;
   name: string;
-  price: number; // TICKETS. 0 = free (the default body).
+  price: number; // Gold Coins. 0 = free (the default body).
 }
 
 /** The free default body every player owns implicitly. Never sold, never removable. */

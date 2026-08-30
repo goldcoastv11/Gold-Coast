@@ -266,7 +266,7 @@ export class RouletteScene extends Phaser.Scene {
     const { number, color, won, payout } = res.result;
 
     // Retention Leg 1 - see src/api/track.ts. Server-settled result only;
-    // betAmount is Gold Coins, payout is Tickets (separate ledgers).
+    // betAmount and payout are both Gold Coins (GC-only economy).
     track(EVENTS.GAME_ROUND_PLAYED, {
       game: "roulette",
       betAmount: wager,
@@ -277,7 +277,7 @@ export class RouletteScene extends Phaser.Scene {
 
     if (won) {
       this.messageText
-        .setText(`${number} ${color.toUpperCase()} — you win +${payout} Tickets`)
+        .setText(`${number} ${color.toUpperCase()} — you win +${payout} Gold Coins`)
         .setColor(Tokens.text.accent);
       popIn(this, this.resultText);
       showWinCelebration(this, payout);
@@ -311,6 +311,6 @@ export class RouletteScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

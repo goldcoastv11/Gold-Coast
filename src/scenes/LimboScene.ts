@@ -235,9 +235,9 @@ export class LimboScene extends Phaser.Scene {
     if (won) {
       this.multiplierText.setColor(Tokens.text.accent);
       this.heroCaption.setText(`Cleared ${target.toFixed(2)}x`).setColor(Tokens.text.accent);
-      // "Tickets" is the win currency and is what a payout is actually paid
-      // in - see CLAUDE.md's economy rules.
-      this.messageText.setText(`You win ${payout} Tickets.`).setColor(Tokens.text.accent);
+      // Gold Coins is the only currency now - a win pays back GC, same
+      // balance the bet was spent from (see repo-root CLAUDE.md).
+      this.messageText.setText(`You win ${payout} Gold Coins.`).setColor(Tokens.text.accent);
       popIn(this, this.multiplierText);
       showWinCelebration(this, payout);
     } else {
@@ -274,6 +274,6 @@ export class LimboScene extends Phaser.Scene {
 
   /** Shared across all 14 games now - see uiHelpers.ts's formatBalance. */
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

@@ -13,22 +13,22 @@ game code running on our server.
 
 This matters more than any figure below, so read it first.
 
-**You bet Gold Coins. You win Tickets. They are two different things.**
+**You bet Gold Coins. You win Gold Coins. There is one currency.**
 
 - Gold Coins are spent on every round, win or lose, like a token in an arcade cabinet. They do not
-  come back.
-- A win pays **Tickets**, which are a separate currency. Tickets can be spent on one thing only:
-  virtual cosmetic items in the Item Shop.
-- **Neither has any cash value.** Neither can be sold, traded, gifted, or cashed out. There is no
+  come back automatically — a win credits Gold Coins back to you as a separate payout.
+- Gold Coins also buy virtual cosmetic items in the Item Shop.
+- **Gold Coins have no cash value.** They cannot be sold, traded, gifted, or cashed out. There is no
   redemption of any kind.
 
 So when this document says a game "returns 97%", it means: *for every 100 Gold Coins bet, the game
-pays out an average of about 97 Tickets, over a very large number of rounds.* It does **not** mean
-you get 97% of your money back. No money comes back, because none was ever at stake. This is a
+pays out an average of about 97 Gold Coins, over a very large number of rounds.* It does **not**
+mean you get 97% of your money back. No money comes back, because none was ever at stake. This is a
 measure of how generous a game is with an in-game score, not a rate of return.
 
-**One important consequence:** because these are separate currencies, these percentages do not have
-to be under 100%, and one of them is not. See Dragon Tower below.
+**One important consequence:** a game's average return is just a ratio of Gold Coins paid to Gold
+Coins bet, so nothing stops it from landing above 100% if a game is mis-tuned. See Dragon Tower
+below.
 
 ## How outcomes are decided
 
@@ -45,8 +45,8 @@ to be under 100%, and one of them is not. See Dragon Tower below.
 ## Reading the tables
 
 - **Chance** = probability of that outcome on any single round.
-- **Pays** = multiplier applied to your Gold Coin bet, credited to you in Tickets.
-- **Average return** = long-run Tickets paid per 100 Gold Coins bet. Short sessions will vary
+- **Pays** = multiplier applied to your Gold Coin bet, credited back to you in Gold Coins.
+- **Average return** = long-run Gold Coins paid per 100 Gold Coins bet. Short sessions will vary
   enormously from this figure; it describes millions of rounds, not your afternoon.
 
 ---
@@ -65,14 +65,14 @@ to be under 100%, and one of them is not. See Dragon Tower below.
 **Average return: 100%.**
 
 There is no house edge on this game at all. A fair 50/50 flip paying exactly 2× returns exactly
-what it takes in, in Tickets.
+what it takes in, in Gold Coins.
 
 [FOUNDER: needs your input — this is almost certainly deliberate (it is the simplest possible
 "honest coin" game) but it is worth confirming, because it is the only game with no edge, and it
 sits oddly beside the other games' 94–99%. It is not a *financial* problem — no money is at risk
-either way — but it does mean Coin Flip is the most Ticket-efficient game in the arcade by a clear
-margin, and players will find that out. Flagging it as an economy-balance question for Phase 1's
-"economy balanced in internal testing" exit criterion, not a compliance problem.]
+either way — but it does mean Coin Flip is the most Gold-Coin-efficient game in the arcade by a
+clear margin, and players will find that out. Flagging it as an economy-balance question for
+Phase 1's "economy balanced in internal testing" exit criterion, not a compliance problem.]
 
 ## Dice
 
@@ -268,14 +268,14 @@ game worth playing.
 
 # Multi-step games (reveal, then choose to stop)
 
-These games let you keep going or stop and take your Tickets. Your decisions affect the outcome, so
-the return depends on how you play.
+These games let you keep going or stop and take your Gold Coins. Your decisions affect the outcome,
+so the return depends on how you play.
 
 ## Mines
 
 **How it works.** A 5×5 grid of 25 tiles hides **3 mines**. You reveal tiles one at a time. Every
-safe tile raises your multiplier. You can stop and take your Tickets at any point. Hitting a mine
-ends the round and you get nothing.
+safe tile raises your multiplier. You can stop and take your Gold Coins at any point. Hitting a
+mine ends the round and you get nothing.
 
 The multiplier is calculated from the true odds of having survived that many picks, then reduced by
 2%. That is where the house edge comes from.
@@ -303,8 +303,8 @@ are not returned. This is deliberate and applies to every multi-step game here.
 ## Dragon Tower
 
 **How it works.** A tower of 6 rows, 4 tiles in each row. One tile in each row is bad. You pick one
-tile per row and climb. You can stop and take your Tickets after any completed row. Picking the bad
-tile ends the round with nothing.
+tile per row and climb. You can stop and take your Gold Coins after any completed row. Picking the
+bad tile ends the round with nothing.
 
 Your chance of clearing any single row is 3 in 4 (75%).
 
@@ -329,10 +329,10 @@ Your chance of clearing any single row is 3 in 4 (75%).
 >
 > Unlike Mines, Dragon Tower's paytable is hand-picked rather than derived from the odds, and it
 > drifts further from fair with every row. Row 1 is about right at 97.5%. By row 3 it is over 100%,
-> and a player who always climbs to the top averages **214 Tickets per 100 Gold Coins bet**.
+> and a player who always climbs to the top averages **214 Gold Coins per 100 Gold Coins bet**.
 >
 > The practical effect is that Dragon Tower has a strictly optimal strategy — always climb, never
-> cash out early — and playing it that way is the fastest way to accumulate Tickets in the whole
+> cash out early — and playing it that way is the fastest way to accumulate Gold Coins in the whole
 > arcade. Players will find this quickly.
 >
 > Contrast with Mines, which does this correctly: it derives the multiplier from the true odds at
@@ -370,10 +370,11 @@ As with Mines and Dragon Tower, leaving mid-round forfeits the bet.
 **How it works.** This is a bonus round, not one of the main cabinets. It is offered after a free
 Gold Coin win at the Coin Kiosk (and after the signup bonus). Three cups; one wins.
 
-**Triple Chance is the one game that pays Gold Coins rather than Tickets**, because it is chained
-onto a free Gold Coin win rather than being a separately wagered game. Which cup you click does not
-change anything — the server decides the outcome before the animation plays, and the cup you pick
-is purely for show.
+**Triple Chance pays Gold Coins, same as every other game**, but it works differently from the 14
+main cabinets: it is chained onto a free Gold Coin win rather than being a separately wagered game,
+and it settles through its own code path rather than the shared one the other 14 use. Which cup you
+click does not change anything — the server decides the outcome before the animation plays, and the
+cup you pick is purely for show.
 
 | Outcome | Chance | Pays |
 |---|---|---|
@@ -463,7 +464,7 @@ five-card hand.
 | Anything else | nothing |
 
 A pair below Jacks pays nothing. A "Jacks or better" win pays 1×, which returns your bet's worth in
-Tickets but does not gain you anything — it is a push, not a win, despite looking like one on
+Gold Coins but does not gain you anything — it is a push, not a win, despite looking like one on
 screen.
 
 Cards are dealt from a real 52-card deck without replacement, so unlike Baccarat, each card can
@@ -568,7 +569,7 @@ call, and a CTO job either way.]
 | Keno (any pick count) | 94.0% | Exact, and covered by an automated test. |
 | Baccarat — Tie | 85.9% | Exact. Much worse than the other two bets. |
 | Dragon Tower | 97.5% to 213.6% | Exact. **Depends on strategy — known open item, deferred to a later game-mechanics pass.** |
-| Triple Chance | 100% | Exact. Deliberately fair; a bonus round, pays Gold Coins. |
+| Triple Chance | 100% | Exact. Deliberately fair; a bonus round chained onto a free Gold Coin win. |
 | Video Poker | **needs verification** | Requires an optimal-strategy computation. |
 | Blackjack | **needs verification** | Requires an optimal-strategy computation. |
 
@@ -590,8 +591,8 @@ be addressed as part of a wider game-mechanics pass — not an oversight. Its fi
 true present values, and the "do not publish this table as-is" note in that section still stands.
 No other game's numbers were changed.
 
-**A closing note on what all these numbers mean.** Every figure on this page describes Tickets paid
-per Gold Coin bet. Tickets buy cosmetic items and nothing else. They cannot be sold, traded,
-gifted, or exchanged for money, and there is no way to withdraw anything from this arcade. A game
-returning 214% is not paying anyone 214% of their money — it is handing out an in-game score
-slightly faster than intended.
+**A closing note on what all these numbers mean.** Every figure on this page describes Gold Coins
+paid per Gold Coin bet. Gold Coins buy cosmetic items and nothing else beyond letting you keep
+playing. They cannot be sold, traded, gifted, or exchanged for money, and there is no way to
+withdraw anything from this arcade. A game returning 214% is not paying anyone 214% of their money
+— it is handing out an in-game score slightly faster than intended.

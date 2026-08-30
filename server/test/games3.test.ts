@@ -79,7 +79,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(bust!.body.user.goldCoins).toBe(goldBeforeBust - 10);
   });
 
-  it("cash-out after clearing a row credits TICKETS = bet * the exact published multiplier", async () => {
+  it("cash-out after clearing a row credits GC = bet * the exact published multiplier", async () => {
     const { token } = await signupUser();
 
     let roundId: string | null = null;
@@ -98,12 +98,13 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(cashout.status).toBe(200);
     expect(cashout.body.multiplier).toBe(DRAGON_TOWER_MULTIPLIERS[0]);
     expect(cashout.body.payout).toBe(Math.round(50 * DRAGON_TOWER_MULTIPLIERS[0]));
-    // Cash-out payout is TICKETS - GC was already spent at start().
-    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins);
-    expect(cashout.body.user.tickets).toBe(preCashout!.body.tickets + cashout.body.payout);
+    // Cash-out payout is GC, credited on top of whatever GC was already
+    // spent at start() - TICKETS is retired and never moves.
+    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins + cashout.body.payout);
+    expect(cashout.body.user.tickets).toBe(preCashout!.body.tickets);
   });
 
-  it("reaching the top auto-cashes-out, pays the max multiplier in TICKETS, and reveals badIndexPerRow", async () => {
+  it("reaching the top auto-cashes-out, pays the max multiplier in GC, and reveals badIndexPerRow", async () => {
     const { token } = await signupUser();
 
     // Same "restart on bust" shape as the other tests, just chasing a full
@@ -134,8 +135,8 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(top!.body.multiplier).toBe(DRAGON_TOWER_MULTIPLIERS[DRAGON_TOWER_MULTIPLIERS.length - 1]);
     expect(top!.body.payout).toBe(Math.round(10 * DRAGON_TOWER_MULTIPLIERS[DRAGON_TOWER_MULTIPLIERS.length - 1]));
     expect(top!.body.badIndexPerRow).toHaveLength(DRAGON_TOWER_ROWS);
-    expect(top!.body.user.goldCoins).toBe(goldBefore - 10);
-    expect(top!.body.user.tickets).toBe(ticketsBefore + top!.body.payout);
+    expect(top!.body.user.goldCoins).toBe(goldBefore - 10 + top!.body.payout);
+    expect(top!.body.user.tickets).toBe(ticketsBefore);
   });
 
   it("rejects cashing out before clearing any row", async () => {
@@ -244,7 +245,7 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
     expect(lost).toBe(true);
   });
 
-  it("cash-out after a correct guess credits TICKETS = bet * the current multiplier", async () => {
+  it("cash-out after a correct guess credits GC = bet * the current multiplier", async () => {
     const { token } = await signupUser();
 
     let roundId: string | null = null;
@@ -268,8 +269,8 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
     expect(cashout.status).toBe(200);
     expect(cashout.body.multiplier).toBe(mult);
     expect(cashout.body.payout).toBe(Math.round(10 * mult));
-    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins);
-    expect(cashout.body.user.tickets).toBe(preCashout!.body.tickets + cashout.body.payout);
+    expect(cashout.body.user.goldCoins).toBe(preCashout!.body.goldCoins + cashout.body.payout);
+    expect(cashout.body.user.tickets).toBe(preCashout!.body.tickets);
   });
 
   it("rejects cashing out before any correct guess", async () => {

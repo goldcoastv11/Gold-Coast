@@ -356,7 +356,7 @@ export class MinesScene extends Phaser.Scene {
           // without the server needing to send them explicitly.
           const mines = Array.from({ length: TOTAL_TILES }, (_, i) => i).filter((i) => !this.revealed.has(i));
           this.revealMines(mines);
-          this.messageText.setText(`Board cleared! +${res.payout ?? 0} Tickets`).setColor(Tokens.text.accent);
+          this.messageText.setText(`Board cleared! +${res.payout ?? 0} Gold Coins`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
           this.endRound("win", res.payout ?? 0);
@@ -389,7 +389,7 @@ export class MinesScene extends Phaser.Scene {
         this.busy = false;
         this.active = false;
         this.revealMines(res.minePositions);
-        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Tokens.text.accent);
+        this.messageText.setText(`Cashed out! +${res.payout} Gold Coins`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
         this.endRound("win", res.payout);
@@ -444,6 +444,6 @@ export class MinesScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

@@ -11,10 +11,9 @@
  *   2. unlocked cosmetics          -> LEVEL_COSMETIC_UNLOCKS
  *   3. a visible prestige number   -> the level itself, surfaced on /me
  *
- * WHY GOLD COINS, NOT TICKETS (hard economy rule, repo-root CLAUDE.md):
- * TICKETS may only ever be credited by GAME_WIN_TICKETS - an actual game
- * win - and economy/ledger.ts enforces that at runtime, so a level reward
- * physically cannot pay TICKETS. GC already has legitimate non-game sources
+ * WHY GOLD COINS (repo-root CLAUDE.md): it's the only currency there is now
+ * - TICKETS is retired, and economy/ledger.ts's applyTransaction physically
+ * refuses to credit it any more. GC already has legitimate non-game sources
  * (the Coin Kiosk's ad-gated claim, a GC package purchase), so a GC reward
  * fits the existing model without inventing anything.
  */
@@ -72,11 +71,11 @@ export function levelRewardGc(level: number): number {
  * reached - deliberately a grant rather than a "you may now buy this" gate.
  *
  * A gate would mean changing what the Item Shop lets you purchase, which
- * would be a behaviour change to a shipped, TICKETS-only flow; a grant is
+ * would be a behaviour change to a shipped, GC-priced flow; a grant is
  * purely additive, can't make anything previously purchasable stop being
  * so, and reads to the player as the better reward anyway. Granting an
  * item is not a balance change, so no ledger transaction is involved and
- * the TICKETS-only purchase rule is untouched.
+ * the shop's normal purchase path is untouched.
  */
 export const LEVEL_COSMETIC_UNLOCKS: Readonly<Record<number, string>> = {
   5: "acc_bow",

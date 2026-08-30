@@ -287,9 +287,9 @@ export class CoinFlipScene extends Phaser.Scene {
     // Retention Leg 1 (see src/api/track.ts). Recorded from the SERVER's
     // resolved result, not the local animation, and only once a round has
     // actually settled - so the numbers here always match what the ledger
-    // did. betAmount is Gold Coins (the play currency, spent on every bet);
-    // payout is Tickets (the win currency) - the two are separate ledgers,
-    // so they are never summed into one "net" figure here.
+    // did. GC-only economy: betAmount and payout are both Gold Coins (the
+    // same one balance is spent on the bet and credited back on a win -
+    // see repo-root CLAUDE.md).
     track(EVENTS.GAME_ROUND_PLAYED, {
       game: "coinflip",
       betAmount: bet,
@@ -299,7 +299,7 @@ export class CoinFlipScene extends Phaser.Scene {
 
     if (won) {
       this.messageText
-        .setText(`${result.toUpperCase()} - you win ${payout} Tickets.`)
+        .setText(`${result.toUpperCase()} - you win ${payout} Gold Coins.`)
         .setColor(Tokens.text.accent);
       popIn(this, this.coinText);
       showWinCelebration(this, payout);
@@ -357,6 +357,6 @@ export class CoinFlipScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

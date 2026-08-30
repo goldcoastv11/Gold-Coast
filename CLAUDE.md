@@ -2,34 +2,34 @@
 Browser-based social casino game. Phaser.js + TypeScript + Vite.
 
 # Economy Rules (critical — all teammates must follow)
-- GC ("Gold Coins") and TICKETS ("Tickets") are separate ledgers — this is the current
-  **arcade-token economy** (replaced the old GC/SC sweepstakes model — see Retired below). Both
-  names are real, displayed-to-players currency names now; there is no display-only renaming layer
-  any more (that reverses the earlier Gold Coast Arcade rebrand's "GC displays as Tickets" rule —
-  TICKETS is a real, separate currency now and needed the "Tickets" name for itself).
-- GC is the **play** currency: spent on every bet, win or lose, like an arcade token (never
-  staked-and-returned). GC only ever grows via the Coin Kiosk's free ad-gated claim
-  (`AD_REWARD_GC`) or a real-money GC package purchase (`PACKAGE_GC`) — never from playing a game.
-- TICKETS is the **win** currency: credited ONLY by a game win (`GAME_WIN_TICKETS` — the ledger
-  hard-enforces this as the one legal credit path) and spent ONLY in the Item Shop
-  (`SKIN_PURCHASE_TICKETS`). No real-money value, no playthrough requirement, no redemption —
-  TICKETS can't be sold, gifted, or cashed out for anything.
+- **GC ("Gold Coins") is the only currency** — this is the current **GC-only economy**, in effect
+  since 2026-08-29 founder direction ("get rid of tickets, only GC, for games, prizes, everything").
+  It replaced a two-currency GC/TICKETS "arcade-token" model, which itself had replaced the original
+  GC/SC sweepstakes model — see Retired below for both.
+- GC is spent on every bet, win or lose, like an arcade token (never staked-and-returned), and a win
+  pays GC straight back out (`GAME_WIN_GC`) — the same balance the bet came out of, not a separate
+  pool. GC also grows via the Coin Kiosk's free ad-gated claim (`AD_REWARD_GC`), a real-money GC
+  package purchase (`PACKAGE_GC`), and challenge/level rewards (`CHALLENGE_REWARD_GC`/
+  `LEVEL_REWARD_GC`).
 - SC (Sweeps Coins) is retired — do not add new SC logic, grants, or references. See "Retired: the
   SC/playthrough/redemption model" below.
-- Skins are purchased with TICKETS only — never GC. Keep skin purchase logic fully separate from GC
-  wagering logic.
-- Ad-reward refills grant GC only — never TICKETS.
+- TICKETS is retired — do not add new TICKETS logic, grants, or references. See "Retired: the
+  GC/TICKETS arcade-token model" below.
+- Skins/wardrobe pieces and Item Shop (accessories/pets) purchases are GC (`SHOP_PURCHASE_GC`) —
+  the same currency as wagering, no longer a separate purchase currency.
 - All balance changes must go through the transaction ledger — no direct balance mutations.
 
-## Triple Chance exception — stays GC-in/GC-out
-Triple Chance isn't one of "the games" for economy purposes: it's a bonus round chained directly
-onto the Coin Kiosk's shuffle-cup GC win, not an independently-wagered game. It intentionally stays
-GC-in/GC-out (bet GC, win GC) rather than paying TICKETS like the other 14 games — settled via its
-own direct ledger calls in `server/src/routes/games.ts`, not through the shared
-`settleSingleShotBet`/`placeWager`/`settlePayout` helpers in `server/src/games/shared.ts` (which
-hardcode the GC wager / TICKETS payout split for everything else). Don't "fix" this to pay TICKETS
-without explicit user sign-off — it matches the user's own framing that the shuffle game's currency
-is Gold Coins, not Tickets.
+## Triple Chance — no longer a special case, but still its own code path
+Triple Chance is a bonus round chained directly onto the Coin Kiosk's shuffle-cup GC win, not an
+independently-wagered game. It settles GC-in/GC-out (bet GC, win GC) via its own direct ledger calls
+in `server/src/routes/games.ts`, not through the shared `settleSingleShotBet`/`placeWager`/
+`settlePayout` helpers in `server/src/games/shared.ts`. Before the 2026-08-29 GC-only restructure
+this was the one deliberate GC-in/GC-out exception among 15 GC-wager/TICKETS-payout games; now that
+every game pays GC, Triple Chance isn't economically special any more. It still isn't rewired
+through `shared.ts`, though: doing so would also pull it through that file's challenge/progress
+tracking, which was deliberately scoped to exclude Triple Chance, and changing that is a product
+call, not a side effect of a currency migration. Don't merge it into the shared helpers without
+explicit founder sign-off.
 
 ## Retired: the SC / playthrough / redemption model (removed 2026-08-23, the arcade-token restructure)
 This game used to run a two-currency GC/SC sweepstakes model: GC plus a non-linearly-scaled SC bonus
@@ -49,13 +49,35 @@ machine. The Postgres service now has a **TCP proxy** enabled, exposing `DATABAS
 Deploy with that variable instead:
 `DATABASE_URL="$(railway variables --service Postgres --kv | grep '^DATABASE_PUBLIC_URL=' | cut -d= -f2-)" npx prisma migrate deploy`
 
-## Pending: client display text hasn't fully caught up to the new currency split
-The field-level rename (`gameState.tickets`, etc.) is done everywhere, but a pass to fix the actual
-on-screen wording is still outstanding: bet-amount labels across the 14 games should say "Gold
-Coins", win/payout text should say "Tickets" with the real TICKETS amount, Item Shop prices should
-say "Tickets", and Coin Kiosk claim results should say "Gold Coins" (it grants GC). Until that pass
-lands, some UI copy may still read "Tickets" where it actually means GC — a leftover from the
-earlier rebrand's now-reversed GC→"Tickets" display rename.
+## Retired: the GC/TICKETS arcade-token model (removed 2026-08-29, the GC-only restructure)
+This game used to run a two-currency GC/TICKETS "arcade-token" model: GC spent on every bet as the
+play currency, and a separate TICKETS balance credited only by a game win (`GAME_WIN_TICKETS`) and
+spent only in the Item Shop (`SKIN_PURCHASE_TICKETS`/wardrobe purchases). Per explicit founder
+direction on 2026-08-29 ("get rid of tickets, only GC, for games, prizes, everything"), that whole
+model is gone, replaced by the GC-only model described above: every game now pays its win in GC
+(`GAME_WIN_GC`), and the wardrobe/Item Shop are priced and paid in GC (`SHOP_PURCHASE_GC`).
+
+The `TICKETS` `Currency` enum value and the `GAME_WIN_TICKETS`/`SKIN_PURCHASE_TICKETS`
+`TransactionType`s stay in the Prisma schema (marked retired in comments) rather than being removed,
+same additive-only-migration precedent the SC retirement above already set — don't reintroduce
+TICKETS logic against them. Every account's TICKETS balance was zeroed via a balancing
+`TICKETS_RETIRED` ledger transaction (not a silent UPDATE), so old ledger rows stay honest and
+readable rather than being deleted.
+
+**Migration note:** `server/prisma/migrations/20260829120000_gc_only_economy` (adds the
+`GAME_WIN_GC`/`SHOP_PURCHASE_GC`/`TICKETS_RETIRED` transaction types) and
+`20260829120100_zero_tickets_balances` (zeroes every TICKETS balance) are **generated but NOT yet
+deployed to production** as of this writing — check Railway before assuming they're live, and don't
+run `prisma migrate deploy` against production yourself; flag it for the founder to run (see the
+deploy note above for the correct command once it's time).
+
+The client-side display-copy pass this used to leave outstanding (bet/win/shop wording, the
+overworld HUD's second "🎟️ Tickets" figure) is done — every player-facing "Tickets" mention became
+"Gold Coins," and the HUD's now-permanently-zero TICKETS figure was dropped rather than kept as a
+second, always-zero wallet. Wardrobe/Item Shop prices (120–1,500 GC) were left numerically unchanged
+from their TICKETS-era values — see `server/src/economy/wardrobe.ts`'s header comment for the
+reasoning (checked against the Coin Kiosk's 500–2,000 GC/~30s claim and packages starting at 5,000
+GC; still a real chunk of a claim or some bet turnover, not free, not unreachable).
 
 ## Retired: attendant SC test grant exception (was in effect 2026-08-10 through the Arcade rebrand)
 The overworld Chip Attendant (now the "Coin Kiosk" — see below) used to carry a narrow,
@@ -70,7 +92,7 @@ fully retired regardless — see above.)
 The two former free-claim stations were consolidated into one: the Coin Kiosk. Watching a
 simulated ad (the old Ad Kiosk's mechanic) now gates entry into the shuffle-cup mini-game (the
 old Chip Attendant's mechanic), which grants a variable amount of GC ("Gold Coins") via
-`AD_REWARD_GC` — no TICKETS/SC (see the retired-exception note above). `server/src/economy/adRewards.ts`
+`AD_REWARD_GC` — GC only, never TICKETS/SC, both retired (see above). `server/src/economy/adRewards.ts`
 and its routes/DB table are unused now but deliberately left in place rather than deleted, to
 avoid touching an already-applied migration for a pure cleanup with no functional benefit.
 
