@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { Tokens } from "./DesignTokens";
-import { makeButton, makePanel, makeText } from "./uiHelpers";
+import { makeText } from "./uiHelpers";
 import { playSfx } from "./SoundManager";
 import {
   GridGeometry,
@@ -15,6 +15,27 @@ import {
  * The Quickplay screen: a scrollable grid of every game, tap a card to jump
  * straight in. Founder ask: "a button that changes the layout of the games
  * to one like Stake" - a grid of cards instead of walking the casino floor.
+ *
+ * FULL-SCREEN VIEW (2026-08-30 follow-up, founder ask: "the quickplay
+ * button needs to take up the full screen with all the buttons where they
+ * usually are, but swap the quickplay button with an 'Arcade' button that
+ * takes players back to the regular game screen"). This still opens as a
+ * panel over OverworldScene rather than a real Phaser Scene change -
+ * deliberately, so the existing panelOpen plumbing (which the overworld
+ * already resets defensively on every create(), see its own doc comment on
+ * the softlock this fixed) keeps working unchanged rather than needing a
+ * second copy of that same defensive reset in a brand-new scene. "Full
+ * screen" here means: a full-canvas backdrop instead of a centered card,
+ * geometry read from the LIVE `scene.scale.width`/`height` at open time
+ * (not a literal 800x600) so it matches whatever width the overworld's own
+ * corner buttons are using, and no more Close button - see
+ * QuickplayViewHandle below, which is how OverworldScene's swapped-in
+ * "Arcade" corner button closes this from the outside instead. The corner
+ * buttons themselves are untouched by this module: they're real
+ * screen-fixed game objects OverworldScene already owns, drawn at their own
+ * depth (150) above this panel's content depth (see DEPTH_BG/DEPTH_CONTENT
+ * below), so they stay visible and clickable on top of the grid exactly as
+ * the founder asked, with no geometry duplicated or guessed at here.
  *
  * STRUCTURE follows ChallengesPanel.ts/ShopPanel.ts - one exported `open*`
  * function, a closure holding the panel's own state, a `render()` that
@@ -57,35 +78,68 @@ export interface QuickplayPanelHost {
   goToGame(sceneKey: string): void;
 }
 
-// --- Geometry. Panel spans y 126-474; every element sits inside 130-470
-// (see uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM) - same budget ChallengesPanel
-// uses, and this reuses its exact CX/PANEL_W/COL_L/COL_R so the two panels'
-// content columns line up if a player opens one right after the other. ---
-const CX = 400;
-const PANEL_W = 664;
-const PANEL_H = 348;
-const COL_L = CX - PANEL_W / 2 + Tokens.space.xl;
-const COL_R = CX + PANEL_W / 2 - Tokens.space.xl;
-const GRID_W = COL_R - COL_L;
-
-/** Scrollable viewport - the region the grid mask clips to and the region drag/tap input is read from. Below it, the footer Close button gets its own untouched strip of the safe zone. */
-const VIEW_TOP = 178;
-const VIEW_BOTTOM = 428;
+// --- Geometry. Computed at open() time from the LIVE canvas size (see
+// geometryFor below), not module-level constants - this view now fills the
+// whole screen rather than sitting at a fixed 800x600-relative spot, and
+// main.ts can widen the canvas's logical width on a wide phone (see its own
+// scale-config comment). Height stays out of that concern: main.ts pins it
+// at a fixed 600 specifically so every existing y-coordinate in the game,
+// including the SAFE_ZONE_TOP/BOTTOM band this reuses (uiHelpers.ts), keeps
+// meaning exactly what it always meant. VIEW_BOTTOM sits well past that
+// band's old 428/452 footer-button floor since there's no footer Close
+// button any more (see the module doc comment on QuickplayViewHandle) -
+// genuinely most of the 600-tall canvas is now grid. ---
+const VIEW_TOP = 190;
+const VIEW_BOTTOM = 560;
 const VIEW_H = VIEW_BOTTOM - VIEW_TOP;
 
 const COLS = 4;
 const GAP = Tokens.space.md;
-/** 4 columns exactly fill GRID_W with GAP between them - no leftover slop on either edge. */
-const CARD_W = (GRID_W - (COLS - 1) * GAP) / COLS;
 const CARD_H = 170;
-const GEO: GridGeometry = { cols: COLS, cardW: CARD_W, cardH: CARD_H, gap: GAP };
 
 const IMG_PAD_TOP = 14;
-const IMG_BOX_W = CARD_W - 24;
 const IMG_BOX_H = 96;
 
-const DEPTH_PANEL = 200;
-const DEPTH_CONTENT = 201;
+/** Below the corner buttons' own depth (150, see OverworldScene.ts) so they stay visibly on top of this full-screen backdrop, per the founder's "buttons stay where they usually are" ask. */
+const DEPTH_BG = 120;
+const DEPTH_CONTENT = 121;
+
+interface Geometry {
+  screenW: number;
+  screenH: number;
+  cx: number;
+  colL: number;
+  colR: number;
+  gridW: number;
+  cardW: number;
+  imgBoxW: number;
+  geo: GridGeometry;
+}
+
+/** Recomputes every screen-size-dependent number from the live canvas at open() time - see the block comment above. */
+function geometryFor(scene: Phaser.Scene): Geometry {
+  const screenW = scene.scale.width;
+  const screenH = scene.scale.height;
+  const cx = screenW / 2;
+  const marginX = Tokens.space.xxl;
+  const colL = marginX;
+  const colR = screenW - marginX;
+  const gridW = colR - colL;
+  // COLS columns exactly fill gridW with GAP between them - no leftover
+  // slop on either edge, same rule the old fixed-width version used.
+  const cardW = (gridW - (COLS - 1) * GAP) / COLS;
+  return {
+    screenW,
+    screenH,
+    cx,
+    colL,
+    colR,
+    gridW,
+    cardW,
+    imgBoxW: cardW - 24,
+    geo: { cols: COLS, cardW, cardH: CARD_H, gap: GAP }
+  };
+}
 
 /** A tap moving less than this many px (in either axis) counts as a tap, not a scroll drag. */
 const TAP_SLOP = 10;
@@ -108,20 +162,22 @@ function drawCard(
   game: QuickplayGame,
   x: number,
   y: number,
+  cardW: number,
+  imgBoxW: number,
   elements: Phaser.GameObjects.GameObject[]
 ) {
-  const cx = x + CARD_W / 2;
+  const cx = x + cardW / 2;
   const cy = y + CARD_H / 2;
 
   const bg = scene.add.graphics({ x: cx, y: cy });
   bg.fillStyle(Tokens.color.surfaceRaised, 1);
-  bg.fillRoundedRect(-CARD_W / 2, -CARD_H / 2, CARD_W, CARD_H, Tokens.radius.md);
+  bg.fillRoundedRect(-cardW / 2, -CARD_H / 2, cardW, CARD_H, Tokens.radius.md);
   elements.push(bg);
 
   const imgCenterY = -CARD_H / 2 + IMG_PAD_TOP + IMG_BOX_H / 2;
   if (scene.textures.exists(game.textureKey)) {
     const img = scene.add.image(cx, cy + imgCenterY, game.textureKey);
-    const scale = Math.min(IMG_BOX_W / img.width, IMG_BOX_H / img.height);
+    const scale = Math.min(imgBoxW / img.width, IMG_BOX_H / img.height);
     img.setScale(scale);
     elements.push(img);
   }
@@ -133,9 +189,15 @@ function drawCard(
     align: "center",
     originX: 0.5,
     originY: 0.5,
-    wordWrapWidth: CARD_W - 16
+    wordWrapWidth: cardW - 16
   });
   elements.push(label);
+}
+
+/** What closing the Quickplay view from the outside needs - see OverworldScene's swapped-in "Arcade" corner button, which is the only way out now that there's no in-panel Close button (a full-screen view doesn't need one - it has its own dedicated corner button, same as the floor itself never needed a "Close" button to leave it). */
+export interface QuickplayViewHandle {
+  /** Idempotent - safe to call even if the view already closed itself (e.g. a card tap already navigated away). */
+  close: () => void;
 }
 
 /**
@@ -145,10 +207,18 @@ function drawCard(
  * scenes/ -> ui/ -> scenes/ import cycle) the way ShopPanel.ts and
  * ChallengesPanel.ts already are.
  */
-export function openQuickplayPanel(host: QuickplayPanelHost, games: QuickplayGame[]) {
+export function openQuickplayPanel(host: QuickplayPanelHost, games: QuickplayGame[]): QuickplayViewHandle {
   const scene = host.scene;
   host.setPanelOpen(true);
   playSfx(scene, "open");
+
+  // Geometry is read once, here, from the live canvas - not reactively on
+  // resize (same "correct for the shape the device is in when this opens,
+  // not live mid-view window resizing" scope boundary uiHelpers.ts's
+  // GAME_SHELL_DISPLAY_CENTER_X and OverworldScene's own corner-button
+  // layout already use).
+  const { screenW, screenH, colL: COL_L, colR: COL_R, gridW: GRID_W, cardW: CARD_W, imgBoxW: IMG_BOX_W, geo: GEO } =
+    geometryFor(scene);
 
   let elements: Phaser.GameObjects.GameObject[] = [];
   let closed = false;
@@ -197,6 +267,13 @@ export function openQuickplayPanel(host: QuickplayPanelHost, games: QuickplayGam
   };
 
   const close = () => {
+    // Guards against a double-close (e.g. OverworldScene's "Arcade" button
+    // firing after a card tap already closed this view on its way into
+    // goToGame) re-destroying already-destroyed game objects - see
+    // QuickplayViewHandle's own doc comment on why this has to be
+    // idempotent now that an external button, not just this module's own
+    // internal paths, can call it.
+    if (closed) return;
     closed = true;
     detachInput();
     cleanup();
@@ -259,8 +336,14 @@ export function openQuickplayPanel(host: QuickplayPanelHost, games: QuickplayGam
   scene.input.on("wheel", onWheel);
 
   // --- Static chrome (drawn once - nothing here changes as the grid scrolls) ---
-  const panel = makePanel(scene, CX, 300, PANEL_W, PANEL_H, DEPTH_PANEL).setScrollFactor(0);
-  elements.push(panel);
+  // Full-canvas backdrop rather than a centered card - this replaces the
+  // floor entirely while open (same "one flat ground rect sized from the
+  // live canvas" approach makeGameShell's own `ground` uses), which is what
+  // makes this a screen, not a panel over one.
+  const backdrop = scene.add.graphics().setScrollFactor(0).setDepth(DEPTH_BG);
+  backdrop.fillStyle(Tokens.color.bg, 1);
+  backdrop.fillRect(0, 0, screenW, screenH);
+  elements.push(backdrop);
 
   elements.push(
     makeText(scene, COL_L, 144, "QUICKPLAY", {
@@ -287,23 +370,14 @@ export function openQuickplayPanel(host: QuickplayPanelHost, games: QuickplayGam
   const cardElements: Phaser.GameObjects.GameObject[] = [];
   games.forEach((game, i) => {
     const pos = cardPosition(i, GEO);
-    drawCard(scene, game, pos.x, pos.y, cardElements);
+    drawCard(scene, game, pos.x, pos.y, CARD_W, IMG_BOX_W, cardElements);
   });
   gridContainer.add(cardElements);
 
-  const closeBtn = makeButton(
-    scene,
-    CX,
-    452,
-    140,
-    32,
-    "Close",
-    Tokens.color.surfaceRaised,
-    Tokens.color.surfaceHover,
-    close,
-    Tokens.text.secondary,
-    Tokens.radius.sm
-  );
-  closeBtn.container.setScrollFactor(0).setDepth(DEPTH_CONTENT);
-  elements.push(closeBtn.container);
+  // No in-panel Close button any more - the corner "Arcade" button
+  // (OverworldScene, swapped in for "Quickplay" while this view is open)
+  // is the one way back to the floor now, matching the founder's own
+  // framing of this as a screen swap rather than a dialog to dismiss. See
+  // QuickplayViewHandle above for how that button reaches back in here.
+  return { close };
 }

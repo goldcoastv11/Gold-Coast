@@ -25,7 +25,7 @@ import {
 } from "../ui/ShopPanel";
 import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel";
 import { claimableCount } from "../ui/challengeDisplay";
-import { openQuickplayPanel, QuickplayPanelHost } from "../ui/QuickplayPanel";
+import { openQuickplayPanel, QuickplayPanelHost, QuickplayViewHandle } from "../ui/QuickplayPanel";
 import { openLeaderboardPanel, LeaderboardPanelHost } from "../ui/LeaderboardPanel";
 import { uniqueGames } from "../ui/quickplayGrid";
 import { openMagazinePanel, MagazinePanelHost } from "../ui/MagazinePanel";
@@ -457,6 +457,22 @@ export class OverworldScene extends Phaser.Scene {
   /** The Challenges button's pulsing "something's ready" ring (same showHighlightRing helper as the Level-Up kiosk/tutorial, screenFixed since this is a fixed UI button) - undefined when nothing is claimable. Same "persist across other panels" reasoning as levelUpHighlight below - it's cleared explicitly by refreshChallengeBadge(), not by panelOpen's setter. */
   private challengesButtonHighlight?: HighlightHandle;
 
+  /**
+   * The corner "Quickplay"/"Arcade" button - one button whose label and
+   * behaviour toggle rather than two separate buttons, per the founder's
+   * own framing ("swap the quickplay button with an 'Arcade' button").
+   * quickplayViewOpen is the source of truth for which state it's in;
+   * quickplayHandle is how it closes the actual full-screen view (see
+   * ui/QuickplayPanel.ts's QuickplayViewHandle) when clicked while open.
+   * Both are reset in create() below, same defensive reasoning as
+   * touchControls/panelOpen above it - if a scene shutdown ever stranded
+   * quickplayViewOpen=true with a handle pointing at destroyed game
+   * objects, the next create() must not carry that forward.
+   */
+  private quickplayButton!: UIButton;
+  private quickplayViewOpen = false;
+  private quickplayHandle?: QuickplayViewHandle;
+
   /** The Level-Up station's own cabinet sprite, so refreshLevelUpStation() knows where to draw/clear its "one is waiting" ring. */
   private levelUpStationSprite?: Phaser.Physics.Arcade.Sprite;
   /** The Level-Up station's pulsing highlight ring (see ui/TutorialGuide.ts's showHighlightRing, the same ring the onboarding tutorial uses), shown exactly while a minigame is owed - undefined when none is. Deliberately its own field, not activeTutorialHighlight below: that one is auto-cleared the instant any real panel opens (see panelOpen's setter), which would hide this ring the moment the player opened, say, the Item Shop - this station's ring has to persist across other panels until the minigame is actually played. */
@@ -571,6 +587,14 @@ export class OverworldScene extends Phaser.Scene {
     this.activeTutorialHighlight = undefined;
     this.activeTutorialInstruction = undefined;
     this.layeredCharacter = undefined;
+    // Same stranding risk panelOpen itself had (see this whole comment
+    // block's history) - quickplayHandle can close over game objects a
+    // previous run of this scene already destroyed, and quickplayViewOpen
+    // is a plain class field Phaser does NOT reset between create() runs.
+    // Both start clean on every entry; the button itself is recreated
+    // fresh below with its default "Quickplay" label regardless.
+    this.quickplayViewOpen = false;
+    this.quickplayHandle = undefined;
 
     this.panelOpen = false;
     this.tutorialAllowMovement = false;
@@ -929,14 +953,27 @@ export class OverworldScene extends Phaser.Scene {
     this.challengesButton.container.setScrollFactor(0).setDepth(150);
     this.refreshChallengeBadge();
 
-    // "Quickplay" corner button - founder ask: "a button that changes the
-    // layout of the games to one like Stake" (a grid of cards instead of
-    // walking the floor). Stacked under Clothes/Challenges at the same
-    // x=cornerX, same w/h, one more step down the safe band (y=130-470) -
-    // see those two buttons' own comments for why this column exists at all.
-    makeButton(this, cornerX, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
-      this.openQuickplayPanel()
-    ).container.setScrollFactor(0).setDepth(150);
+    // "Quickplay"/"Arcade" corner button - founder ask: "a button that
+    // changes the layout of the games to one like Stake" (a grid of cards
+    // instead of walking the floor), later extended to "the quickplay
+    // button needs to take up the full screen with all the buttons where
+    // they usually are, but swap the quickplay button with an 'Arcade'
+    // button that takes players back to the regular game screen." One
+    // button, not two - see quickplayButton's own field comment for why -
+    // whose click handler and label both come from toggleQuickplayView()
+    // below. Same x=cornerX/w/h/safe-band position this always had.
+    this.quickplayButton = makeButton(
+      this,
+      cornerX,
+      255,
+      130,
+      40,
+      "🎮 Quickplay",
+      Theme.neutral,
+      Theme.neutralHover,
+      () => this.toggleQuickplayView()
+    );
+    this.quickplayButton.container.setScrollFactor(0).setDepth(150);
 
     // "Leaderboard" / "Magazine" corner buttons - founder ask ("the corner
     // column is crowded") moved these two off the right-side x=730 column
@@ -2258,16 +2295,36 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * The Quickplay corner button's handler - same shape as the Item Shop's
-   * openShopCategoryMenu() wrapper above: the panel itself lives in
-   * ui/QuickplayPanel.ts, this is just the named seam. Passes it
-   * GAME_STATIONS deduplicated to one card per game (uniqueGames, in
-   * ui/quickplayGrid.ts) rather than letting that module import
-   * GAME_STATIONS itself - see QuickplayPanel.ts's doc comment on why
-   * (keeps this the only scenes/ <-> ui/ import edge in either direction).
+   * The corner button's click handler while it reads "🎮 Quickplay" -
+   * opens the full-screen game grid (ui/QuickplayPanel.ts) and swaps the
+   * button itself to "🕹️ Arcade" - see toggleQuickplayView() below for the
+   * other half of the toggle. Passes GAME_STATIONS deduplicated to one card
+   * per game (uniqueGames, in ui/quickplayGrid.ts) rather than letting that
+   * module import GAME_STATIONS itself - see QuickplayPanel.ts's doc
+   * comment on why (keeps this the only scenes/ <-> ui/ import edge in
+   * either direction).
    */
-  private openQuickplayPanel() {
-    openQuickplayPanel(this.quickplayPanelHost, uniqueGames(GAME_STATIONS));
+  private openQuickplayView() {
+    this.quickplayViewOpen = true;
+    this.quickplayButton.setLabel("🕹️ Arcade");
+    this.quickplayHandle = openQuickplayPanel(this.quickplayPanelHost, uniqueGames(GAME_STATIONS));
+  }
+
+  /** The corner button's click handler while it reads "🕹️ Arcade" - closes the full-screen grid and swaps the label back, returning the player to the walk-around floor exactly like any other panel's Close used to. */
+  private closeQuickplayView() {
+    this.quickplayHandle?.close();
+    this.quickplayHandle = undefined;
+    this.quickplayViewOpen = false;
+    this.quickplayButton.setLabel("🎮 Quickplay");
+  }
+
+  /** The one corner button's actual click handler - dispatches to whichever half of the toggle quickplayViewOpen says is current. See the button's own creation comment in create() for why this is one button, not two. */
+  private toggleQuickplayView() {
+    if (this.quickplayViewOpen) {
+      this.closeQuickplayView();
+    } else {
+      this.openQuickplayView();
+    }
   }
 
   /** Everything ui/QuickplayPanel.ts needs back from this scene. */
