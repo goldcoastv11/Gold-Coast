@@ -25,6 +25,8 @@ import {
 } from "../ui/ShopPanel";
 import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel";
 import { claimableCount } from "../ui/challengeDisplay";
+import { openQuickplayPanel, QuickplayPanelHost } from "../ui/QuickplayPanel";
+import { uniqueGames } from "../ui/quickplayGrid";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { offerCoinKiosk } from "../ui/CoinKioskOffer";
@@ -159,8 +161,12 @@ interface OverworldSceneData {
  * keeps concurrent edits (e.g. "games" adding Keno/Wheel/Hi-Lo) from
  * clobbering unrelated layout code. Coordinate placement via SendMessage
  * before adding entries here so spacing stays verified/non-overlapping.
+ *
+ * Exported (along with GAME_STATIONS below) so ui/QuickplayPanel.ts's
+ * caller here can hand it the deduplicated game list without that module
+ * needing its own second list - see openQuickplayPanel() below.
  */
-interface FurnitureStationDef {
+export interface FurnitureStationDef {
   col: number;
   row: number;
   textureKey: string;
@@ -174,7 +180,7 @@ interface FurnitureStationDef {
 }
 
 /** Every playable game's floor furniture. Grouped by zone/comment for readability. */
-const GAME_STATIONS: FurnitureStationDef[] = [
+export const GAME_STATIONS: FurnitureStationDef[] = [
   // Slots - lined along the right wall, any of them opens the same game
   ...([
     [74, 8],
@@ -883,6 +889,15 @@ export class OverworldScene extends Phaser.Scene {
     );
     this.challengesButton.container.setScrollFactor(0).setDepth(150);
     this.refreshChallengeBadge();
+
+    // "Quickplay" corner button - founder ask: "a button that changes the
+    // layout of the games to one like Stake" (a grid of cards instead of
+    // walking the floor). Stacked under Clothes/Challenges at the same
+    // x=730, same w/h, one more step down the safe band (y=130-470) - see
+    // those two buttons' own comments for why this column exists at all.
+    makeButton(this, 730, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
+      this.openQuickplayPanel()
+    ).container.setScrollFactor(0).setDepth(150);
 
     this.updateHud();
 
@@ -2174,6 +2189,30 @@ export class OverworldScene extends Phaser.Scene {
       },
       updateHud: () => this.updateHud(),
       showToast: (message, color) => this.showToast(message, color)
+    };
+  }
+
+  /**
+   * The Quickplay corner button's handler - same shape as the Item Shop's
+   * openShopCategoryMenu() wrapper above: the panel itself lives in
+   * ui/QuickplayPanel.ts, this is just the named seam. Passes it
+   * GAME_STATIONS deduplicated to one card per game (uniqueGames, in
+   * ui/quickplayGrid.ts) rather than letting that module import
+   * GAME_STATIONS itself - see QuickplayPanel.ts's doc comment on why
+   * (keeps this the only scenes/ <-> ui/ import edge in either direction).
+   */
+  private openQuickplayPanel() {
+    openQuickplayPanel(this.quickplayPanelHost, uniqueGames(GAME_STATIONS));
+  }
+
+  /** Everything ui/QuickplayPanel.ts needs back from this scene. */
+  private get quickplayPanelHost(): QuickplayPanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      },
+      goToGame: (sceneKey) => this.goToGame(sceneKey)
     };
   }
 
