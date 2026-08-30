@@ -3,7 +3,6 @@ import { gameState } from "../GameState";
 import { DEFAULT_BODY_PIECE_ID } from "../wardrobeCatalog";
 import { LayeredCharacter } from "../ui/LayeredCharacter";
 import {
-  ACCESSORY_HEAD_GAP,
   KENNEY_RIG,
   accessoryScale,
   accessoryY,
@@ -51,6 +50,9 @@ const MAP_COLS = 80;
 const MAP_ROWS = 56;
 const PLAYER_SPEED = 160;
 const INTERACT_PADDING = 16; // extra reach beyond a station's own footprint
+/** The corner "Challenges" button's own w/h - shared by its makeButton() call and refreshChallengeBadge()'s ring sizing so the two can't drift apart. */
+const CHALLENGES_BTN_W = 130;
+const CHALLENGES_BTN_H = 40;
 
 // Mobile-only size boost (user: "everything needs to be bigger on mobile") -
 // scoped to individual sprites (player, ambient NPCs, game cabinets/
@@ -442,8 +444,10 @@ export class OverworldScene extends Phaser.Scene {
   /** The pet's own facing, tracked separately from the player's lastDir since the pet lags behind and can be moving in a different direction than the player at any given moment. */
   private petLastDir: "down" | "left" | "right" | "up" = "down";
 
-  /** The Challenge Board station's floating name label, so refreshChallengeBadge() can append a "N ready!" badge to it. */
-  private challengeStationLabel?: Phaser.GameObjects.Text;
+  /** The corner "Challenges" button - replaces the old walk-up Challenge Board station, see its creation comment in create(). */
+  private challengesButton!: UIButton;
+  /** The Challenges button's pulsing "something's ready" ring (same showHighlightRing helper as the Level-Up kiosk/tutorial, screenFixed since this is a fixed UI button) - undefined when nothing is claimable. Same "persist across other panels" reasoning as levelUpHighlight below - it's cleared explicitly by refreshChallengeBadge(), not by panelOpen's setter. */
+  private challengesButtonHighlight?: HighlightHandle;
 
   /** The Level-Up station's own cabinet sprite, so refreshLevelUpStation() knows where to draw/clear its "one is waiting" ring. */
   private levelUpStationSprite?: Phaser.Physics.Arcade.Sprite;
@@ -696,28 +700,15 @@ export class OverworldScene extends Phaser.Scene {
       () => this.openShopCategoryMenu("shop")
     );
 
-    // Challenge Board - daily/weekly challenges, achievements, and the
-    // player's level/XP (see ui/ChallengesPanel.ts). Wired exactly like the
-    // Item Shop above: a static cabinet-scale sprite, a collider, and a
-    // registerStation walk-up handler that opens a panel.
-    //
-    // Placed at (34,48), just off the bottom entrance where the player
-    // spawns (40,46) and returns from every game, so the first thing anyone
-    // sees on walking in is whether something is waiting to be claimed.
-    // Clear of the tree at (28,46), the lamp posts at (36,44)/(44,44) and
-    // the exit door at (40,51) - the nearest station centre is ~107px away,
-    // well beyond this station's own 48px interaction radius.
-    const challengeBoard = this.physics.add.staticSprite(34 * TILE, 48 * TILE, "challenge_board");
-    if (isTouchDevice()) challengeBoard.setScale(MOBILE_FURNITURE_SCALE_BOOST);
-    challengeBoard.refreshBody();
-    this.physics.add.collider(this.player, challengeBoard);
-    this.challengeStationLabel = this.registerStation(
-      challengeBoard,
-      "Challenges",
-      "Press E to check your Challenges",
-      () => this.openChallengesPanel()
-    );
-    this.refreshChallengeBadge();
+    // Challenge Board station removed (founder direction, from real play:
+    // "add a button so you don't have to walk there" / "take out the kiosk
+    // on the game flow") - replaced by the "🏆 Challenges" corner button in
+    // create() above, which opens the same openChallengesPanel() panel and
+    // carries the "N ready!" glow that used to be this station's badge (see
+    // refreshChallengeBadge() below). BootScene's "challenge_board" texture
+    // is left generated-but-unused, same precedent as adRewards.ts's
+    // retired Ad Kiosk route - not worth touching for a pure cleanup with
+    // no functional benefit.
 
     // Level-Up station - the walk-up cabinet for the "stop the marker"
     // level-up minigame (see levelUpMinigameLauncher.ts and
@@ -727,9 +718,9 @@ export class OverworldScene extends Phaser.Scene {
     // the Challenges panel (see openChallengesPanel's removed calls); this
     // station replaces that with a real thing to walk up to.
     //
-    // Wired exactly like the Item Shop/Challenge Board above: a static
-    // cabinet-scale sprite, a collider, and a registerStation walk-up
-    // handler. Placed at (67,38) - the standalone "Ad Kiosk" station's old
+    // Wired exactly like the Item Shop above: a static cabinet-scale
+    // sprite, a collider, and a registerStation walk-up handler. Placed at
+    // (67,38) - the standalone "Ad Kiosk" station's old
     // spot (that station was retired and consolidated into the Coin Kiosk
     // above), already verified clear of Hi-Lo (67,28) and Video Poker
     // (67,48), both 10 tiles/160px away - well beyond any station's own
@@ -847,15 +838,19 @@ export class OverworldScene extends Phaser.Scene {
     });
     this.promptText.container.setScrollFactor(0).setDepth(100).setVisible(false);
 
-    this.hudText = makeTextChip(
-      this,
-      0,
-      0,
-      "",
-      { fontSize: "13px", color: Theme.textGold },
-      { originY: 1, paddingX: 8, paddingY: 4 }
-    );
-    this.hudText.container.setDepth(90);
+    // Coin/level balance readout - screen-fixed, NOT anchored to the
+    // player's head in world space any more (see Samsung bug fix below).
+    // Was previously repositioned every frame in update() to float above
+    // the player sprite; on Samsung phones (very wide in mobile landscape,
+    // see main.ts's Scale.ENVELOP note) that pushed it above the measured
+    // safe band and it got cropped off-screen, so players couldn't see
+    // their own GC balance. Pinned at a static spot inside y=[130,470]
+    // instead, same fix pattern as the "Clothes" button below.
+    this.hudText = makeTextChip(this, 85, 155, "", { fontSize: "13px", color: Theme.textGold }, {
+      paddingX: 8,
+      paddingY: 4
+    });
+    this.hudText.container.setScrollFactor(0).setDepth(150);
 
     // "Clothes" corner button - always available, opens the wardrobe
     // (change any layer you already own). Y=155, not the original 30 -
@@ -866,6 +861,28 @@ export class OverworldScene extends Phaser.Scene {
     makeButton(this, 730, 155, 130, 40, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
       this.openShopCategoryMenu("wardrobe")
     ).container.setScrollFactor(0).setDepth(150);
+
+    // "Challenges" corner button - replaces the old walk-up Challenge Board
+    // station (removed below) so a player doesn't have to cross the floor
+    // to check/claim. Glows via the same pulsing ring the Level-Up kiosk
+    // and the tutorial use (ui/TutorialGuide.ts's showHighlightRing,
+    // screenFixed:true here since this is a fixed UI button, not a world
+    // sprite) whenever something is ready to claim - see
+    // refreshChallengeBadge() below, which also runs once right here so
+    // it's correct on walking in, not only after a claim.
+    this.challengesButton = makeButton(
+      this,
+      730,
+      205,
+      CHALLENGES_BTN_W,
+      CHALLENGES_BTN_H,
+      "🏆 Challenges",
+      Theme.neutral,
+      Theme.neutralHover,
+      () => this.openChallengesPanel()
+    );
+    this.challengesButton.container.setScrollFactor(0).setDepth(150);
+    this.refreshChallengeBadge();
 
     this.updateHud();
 
@@ -1105,20 +1122,21 @@ export class OverworldScene extends Phaser.Scene {
     this.handleProximity();
     this.handleInteraction();
 
-    // The accessory takes the "right above the head" spot the coin tracker
-    // normally sits in (reported live: with both only 20px apart, the hat
-    // read as floating up near the balance HUD instead of sitting on the
-    // person) - the tracker itself moves further up to make room ONLY when
-    // an accessory is actually equipped, so nothing shifts for anyone not
-    // wearing one.
-    // Anchored to where the head actually IS (the rig's headTopFrac), not
-    // to the top edge of the frame. Identical pixels for the legacy rigs,
-    // which all declare 0 headroom - but an LPC frame has ~12px of empty
-    // space above the head, so the old frame-top assumption would float the
-    // hat and the HUD label well clear of the character.
-    const headTop = accessoryY(this.playerRig, this.player.y, this.player.displayHeight) + ACCESSORY_HEAD_GAP;
-    this.hudText.container.setPosition(this.player.x, headTop - (this.accessoryBadge ? 32 : 6));
-    this.accessoryBadge?.setPosition(this.player.x, headTop - ACCESSORY_HEAD_GAP);
+    // The accessory sprite is part of the character, not the screen chrome
+    // - it stays anchored to the player's head in world space (moves/scrolls
+    // with them, like the player sprite itself) so it visually reads as
+    // "worn". Anchored to where the head actually IS (the rig's
+    // headTopFrac), not to the top edge of the frame. Identical pixels for
+    // the legacy rigs, which all declare 0 headroom - but an LPC frame has
+    // ~12px of empty space above the head, so the old frame-top assumption
+    // would float the hat clear of the character.
+    // (The coin/level balance HUD used to also be repositioned here, right
+    // above the accessory - it's a screen-fixed corner readout now, see its
+    // creation comment in create() for why.)
+    this.accessoryBadge?.setPosition(
+      this.player.x,
+      accessoryY(this.playerRig, this.player.y, this.player.displayHeight)
+    );
     this.updatePetFollow();
   }
 
@@ -1489,10 +1507,10 @@ export class OverworldScene extends Phaser.Scene {
    * require standing on its exact center), and adds a floating name label
    * above it so players can tell what it is before walking over.
    *
-   * Returns that label so a caller can update it later - the Challenge Board
-   * uses this to append a "N ready!" badge once its (asynchronous) board
-   * fetch comes back. Every other call site simply ignores the return value,
-   * exactly as before.
+   * Returns that label so a caller can update it later if it ever needs to
+   * (e.g. appending a status badge once an async fetch comes back, the way
+   * the now-removed walk-up Challenge Board station used to). Every current
+   * call site ignores the return value.
    */
   private registerStation(
     sprite: Phaser.Physics.Arcade.Sprite,
@@ -1935,31 +1953,54 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
-   * Appends a "N ready!" badge to the Challenge Board's floating label when
-   * the player has completed challenges they haven't claimed.
+   * Lights up the corner "Challenges" button's pulsing ring when the player
+   * has completed challenges they haven't claimed - the replacement for the
+   * old walk-up Challenge Board station's "N ready!" text badge (founder
+   * direction: "have it glow/blink when you won a challenge so it is clear
+   * a player has a reward ready").
    *
-   * This is the thing that pulls someone back tomorrow, so it has to be
-   * visible from across the floor rather than only once you walk up and open
-   * the panel. Fire-and-forget and silent on failure - a station label that
-   * simply doesn't gain a badge is a far better outcome than an error toast
-   * on entering the overworld, and the panel itself re-reads the board (and
-   * reports its own failures) the moment anyone opens it.
+   * Called once from create() (screenFixed showHighlightRing around the
+   * button, same helper/shape as the Level-Up kiosk's ring) so it's correct
+   * on walking into the overworld, not only after a claim, and again
+   * whenever the Challenges panel closes (openChallengesPanel's
+   * setPanelOpen override) so claiming everything while the panel is open
+   * clears the glow right away instead of waiting for the next scene entry.
+   * Fire-and-forget and silent on failure - a button that simply doesn't
+   * light up is a far better outcome than an error toast on entering the
+   * overworld, and the panel itself re-reads the board (and reports its own
+   * failures) the moment anyone opens it.
    */
   private refreshChallengeBadge() {
-    const label = this.challengeStationLabel;
-    if (!label) return;
+    const button = this.challengesButton;
+    if (!button) return;
     api
       .getChallenges()
       .then((board) => {
         // The scene can be torn down (a game entered, the title screen)
-        // while this is in flight; a destroyed Text has no `scene`.
-        if (!label.scene) return;
+        // while this is in flight; a destroyed container has no `scene`.
+        if (!button.container.scene) return;
         if (!board.available) return;
         const ready = claimableCount(board.daily, board.weekly, board.achievements);
-        // Reset as well as set: claiming everything while the panel is open
-        // must not leave the floor still advertising banked rewards.
-        label.setText(ready > 0 ? `Challenges · ${ready} ready!` : "Challenges");
-        label.setColor(ready > 0 ? Theme.textGold : Theme.textPrimary);
+        if (ready > 0) {
+          if (!this.challengesButtonHighlight) {
+            // Half-diagonal of the button's own w/h (130x40, see its
+            // makeButton() call) rather than the Level-Up kiosk's simpler
+            // max(w,h)/2 - that button is near-square, but a circle sized
+            // off this one's much wider rectangle would either swallow
+            // neighbouring UI or clip the button's corners.
+            const radius = Math.sqrt((CHALLENGES_BTN_W / 2) ** 2 + (CHALLENGES_BTN_H / 2) ** 2) + 6;
+            this.challengesButtonHighlight = showHighlightRing(
+              this,
+              button.container.x,
+              button.container.y,
+              radius,
+              true
+            );
+          }
+        } else {
+          this.challengesButtonHighlight?.destroy();
+          this.challengesButtonHighlight = undefined;
+        }
       })
       .catch(() => {
         // Silent by design - see this method's doc comment.
