@@ -234,6 +234,32 @@ full suite (46/46, includes economy's new tests for both fixes), ran
 - [ ] Walking into each game's entrance/kiosk transitions to the right scene.
 - [ ] Skin shop kiosk (if present) opens and reflects owned vs. lockable skins.
 
+## Quickplay (`ui/QuickplayPanel.ts`, roadmap/quickplay-grid)
+
+- [ ] The "🎮 Quickplay" corner button (stacked under Clothes/Challenges)
+      opens a scrollable grid of cards, one per game - 14 cards, no
+      duplicates even though several games (Slots, Blackjack, Roulette,
+      Coin Flip, Dragon Tower) have more than one floor cabinet.
+- [ ] No "N playing" or any player-count text anywhere on the grid -
+      deliberate, per founder direction (see QuickplayPanel.ts's doc
+      comment) - flag it as a regression if one ever appears here.
+- [ ] On a touch device (or Chrome DevTools' touch emulation), dragging a
+      finger up/down inside the grid scrolls it; a light tap that barely
+      moves still opens the tapped game instead of being swallowed as a
+      drag.
+- [ ] Mouse wheel also scrolls the grid (desktop convenience, not the
+      primary input).
+- [ ] Tapping a card fades into that game; that game's own Walk Away
+      button returns to the plain casino floor (not back into Quickplay -
+      this is intentional, see the panel's `goToGame` doc comment).
+- [ ] Close returns to the floor with the player able to move immediately -
+      no softlock. Specifically: open Quickplay, close it without tapping a
+      game, and confirm WASD/touch-joystick movement still works (this is
+      the exact bug class `panelOpen` was already patched for once).
+- [ ] Opening Quickplay, then tapping a card, never leaves the player
+      unable to move after later leaving that game and returning to the
+      floor.
+
 ## Player Room (`RoomScene`, roadmap/player-room-v2)
 
 - [ ] Walking to the Overworld's Exit door and pressing E leads to the Room,
