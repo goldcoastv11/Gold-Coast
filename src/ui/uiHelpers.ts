@@ -579,6 +579,23 @@ export function makeBetControl(
  * instead of the canvas center (400,300), since the left sidebar occupies
  * the left third of the screen. Unchanged by the restyle on purpose: all 14
  * scenes lay their boards out around these two numbers.
+ *
+ * Known gap (2026-08 responsive pass): stays a fixed 570, not derived from
+ * the live canvas width, even though main.ts can now widen the game's
+ * logical width well past 800 on a wide phone (see its own scale-config
+ * comment). That's deliberate for THIS pass, not an oversight: every one of
+ * the 14 games computes its own board layout (card/tile/grid positions)
+ * from this constant at MODULE load time, not inside a method that runs
+ * per-scene-instance - e.g. `const DX = GAME_SHELL_DISPLAY_CENTER_X;` at
+ * the top of BaccaratScene.ts and its siblings. Making this genuinely
+ * dynamic means restructuring that board-layout math in all 14 files to
+ * compute from the live width at scene-create time instead, which is a
+ * much larger and riskier change than fits in one clean pass alongside the
+ * actual reported bug (cropping) - see this PR's description. The
+ * consequence is cosmetic, not a regression: on a wide phone the board
+ * still renders complete and fully reachable at its original size and
+ * position, just left-of-true-center rather than perfectly centered in the
+ * extra width. Left as explicit follow-up work rather than attempted here.
  */
 export const GAME_SHELL_DISPLAY_CENTER_X = 570;
 export const GAME_SHELL_DISPLAY_CENTER_Y = 300;
@@ -595,15 +612,21 @@ export interface GameShellHandle {
 
 /**
  * Every interactive/informational sidebar element sits within this band
- * (130-470, symmetric around the canvas's own vertical center 300) - see
- * main.ts's Scale.ENVELOP-on-mobile comment for why: filling a wide phone
- * screen edge-to-edge crops roughly the top/bottom of the 800x600 canvas to
- * cover the extra width, so nothing anyone actually needs to see or tap can
- * live outside this range. 130, not an initial-pass 100 - measured live
- * against a real ~19.5:9 phone viewport (844x390, iPhone 14 Pro landscape
- * proportions) and the actual crop came out to ~115-122px, more than the
- * first pass budgeted for; 130 keeps real margin beyond that measured worst
- * case rather than sitting right on the edge of it.
+ * (130-470, symmetric around the canvas's own vertical center 300).
+ *
+ * History: this originally existed to survive main.ts's mobile Scale.
+ * ENVELOP cropping the top/bottom of the fixed 800x600 canvas to fill a
+ * wide phone screen edge-to-edge (130, not an initial-pass 100 - measured
+ * live against a real ~19.5:9 phone viewport, iPhone 14 Pro landscape
+ * proportions, and the actual crop came out to ~115-122px). main.ts no
+ * longer crops at all (it resizes the game's own logical resolution to
+ * match the device instead, keeping height fixed at 600 - see its own
+ * scale-config comment), so this band is no longer load-bearing for that
+ * reason. It stays as-is anyway: all 14 game scenes already lay their
+ * sidebar content out against it, height stays a fixed 600 in landscape
+ * specifically so this remains valid, and there is no benefit to reclaiming
+ * the ~120px margin on either side now that nothing is at risk of being
+ * cropped away.
  * GAME_SHELL_DISPLAY_CENTER_Y deliberately stays at the same 300 center for
  * the same reason - each game's own display-area content should stay within
  * roughly +/-170 of it too.
@@ -655,9 +678,17 @@ export function makeGameShell(
   // than relying on each scene's own camera background colour, so the whole
   // shell sits on the token ground even in scenes that have not been
   // converted yet. Depth is far below drawCabinetFrame's -1.
+  //
+  // Sized from the LIVE canvas (scene.scale.width/height), not a literal
+  // 800x600 - main.ts's mobile-landscape handling widens the game's actual
+  // logical resolution to match wide phones (see its own doc comment), and
+  // the sidebar/board content below stays anchored to the original 800x600
+  // layout, so a hardcoded 800x600 fill would leave the extra width on a
+  // wide phone showing raw canvas backgroundColor (Theme.bgDark, a
+  // different colour to this token ground) instead of this surface.
   const ground = scene.add.graphics().setDepth(-1000);
   ground.fillStyle(Tokens.color.bg, 1);
-  ground.fillRect(0, 0, 800, 600);
+  ground.fillRect(0, 0, scene.scale.width, scene.scale.height);
 
   // Sidebar panel: spans y 118-484. A few px of the rounded corner bleeds
   // past the safe zone at each edge, which is harmless - it is background,

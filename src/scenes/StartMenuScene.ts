@@ -20,14 +20,22 @@ export class StartMenuScene extends Phaser.Scene {
     fadeInOnCreate(this);
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 460, 340);
+    // Screen center, not a literal 400 - main.ts can now widen the game's
+    // logical width on a wide phone in landscape (see its scale-config
+    // comment), so this menu recenters against the live canvas instead of
+    // drifting off-center-left on a wide screen. Computed once here at
+    // scene-create time, same scope boundary as OverworldScene's
+    // `screenCenterX` (see that comment for why not reactive on resize).
+    const cx = this.scale.width / 2;
+
+    makePanel(this, cx, 300, 460, 340);
 
     this.add
-      .text(400, 200, "🕹️", { fontSize: "64px" })
+      .text(cx, 200, "🕹️", { fontSize: "64px" })
       .setOrigin(0.5);
 
     this.add
-      .text(400, 270, "GOLD COAST ARCADE", {
+      .text(cx, 270, "GOLD COAST ARCADE", {
         fontSize: "26px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -35,7 +43,7 @@ export class StartMenuScene extends Phaser.Scene {
       .setOrigin(0.5);
 
     this.add
-      .text(400, 300, `Logged in as ${gameState.activeUsername ?? "guest"}`, {
+      .text(cx, 300, `Logged in as ${gameState.activeUsername ?? "guest"}`, {
         fontSize: "13px",
         color: Theme.textGold
       })
@@ -43,7 +51,7 @@ export class StartMenuScene extends Phaser.Scene {
 
     if (data?.notice) {
       this.add
-        .text(400, 320, data.notice, {
+        .text(cx, 320, data.notice, {
           fontSize: "11px",
           color: Theme.textMuted,
           align: "center",
@@ -54,7 +62,7 @@ export class StartMenuScene extends Phaser.Scene {
 
     makeButton(
       this,
-      400,
+      cx,
       365,
       240,
       56,
@@ -64,7 +72,7 @@ export class StartMenuScene extends Phaser.Scene {
       () => fadeToScene(this, "OverworldScene", { startTutorial: data?.startTutorial })
     );
 
-    makeButton(this, 400, 435, 160, 36, "LOG OUT", Theme.neutral, Theme.neutralHover, () => {
+    makeButton(this, cx, 435, 160, 36, "LOG OUT", Theme.neutral, Theme.neutralHover, () => {
       gameState.logout();
       fadeToScene(this, "LoginScene");
     });
