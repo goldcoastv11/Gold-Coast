@@ -5,6 +5,7 @@ import { prisma } from "../src/db";
 import { applyTransaction } from "../src/economy/ledger";
 import { resetDb, signupUser, authed } from "./helpers";
 import { WARDROBE_CATALOG, WARDROBE_SLOTS, DEFAULT_BODY_PIECE_ID } from "../src/wardrobeCatalog";
+import { XP_ITEM_PURCHASE } from "../src/progression/progress";
 
 beforeEach(resetDb);
 
@@ -83,6 +84,17 @@ describe("POST /wardrobe/buy", () => {
     // The slot/piece is recorded in meta for audit rather than in a new
     // transaction type - see economy/wardrobe.ts's header.
     expect(tx!.meta).toMatchObject({ wardrobePieceId: shirt.id, wardrobeSlot: "TORSO" });
+  });
+
+  it("awards flat XP for the purchase - a buy is one of the founder's new XP sources", async () => {
+    const { token, username } = await signupUser();
+    await topUpGc(username, shirt.price);
+
+    const before = await request(app).get("/me").set(authed(token));
+    const res = await request(app).post("/wardrobe/buy").set(authed(token)).send({ pieceId: shirt.id });
+
+    expect(res.status).toBe(200);
+    expect(res.body.user.progression.xp).toBe(before.body.progression.xp + XP_ITEM_PURCHASE);
   });
 
   it("wears the piece immediately - buying it means wearing it", async () => {

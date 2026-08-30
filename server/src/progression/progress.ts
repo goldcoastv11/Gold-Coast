@@ -122,6 +122,46 @@ function matchingChallenges(metric: ChallengeMetric, game: string): ChallengeDef
   return CHALLENGE_CATALOG.filter((c) => c.metric === metric && (c.game === undefined || c.game === game));
 }
 
+// ---------------------------------------------------------------------
+// XP from real gameplay/purchases (on top of challenges, which already
+// grant XP on claim - see challengeCatalog.ts's rewardXp)
+// ---------------------------------------------------------------------
+
+/**
+ * Flat XP grants for the three activities the founder asked to reward on
+ * top of challenges: playing a round, winning a round, buying an item
+ * (wardrobe/room/furniture/Item Shop - all four purchase paths call
+ * awardXp with this same constant, see their economy/*.ts files).
+ *
+ * WHY FLAT, NOT SCALED (founder's explicit rule): "XP for a win is
+ * constant" - it must not scale with bet size or payout, or a big spender
+ * could buy levels faster than someone playing the same number of rounds
+ * for cheap. Levelling is meant to track how much someone PLAYS, not how
+ * much they STAKE. Same flat-rate reasoning is extended to XP_ROUND_PLAYED
+ * and XP_ITEM_PURCHASE for consistency - nothing here ever reads
+ * betAmount/payout/price to size the XP grant, only to gate whether it
+ * fires at all (e.g. recordWin only runs on payout > 0).
+ *
+ * A winning round nets XP_ROUND_PLAYED + XP_ROUND_WIN (recordWager and
+ * recordWin both fire for a win; only recordWager fires for a loss) - see
+ * settleSingleShotBet/placeWager/settlePayout in games/shared.ts.
+ *
+ * PACING (levels.ts's curve: xpForLevel(n) = 100 * n * (n-1) / 2, so each
+ * level costs 100 XP more than the last):
+ *   - At a rough 45-50% win rate (roughly house-edge parity across the 14
+ *     games), an average round earns ~5 + 0.5*10 = ~10 XP. Level 2 costs
+ *     100 XP -> roughly 10 rounds, so most players see their first level-up
+ *     within one sitting.
+ *   - Level 50 (max) needs 122,500 cumulative XP -> roughly 12,000+ rounds
+ *     at that same average, and the last single step alone (level 49 -> 50,
+ *     4,900 XP) is ~490 rounds by itself. That's a genuine long-haul grind,
+ *     which is the point of a 50-level prestige track - the founder can
+ *     retune these three constants freely without touching the curve.
+ */
+export const XP_ROUND_PLAYED = 5;
+export const XP_ROUND_WIN = 10;
+export const XP_ITEM_PURCHASE = 20;
+
 /**
  * Adds `delta` to one challenge's counter for the current period, creating
  * the row on first touch.
@@ -196,6 +236,9 @@ export async function recordWager(
   if (!(await progressionAvailable())) return;
   if (!Number.isFinite(betAmount) || betAmount <= 0) return;
 
+  // Flat XP for playing, regardless of bet size - see XP_ROUND_PLAYED above.
+  await awardXp(tx, userId, XP_ROUND_PLAYED);
+
   for (const def of matchingChallenges("ROUNDS_PLAYED", game)) {
     await bumpCounter(tx, userId, def.id, periodKeyFor(def.period, now), 1);
   }
@@ -222,6 +265,12 @@ export async function recordWin(
 ): Promise<void> {
   if (!(await progressionAvailable())) return;
   if (!Number.isFinite(payout) || payout <= 0) return;
+
+  // Flat XP for winning, regardless of payout size - see XP_ROUND_WIN
+  // above. This is IN ADDITION to the XP_ROUND_PLAYED already awarded by
+  // recordWager for this same round (both fire for a win; only recordWager
+  // fires for a loss), never a replacement for it.
+  await awardXp(tx, userId, XP_ROUND_WIN);
 
   for (const def of matchingChallenges("WINS", game)) {
     // minPayout gates "land one big win" style challenges on the size of a
@@ -416,6 +465,25 @@ async function addXp(tx: TxClient, userId: string, amount: number): Promise<void
   });
 }
 
+/**
+ * The one entry point every XP source should call: adds `amount` XP and,
+ * in the same transaction, pays out any level(s) that XP just unlocked
+ * (grantPendingLevelRewards) - so "gain XP" and "collect the level(s) it
+ * crosses" can never drift apart no matter which of the growing list of
+ * callers (challenge claims, recordWager/recordWin above, item/wardrobe/
+ * room/furniture purchases) triggered it.
+ *
+ * This is also what makes a level crossed mid-game behave identically to
+ * one crossed by claiming a challenge: grantPendingLevelRewards sets
+ * PlayerProgress.pendingMinigameLevel unconditionally on any level-up, and
+ * GET /progression / the Level-Up kiosk's highlight ring both just read
+ * that column - they don't know or care what pushed the XP over the line.
+ */
+export async function awardXp(tx: TxClient, userId: string, amount: number): Promise<LevelGrant[]> {
+  await addXp(tx, userId, amount);
+  return grantPendingLevelRewards(tx, userId);
+}
+
 export interface ProgressionState extends LevelState {
   /** Highest level already paid out - exposed mostly for debugging/QA. */
   rewardedLevel: number;
@@ -521,8 +589,7 @@ export async function claimChallenge(
     rewardXp: def.rewardXp
   });
 
-  await addXp(tx, userId, def.rewardXp);
-  const levelsGained = await grantPendingLevelRewards(tx, userId);
+  const levelsGained = await awardXp(tx, userId, def.rewardXp);
   const progression = await getProgression(tx, userId);
   const pendingLevelMinigame = await getPendingLevelMinigame(tx, userId);
 

@@ -27,7 +27,11 @@ import {
   claimChallenge,
   getChallengeBoard,
   grantPendingLevelRewards,
-  recordWager
+  recordWager,
+  recordWin,
+  XP_ITEM_PURCHASE,
+  XP_ROUND_PLAYED,
+  XP_ROUND_WIN
 } from "../src/progression/progress";
 
 beforeEach(resetDb);
@@ -236,6 +240,96 @@ describe("progress from real game outcomes", () => {
 });
 
 // =====================================================================
+// XP from real gameplay - the founder's "every play/win rewards XP" ask,
+// on top of the challenge-claim XP already covered above. Exercised at
+// the recordWager/recordWin level (same functions games/shared.ts calls
+// from real settlement) so the founder's flat-XP rule can be asserted
+// exactly, without depending on a particular game's random outcome.
+// =====================================================================
+
+describe("XP from real gameplay (playing and winning)", () => {
+  it("grants flat XP for playing a round, whether it wins or loses", async () => {
+    const { username } = await signupUser();
+    const userId = await userIdFor(username);
+
+    await prisma.$transaction((tx) => recordWager(tx, userId, "dice", 5));
+    let progress = await prisma.playerProgress.findUniqueOrThrow({ where: { userId } });
+    expect(progress.xp).toBe(XP_ROUND_PLAYED);
+
+    // A payout of 0 (a loss) is not a win - no extra XP on top of the play.
+    await prisma.$transaction((tx) => recordWin(tx, userId, "dice", 0));
+    progress = await prisma.playerProgress.findUniqueOrThrow({ where: { userId } });
+    expect(progress.xp).toBe(XP_ROUND_PLAYED);
+
+    // A real win adds XP_ROUND_WIN on top of the round's own XP_ROUND_PLAYED.
+    await prisma.$transaction((tx) => recordWin(tx, userId, "dice", 500));
+    progress = await prisma.playerProgress.findUniqueOrThrow({ where: { userId } });
+    expect(progress.xp).toBe(XP_ROUND_PLAYED + XP_ROUND_WIN);
+  });
+
+  it("pays the SAME win XP no matter the bet size or payout - founder's rule: levels track play, not stake", async () => {
+    const small = await signupUser();
+    const big = await signupUser();
+    const smallId = await userIdFor(small.username);
+    const bigId = await userIdFor(big.username);
+
+    // A 10 GC bet that wins 20 GC vs. a 1,000 GC bet that wins 5,000 GC -
+    // wildly different stakes and payouts, same real win.
+    await prisma.$transaction(async (tx) => {
+      await recordWager(tx, smallId, "dice", 10);
+      await recordWin(tx, smallId, "dice", 20);
+    });
+    await prisma.$transaction(async (tx) => {
+      await recordWager(tx, bigId, "dice", 1000);
+      await recordWin(tx, bigId, "dice", 5000);
+    });
+
+    const smallProgress = await prisma.playerProgress.findUniqueOrThrow({ where: { userId: smallId } });
+    const bigProgress = await prisma.playerProgress.findUniqueOrThrow({ where: { userId: bigId } });
+    expect(smallProgress.xp).toBe(bigProgress.xp);
+    expect(smallProgress.xp).toBe(XP_ROUND_PLAYED + XP_ROUND_WIN);
+  });
+
+  it("grants gameplay XP end to end over a real HTTP round, matching XP_ROUND_PLAYED/XP_ROUND_WIN exactly", async () => {
+    const { token, username } = await signupUser();
+    await topUpGc(username, 1_000);
+
+    const before = await request(app).get("/me").set(authed(token));
+    const res = await request(app)
+      .post("/games/dice/play")
+      .set(authed(token))
+      .send({ betAmount: 5, target: 95 });
+    expect(res.status).toBe(200);
+
+    const expectedXp =
+      before.body.progression.xp + XP_ROUND_PLAYED + (res.body.result.won ? XP_ROUND_WIN : 0);
+    const after = await request(app).get("/me").set(authed(token));
+    expect(after.body.progression.xp).toBe(expectedXp);
+  });
+
+  it("crossing a level from real gameplay ALONE (no challenge claim) still sets the pending Level-Up minigame flag", async () => {
+    const { token, username } = await signupUser();
+    await topUpGc(username, 5_000);
+
+    // Even with zero wins, XP_ROUND_PLAYED alone crosses level 2's 100 XP
+    // threshold by round 20 (5 XP * 20) - bounded loop, never touches
+    // /challenges/claim, so any level-up here is purely from gameplay.
+    let level = 1;
+    for (let i = 0; i < 25 && level < 2; i += 1) {
+      await request(app).post("/games/dice/play").set(authed(token)).send({ betAmount: 5, target: 95 });
+      const progression = await request(app).get("/progression").set(authed(token));
+      level = progression.body.level;
+    }
+    expect(level).toBeGreaterThanOrEqual(2);
+
+    const res = await request(app).get("/progression").set(authed(token));
+    // Same pending-minigame state a challenge-claim-triggered level-up
+    // produces - the flag doesn't know or care what pushed the XP over.
+    expect(res.body.pendingLevelMinigame).toEqual({ level: res.body.level });
+  });
+});
+
+// =====================================================================
 // Daily reset across a date boundary
 // =====================================================================
 
@@ -305,7 +399,12 @@ describe("POST /challenges/claim", () => {
     await topUpGc(username, 10_000);
     const userId = await userIdFor(username);
 
-    await playDice(token, 5); // completes ach_first_round (target 1)
+    const played = await playDice(token, 5); // completes ach_first_round (target 1)
+    // The round itself grants XP_ROUND_PLAYED (win or lose), plus
+    // XP_ROUND_WIN if it happened to win - see progress.ts's recordWager/
+    // recordWin. Read the actual outcome rather than assuming it, since
+    // playDice's win odds are 95% but not guaranteed.
+    const gameplayXp = XP_ROUND_PLAYED + (played.result.won ? XP_ROUND_WIN : 0);
 
     const before = await request(app).get("/me").set(authed(token));
     const res = await request(app)
@@ -318,7 +417,7 @@ describe("POST /challenges/claim", () => {
     expect(res.body.claimed.rewardXp).toBe(25);
     expect(res.body.user.goldCoins).toBe(before.body.goldCoins + 100);
     expect(res.body.user.tickets).toBe(before.body.tickets); // Tickets untouched
-    expect(res.body.progression.xp).toBe(25);
+    expect(res.body.progression.xp).toBe(25 + gameplayXp);
     expect(res.body.progression.level).toBe(1);
 
     const ledgerRow = await prisma.transaction.findFirst({
@@ -425,35 +524,61 @@ describe("levels", () => {
     await playUntilComplete(token, "daily_play_10"); // 10 rounds
     await playUntilComplete(token, "daily_win_3");
 
-    // 25 + 50 + 40 = 115 XP, past level 2's 100 XP threshold.
+    // Real gameplay now also grants flat XP (XP_ROUND_PLAYED per round,
+    // + XP_ROUND_WIN per win) alongside the three challenge claims below -
+    // read the exact rounds/wins so far off the board rather than assuming
+    // a fixed round count, since daily_win_3 may or may not need extra
+    // rounds beyond the 10 played for daily_play_10 (dice's win odds are
+    // 95%, not guaranteed).
+    const boardAfterPlay = await getBoard(token);
+    const roundsPlayed = view(boardAfterPlay, "weekly_play_100").progress;
+    const winsSoFar = view(boardAfterPlay, "weekly_win_30").progress;
+    const gameplayXp = roundsPlayed * XP_ROUND_PLAYED + winsSoFar * XP_ROUND_WIN;
+
+    // 25 + 50 + 40 = 115 XP from claims, plus gameplayXp from the rounds
+    // themselves - together past level 2's 100 XP threshold.
     for (const id of ["ach_first_round", "ach_first_win", "daily_play_10"]) {
       const res = await request(app).post("/challenges/claim").set(authed(token)).send({ challengeId: id });
       expect(res.status).toBe(200);
     }
 
+    const totalXp = 115 + gameplayXp;
+    const expectedLevel = levelForXp(totalXp);
+
     const progressionRes = await request(app).get("/progression").set(authed(token));
     expect(progressionRes.status).toBe(200);
-    expect(progressionRes.body.xp).toBe(115);
-    expect(progressionRes.body.level).toBe(2);
-    expect(progressionRes.body.rewardedLevel).toBe(2);
-    expect(progressionRes.body.xpIntoLevel).toBe(15);
-    expect(progressionRes.body.xpForNextLevel).toBe(200);
+    expect(progressionRes.body.xp).toBe(totalXp);
+    expect(progressionRes.body.level).toBe(expectedLevel);
+    expect(progressionRes.body.rewardedLevel).toBe(expectedLevel);
+    expect(progressionRes.body.xpIntoLevel).toBe(totalXp - xpForLevel(expectedLevel));
+    expect(progressionRes.body.xpForNextLevel).toBe(
+      expectedLevel >= MAX_LEVEL ? 0 : xpForLevel(expectedLevel + 1) - xpForLevel(expectedLevel)
+    );
 
     let levelRows = await prisma.transaction.findMany({ where: { userId, type: "LEVEL_REWARD_GC" } });
-    expect(levelRows).toHaveLength(1);
-    expect(levelRows[0].currency).toBe("GC");
-    expect(levelRows[0].amount).toBe(200);
+    // Every level from 2 up to expectedLevel was paid, exactly once each.
+    expect(levelRows).toHaveLength(Math.max(0, expectedLevel - 1));
+    expect(levelRows.every((r) => r.currency === "GC")).toBe(true);
+    let expectedTotalGc = 0;
+    for (let l = 2; l <= expectedLevel; l += 1) expectedTotalGc += levelRewardGc(l);
+    expect(levelRows.reduce((sum, r) => sum + r.amount, 0)).toBe(expectedTotalGc);
 
-    // Another claim adds XP but must not re-pay level 2.
+    // Another claim adds XP but must not re-pay any level already paid -
+    // whether it crosses a further level depends on exactly how much
+    // gameplay XP landed above (winsSoFar varies run to run), so work out
+    // what SHOULD happen from the same curve the implementation uses
+    // rather than assuming either way.
     const more = await request(app)
       .post("/challenges/claim")
       .set(authed(token))
       .send({ challengeId: "daily_win_3" });
     expect(more.status).toBe(200);
-    expect(more.body.levelsGained).toHaveLength(0);
+
+    const expectedLevelAfterMore = levelForXp(totalXp + 50); // daily_win_3's rewardXp
+    expect(more.body.levelsGained).toHaveLength(Math.max(0, expectedLevelAfterMore - expectedLevel));
 
     levelRows = await prisma.transaction.findMany({ where: { userId, type: "LEVEL_REWARD_GC" } });
-    expect(levelRows).toHaveLength(1);
+    expect(levelRows).toHaveLength(Math.max(0, expectedLevelAfterMore - 1));
   });
 
   it("reports the level as a prestige number on /me", async () => {
@@ -463,11 +588,12 @@ describe("levels", () => {
     const fresh = await request(app).get("/me").set(authed(token));
     expect(fresh.body.progression).toEqual({ level: 1, xp: 0 });
 
-    await playDice(token, 5);
+    const played = await playDice(token, 5);
+    const gameplayXp = XP_ROUND_PLAYED + (played.result.won ? XP_ROUND_WIN : 0);
     await request(app).post("/challenges/claim").set(authed(token)).send({ challengeId: "ach_first_round" });
 
     const after = await request(app).get("/me").set(authed(token));
-    expect(after.body.progression.xp).toBe(25);
+    expect(after.body.progression.xp).toBe(25 + gameplayXp);
     expect(after.body.progression.level).toBe(1);
   });
 
