@@ -636,13 +636,20 @@ export class OverworldScene extends Phaser.Scene {
       this.openCoinKiosk()
     );
 
-    // Exit - bottom-middle wall, sends you back to the title screen
+    // Exit - bottom-middle wall, leads to the player's own Room
+    // (roadmap/player-room-v2, founder direction: "when you exit the
+    // casino have it go to your Room"). Used to lead to the title screen
+    // (StartMenuScene) - that's still reachable via the 401/logout path,
+    // it's just no longer what this specific door does. Position is saved
+    // first so RoomScene's own door back drops the player at exactly this
+    // spot on return, with no bookkeeping needed on that side - see
+    // RoomScene.ts's create().
     const exitDoor = this.physics.add.staticSprite(40 * TILE, 51 * TILE, "exit_door");
     this.physics.add.collider(this.player, exitDoor);
-    this.registerStation(exitDoor, "Exit", "Press E to exit to the title screen", () => {
+    this.registerStation(exitDoor, "Exit", "Press E to go to your Room", () => {
       gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
       this.savePositionRemote(this.player.x, this.player.y);
-      fadeToScene(this, "StartMenuScene");
+      fadeToScene(this, "RoomScene");
     });
 
     // Item Shop - buy new looks for your character, a piece at a time (see

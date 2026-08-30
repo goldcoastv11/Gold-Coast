@@ -174,6 +174,8 @@ import type {
   EquipWardrobePieceResponse,
   UnequipWardrobeSlotResponse,
   WardrobeSlot,
+  BuyRoomPieceResponse,
+  EquipRoomPieceResponse,
   BuyItemResponse,
   EquipItemResponse,
   UnequipItemResponse,
@@ -249,6 +251,20 @@ export function equipWardrobePiece(pieceId: string): Promise<EquipWardrobePieceR
 /** Takes off whatever is worn in `slot`. Rejected server-side for BODY, which can never be empty. */
 export function unequipWardrobeSlot(slot: WardrobeSlot): Promise<UnequipWardrobeSlotResponse> {
   return request<UnequipWardrobeSlotResponse>("/wardrobe/unequip", { method: "POST", body: { slot } });
+}
+
+// ---- Player Room (wallpaper/flooring - see src/roomCatalog.ts) ----
+// No client-side getRoomCatalog(): like the wardrobe, the catalogue is
+// static data the client already has bundled (src/roomCatalog.ts) -
+// GET /room/catalog exists server-side purely so a non-JS client could
+// discover prices, same as GET /wardrobe/catalog.
+
+export function buyRoomPiece(pieceId: string): Promise<BuyRoomPieceResponse> {
+  return request<BuyRoomPieceResponse>("/room/buy", { method: "POST", body: { pieceId } });
+}
+
+export function equipRoomPiece(pieceId: string): Promise<EquipRoomPieceResponse> {
+  return request<EquipRoomPieceResponse>("/room/equip", { method: "POST", body: { pieceId } });
 }
 
 // ---- Items (accessories/pets) ----

@@ -70,6 +70,16 @@ export const EVENTS = {
   /** An owned cosmetic was equipped. Props: { itemId } or { pieceId, slot }. */
   ITEM_EQUIPPED: "shop.item_equipped",
   /**
+   * A Player Room decor purchase (wallpaper/flooring - see
+   * src/roomCatalog.ts and src/ui/RoomPanel.ts). Props: { pieceId, slot,
+   * price }. A distinct event from WARDROBE_PURCHASED even though the
+   * shape matches exactly - same reasoning that event's own doc comment
+   * gives for not reusing an older one: pooling "bought a shirt" and
+   * "bought wallpaper" into one name would corrupt any read of either
+   * feature on its own.
+   */
+  ROOM_DECOR_PURCHASED: "room.decor_purchased",
+  /**
    * A completed challenge's reward was claimed. Props: { challengeId,
    * period, rewardGc, rewardXp } - all catalog facts, nothing a player
    * typed. This is the "does the challenge system actually bring people
