@@ -9,6 +9,7 @@ import { openRoomSlotMenu, RoomPanelHost } from "../ui/RoomPanel";
 import { openFurnitureMenu, FurniturePanelHost } from "../ui/FurniturePanel";
 import { FurnitureSlotId } from "../furnitureCatalog";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
+import { registerUiCamera, isolateFixedUi, isolateWorldObject } from "../ui/sceneCameraSplit";
 import { playSfx, playMusic } from "../ui/SoundManager";
 import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
 import {
@@ -93,6 +94,8 @@ export class RoomScene extends Phaser.Scene {
   private touchControls?: TouchControlsHandle;
   private promptText!: TextChip;
   private balanceText!: TextChip;
+  /** Second camera, zoom pinned at 1, that every screen-fixed UI element renders through instead of the zoomed main camera - see updateCameraZoom()/ui/sceneCameraSplit.ts (same setup as OverworldScene's own uiCamera). */
+  private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private door!: Phaser.Physics.Arcade.Sprite;
   private lastDir: "down" | "left" | "right" | "up" = "down";
   private _panelOpen = false;
@@ -159,6 +162,23 @@ export class RoomScene extends Phaser.Scene {
     this.physics.world.setBounds(0, 0, ROOM_COLS * TILE, ROOM_ROWS * TILE);
     this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
 
+    // Camera zoom + the screen-fixed-UI camera split it needs - same setup
+    // as OverworldScene.ts's own (see that scene's create() and
+    // updateCameraZoom() for the full mechanics/reasoning; this room is
+    // only slightly bigger than one screen at its native size, so this
+    // mainly keeps a wide mobile-landscape phone from showing empty space
+    // past the room's own walls, the same principle as the overworld).
+    this.uiCamera = this.cameras.add(0, 0, this.scale.width, this.scale.height);
+    this.uiCamera.setName("ui");
+    this.uiCamera.transparent = true;
+    registerUiCamera(this, this.uiCamera);
+    this.updateCameraZoom();
+    const onResize = () => this.updateCameraZoom();
+    this.scale.on(Phaser.Scale.Events.RESIZE, onResize);
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.scale.off(Phaser.Scale.Events.RESIZE, onResize);
+    });
+
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasd = this.input.keyboard!.addKeys("W,A,S,D") as Record<string, Phaser.Input.Keyboard.Key>;
     this.interactKey = this.input.keyboard!.addKey("E");
@@ -183,23 +203,44 @@ export class RoomScene extends Phaser.Scene {
     // main.ts can widen the game's logical width on a wide phone in
     // landscape, and a literal 730/400 would drift away from the true
     // right edge/center as the canvas gets wider.
-    const cornerX = this.scale.width - 70;
     const screenCenterX = this.scale.width / 2;
+
+    // Everything from here through the end of create() is screen-fixed UI -
+    // snapshotted so it can all be isolated from the zoomed main camera in
+    // one call below (see ui/sceneCameraSplit.ts's header and
+    // OverworldScene.ts's identical `worldContentSoFar`/`fixedUiSoFar`
+    // split for the full reasoning).
+    const worldContentSoFar = [...this.children.list];
 
     this.balanceText = makeTextChip(this, 70, 155, "", { fontSize: "13px", color: Theme.textGold });
     this.balanceText.container.setScrollFactor(0).setDepth(90);
     this.updateHud();
 
-    makeButton(this, cornerX, 155, 130, 40, "🎨 Decorate", Theme.neutral, Theme.neutralHover, () =>
+    // Top button row - Decorate/Furniture, same "across the top, not the
+    // sides" direction and fixed-width-centered-row shape as
+    // OverworldScene's own top row (see that scene's create() for the full
+    // reasoning) - the two scenes' chrome no longer lines up 1:1 (that was
+    // only ever a byproduct of both using the same cornerX column, not a
+    // requirement), but both now read as "buttons live along the top."
+    const TOP_ROW_Y = 100;
+    const TOP_ROW_BTN_W = 130;
+    const TOP_ROW_BTN_H = 40;
+    const TOP_ROW_GAP = 12;
+    const topRowCount = 2;
+    const topRowTotalW = TOP_ROW_BTN_W * topRowCount + TOP_ROW_GAP * (topRowCount - 1);
+    const topRowLeft = screenCenterX - topRowTotalW / 2;
+    const topRowX = (i: number) => topRowLeft + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
+
+    makeButton(this, topRowX(0), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "🎨 Decorate", Theme.neutral, Theme.neutralHover, () =>
       this.openDecoratePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
-    // Second chrome button, stacked directly under Decorate - still inside
-    // the mobile safe zone (y=[130,470]). A separate button rather than a
-    // third row inside openRoomSlotMenu: furniture's picker (RoomPanel.ts
+    // Second chrome button, beside Decorate rather than stacked under it -
+    // see the top-row comment above. A separate button rather than a third
+    // row inside openRoomSlotMenu: furniture's picker (RoomPanel.ts/
     // ui/FurniturePanel.ts) is a slot-position grid, not a per-category
     // piece list, different enough to be its own entry point.
-    makeButton(this, cornerX, 200, 130, 40, "🪑 Furniture", Theme.neutral, Theme.neutralHover, () =>
+    makeButton(this, topRowX(1), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "🪑 Furniture", Theme.neutral, Theme.neutralHover, () =>
       this.openFurniturePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -208,6 +249,19 @@ export class RoomScene extends Phaser.Scene {
       color: Theme.textPrimary
     });
     this.promptText.container.setScrollFactor(0).setDepth(100).setVisible(false);
+
+    // See `worldContentSoFar` above - splits everything created in this
+    // create() call between the two cameras.
+    const fixedUiSoFar = this.children.list.filter((obj) => !worldContentSoFar.includes(obj));
+    isolateWorldObject(this, worldContentSoFar);
+    isolateFixedUi(this, fixedUiSoFar);
+  }
+
+  /** Same zoom formula/reasoning as OverworldScene.ts's own updateCameraZoom() - see that method's doc comment. */
+  private updateCameraZoom() {
+    const zoom = isTouchDevice() ? this.scale.width / 800 : 1;
+    this.cameras.main.setZoom(zoom);
+    this.uiCamera.setSize(this.scale.width, this.scale.height);
   }
 
   update() {
@@ -375,6 +429,8 @@ export class RoomScene extends Phaser.Scene {
       { paddingX: 10, paddingY: 5 }
     );
     toast.container.setScrollFactor(0).setDepth(210).setAlpha(0);
+    // Screen-fixed - see updateCameraZoom()/ui/sceneCameraSplit.ts.
+    isolateFixedUi(this, toast.container);
 
     this.tweens.add({
       targets: toast.container,

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
 import { makeButton, makePanel } from "./uiHelpers";
+import { isolateFixedUi, isolateWorldObject } from "./sceneCameraSplit";
 
 /**
  * Onboarding tutorial - a short guided tour that runs once, right after a
@@ -41,7 +42,13 @@ export interface TutorialStep {
   allowMovement?: boolean;
 }
 
-const PANEL_X = 400;
+// panelX used to be a fixed module const (400, matching the original
+// 800-wide canvas) - now computed as `panelX` inside showDialogue/
+// showInstruction below, from the live canvas width, since main.ts can
+// widen the canvas well past 800 on a wide mobile-landscape phone (see its
+// own scale-config comment) and a fixed 400 would leave this panel
+// left-of-true-center there.
+//
 // Top of the screen, not the bottom - this panel is nearly full-width
 // (680 of the 800px canvas), so at its original PANEL_Y=520 it directly
 // overlapped the mobile touch joystick/interact button band (both sit
@@ -71,16 +78,19 @@ function showDialogue(
   onNext: () => void,
   onSkip: () => void
 ): DialogueHandle {
-  const panel = makePanel(scene, PANEL_X, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
+  // See the module-scope comment above PANEL_Y for why this is computed
+  // here instead of as a fixed module const.
+  const panelX = scene.scale.width / 2;
+  const panel = makePanel(scene, panelX, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
 
   const portrait = scene.add
-    .image(PANEL_X - PANEL_W / 2 + 55, PANEL_Y, "tutorial_guide")
+    .image(panelX - PANEL_W / 2 + 55, PANEL_Y, "tutorial_guide")
     .setScrollFactor(0)
     .setDepth(DEPTH + 1)
     .setScale(1.5);
 
   const titleText = scene.add
-    .text(PANEL_X - PANEL_W / 2 + 110, PANEL_Y - 42, title, {
+    .text(panelX - PANEL_W / 2 + 110, PANEL_Y - 42, title, {
       fontSize: "15px",
       color: Theme.textGold,
       fontStyle: "bold"
@@ -89,7 +99,7 @@ function showDialogue(
     .setDepth(DEPTH + 1);
 
   const bodyText = scene.add
-    .text(PANEL_X - PANEL_W / 2 + 110, PANEL_Y - 20, text, {
+    .text(panelX - PANEL_W / 2 + 110, PANEL_Y - 20, text, {
       fontSize: "13px",
       color: Theme.textPrimary,
       wordWrap: { width: 380 }
@@ -99,7 +109,7 @@ function showDialogue(
 
   const nextBtn = makeButton(
     scene,
-    PANEL_X + PANEL_W / 2 - 85,
+    panelX + PANEL_W / 2 - 85,
     PANEL_Y + 42,
     130,
     40,
@@ -112,7 +122,7 @@ function showDialogue(
 
   const skipBtn = makeButton(
     scene,
-    PANEL_X + PANEL_W / 2 - 85,
+    panelX + PANEL_W / 2 - 85,
     PANEL_Y - 42,
     130,
     30,
@@ -122,6 +132,8 @@ function showDialogue(
     onSkip
   );
   skipBtn.container.setScrollFactor(0).setDepth(DEPTH + 1);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, [panel, portrait, titleText, bodyText, nextBtn.container, skipBtn.container]);
 
   return {
     destroy: () => {
@@ -156,7 +168,18 @@ export function showHighlightRing(
   screenFixed = false
 ): HighlightHandle {
   const ring = scene.add.graphics().setPosition(x, y).setDepth(DEPTH + 2);
-  if (screenFixed) ring.setScrollFactor(0);
+  if (screenFixed) {
+    ring.setScrollFactor(0);
+    // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+    isolateFixedUi(scene, ring);
+  } else {
+    // World-space, created here well after a zoomed scene's initial
+    // create() pass (a station's ring can appear any time - the tutorial
+    // walking the player up to one, or the Level-Up kiosk lighting up mid-
+    // play) - see ui/sceneCameraSplit.ts's header on why this needs its own
+    // per-object isolate call rather than a one-time snapshot.
+    isolateWorldObject(scene, ring);
+  }
   ring.lineStyle(4, Theme.gold, 1);
   ring.strokeCircle(0, 0, radius);
 
@@ -194,16 +217,19 @@ export interface InstructionHandle {
  * caller decides what "next" actually is.
  */
 export function showInstruction(scene: Phaser.Scene, title: string, text: string, onSkip: () => void): InstructionHandle {
-  const panel = makePanel(scene, PANEL_X, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
+  // See the module-scope comment above PANEL_Y for why this is computed
+  // here instead of as a fixed module const.
+  const panelX = scene.scale.width / 2;
+  const panel = makePanel(scene, panelX, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
 
   const portrait = scene.add
-    .image(PANEL_X - PANEL_W / 2 + 55, PANEL_Y, "tutorial_guide")
+    .image(panelX - PANEL_W / 2 + 55, PANEL_Y, "tutorial_guide")
     .setScrollFactor(0)
     .setDepth(DEPTH + 1)
     .setScale(1.5);
 
   const titleText = scene.add
-    .text(PANEL_X - PANEL_W / 2 + 110, PANEL_Y - 42, title, {
+    .text(panelX - PANEL_W / 2 + 110, PANEL_Y - 42, title, {
       fontSize: "15px",
       color: Theme.textGold,
       fontStyle: "bold"
@@ -212,7 +238,7 @@ export function showInstruction(scene: Phaser.Scene, title: string, text: string
     .setDepth(DEPTH + 1);
 
   const bodyText = scene.add
-    .text(PANEL_X - PANEL_W / 2 + 110, PANEL_Y - 20, text, {
+    .text(panelX - PANEL_W / 2 + 110, PANEL_Y - 20, text, {
       fontSize: "13px",
       color: Theme.textPrimary,
       wordWrap: { width: 380 }
@@ -222,7 +248,7 @@ export function showInstruction(scene: Phaser.Scene, title: string, text: string
 
   const skipBtn = makeButton(
     scene,
-    PANEL_X + PANEL_W / 2 - 85,
+    panelX + PANEL_W / 2 - 85,
     PANEL_Y,
     130,
     40,
@@ -232,6 +258,8 @@ export function showInstruction(scene: Phaser.Scene, title: string, text: string
     onSkip
   );
   skipBtn.container.setScrollFactor(0).setDepth(DEPTH + 1);
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, [panel, portrait, titleText, bodyText, skipBtn.container]);
 
   return {
     destroy: () => {

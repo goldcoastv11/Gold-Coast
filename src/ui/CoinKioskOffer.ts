@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
 import { makeButton, makePanel } from "./uiHelpers";
+import { isolateFixedUi } from "./sceneCameraSplit";
 
 /**
  * "Watch an Ad?" gate for the overworld Coin Kiosk (formerly the "Chip
@@ -86,4 +87,9 @@ export function offerCoinKiosk(
     onDecline();
   });
   declineBtn.container.setScrollFactor(0).setDepth(401);
+
+  // Screen-fixed - safe to call even in a scene with no zoomed main camera
+  // (e.g. RoomScene doesn't use this offer today) - see
+  // ui/sceneCameraSplit.ts's header.
+  isolateFixedUi(scene, [panel, title, sub, watchBtn.container, declineBtn.container]);
 }

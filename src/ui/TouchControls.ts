@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
+import { isolateFixedUi } from "./sceneCameraSplit";
 
 /**
  * On-screen touch controls for the overworld: a drag-based virtual
@@ -30,9 +31,10 @@ const JOYSTICK_RADIUS = 50;
 const KNOB_RADIUS = 24;
 const DEADZONE_FRACTION = 0.25; // fraction of JOYSTICK_RADIUS before a direction registers
 
-const INTERACT_X = 730;
 const INTERACT_Y = 385; // see JOYSTICK_Y's comment - same safe-zone constraint
 const INTERACT_RADIUS = 40;
+/** 70px margin from the live right edge - matches the original literal 730's margin from the old fixed 800px canvas, computed fresh per call so a widened mobile-landscape canvas (see main.ts's scale-config comment) doesn't leave this drifting away from the true right edge. */
+const interactX = (scene: Phaser.Scene) => scene.scale.width - 70;
 
 const CONTROLS_DEPTH = 500;
 
@@ -119,14 +121,15 @@ export function createTouchControls(scene: Phaser.Scene, onInteract: () => void)
     if (pointer.id === activePointerId) resetStick();
   });
 
+  const interactBtnX = interactX(scene);
   const interactBtn = scene.add
-    .circle(INTERACT_X, INTERACT_Y, INTERACT_RADIUS, Theme.accent, 0.88)
+    .circle(interactBtnX, INTERACT_Y, INTERACT_RADIUS, Theme.accent, 0.88)
     .setStrokeStyle(2, Theme.outline, 1)
     .setScrollFactor(0)
     .setDepth(CONTROLS_DEPTH + 1)
     .setInteractive({ useHandCursor: true });
   const interactLabel = scene.add
-    .text(INTERACT_X, INTERACT_Y, "E", { fontSize: "22px", color: Theme.textOnDark, fontStyle: "bold" })
+    .text(interactBtnX, INTERACT_Y, "E", { fontSize: "22px", color: Theme.textOnDark, fontStyle: "bold" })
     .setOrigin(0.5)
     .setScrollFactor(0)
     .setDepth(CONTROLS_DEPTH + 2);
@@ -137,6 +140,10 @@ export function createTouchControls(scene: Phaser.Scene, onInteract: () => void)
   });
   interactBtn.on("pointerup", () => interactBtn.setScale(1));
   interactBtn.on("pointerout", () => interactBtn.setScale(1));
+
+  // Screen-fixed - see ui/sceneCameraSplit.ts's header (no-op in a scene
+  // with no zoomed main camera).
+  isolateFixedUi(scene, [base, knob, hitZone, interactBtn, interactLabel]);
 
   return {
     state,
