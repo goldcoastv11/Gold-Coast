@@ -551,6 +551,25 @@ export class OverworldScene extends Phaser.Scene {
     // re-entering the overworld ALWAYS starts unblocked, whatever happened
     // before. Both flags are set through their setters so the touch controls
     // are re-shown too.
+    // Clear handles to objects that died with the PREVIOUS run of this scene
+    // BEFORE anything can touch them. Phaser reuses the scene instance, so
+    // these fields still point at game objects Phaser destroyed on shutdown;
+    // calling into them throws and aborts create(), leaving a blank screen
+    // with the old scene's music still looping.
+    //
+    // This bit us for real: setting panelOpen below runs
+    // updateTouchControlsVisibility(), which calls setVisible() on
+    // touchControls - and that handle closes over destroyed sprites and calls
+    // setInteractive()/disableInteractive() on them. touchControls is only
+    // created on touch devices, which is exactly why the failure was
+    // phone-only: on desktop the field is undefined and the optional chain is
+    // a no-op. Each of these is re-created further down create() anyway.
+    this.touchControls = undefined;
+    this.challengesButtonHighlight = undefined;
+    this.activeTutorialHighlight = undefined;
+    this.activeTutorialInstruction = undefined;
+    this.layeredCharacter = undefined;
+
     this.panelOpen = false;
     this.tutorialAllowMovement = false;
 
