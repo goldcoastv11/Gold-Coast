@@ -58,6 +58,8 @@
 import { TransactionType } from "@prisma/client";
 import { TxClient } from "./ledger";
 import { startOfUtcDay, startOfUtcWeek } from "../progression/periods";
+import { getEquippedWardrobe } from "./wardrobe";
+import { WardrobeSlot } from "../wardrobeCatalog";
 
 export type LeaderboardWindow = "daily" | "weekly" | "allTime";
 
@@ -71,7 +73,8 @@ export const EARNED_GC_TRANSACTION_TYPES: TransactionType[] = [
   "AD_REWARD_GC"
 ];
 
-export interface LeaderboardEntry {
+/** A ranked row before wardrobe is attached - see `attachWardrobe` below for why the two are split. */
+interface RankedEarner {
   userId: string;
   username: string;
   earnedGc: number;
@@ -82,6 +85,18 @@ export interface LeaderboardEntry {
    * next distinct player is 4th, not 3rd.
    */
   rank: number;
+}
+
+export interface LeaderboardEntry extends RankedEarner {
+  /**
+   * What this player currently has equipped, keyed by slot - exactly what
+   * ui/LeaderboardPanel.ts needs to draw a small portrait next to their
+   * name and nothing else (no balances, no email, no progression). Same
+   * minimal-exposure discipline economy/magazine.ts's MagazineRoomEntry
+   * uses. BODY is always present (see wardrobe.ts's getEquippedWardrobe) -
+   * a listed player can never resolve to an empty/invisible portrait.
+   */
+  wardrobe: Partial<Record<WardrobeSlot, string>>;
 }
 
 export interface LeaderboardBoard {
@@ -162,8 +177,8 @@ async function sortedEarners(
 /** Attaches standard competition rank (see LeaderboardEntry.rank's doc comment) to an already-sorted list. */
 function withRanks(
   sorted: Array<{ userId: string; username: string; earnedGc: number }>
-): LeaderboardEntry[] {
-  const ranked: LeaderboardEntry[] = [];
+): RankedEarner[] {
+  const ranked: RankedEarner[] = [];
   let rank = 0;
   let prevEarned: number | null = null;
   sorted.forEach((e, i) => {
@@ -176,16 +191,57 @@ function withRanks(
   return ranked;
 }
 
+/** A board's rows before wardrobe is attached - see `attachWardrobe`. */
+interface RankedBoard {
+  top: RankedEarner[];
+  me: RankedEarner | null;
+}
+
 async function loadBoard(
   tx: TxClient,
   window: LeaderboardWindow,
   userId: string,
   now: Date
-): Promise<LeaderboardBoard> {
+): Promise<RankedBoard> {
   const ranked = withRanks(await sortedEarners(tx, window, now));
   const top = ranked.slice(0, TOP_N);
   const me = ranked.find((e) => e.userId === userId) ?? null;
   return { top, me };
+}
+
+/**
+ * Every userId that actually appears on a board (top rows + the caller's
+ * own row), deduplicated - the exact set `attachWardrobe` needs to look up,
+ * no more.
+ */
+function boardUserIds(boards: RankedBoard[]): string[] {
+  const ids = new Set<string>();
+  for (const board of boards) {
+    board.top.forEach((e) => ids.add(e.userId));
+    if (board.me) ids.add(board.me.userId);
+  }
+  return [...ids];
+}
+
+/**
+ * Turns a RankedBoard into the public LeaderboardBoard by attaching each
+ * row's currently-equipped wardrobe from `wardrobeById` - one lookup map
+ * built once per request (see getLeaderboard) rather than a query per row,
+ * since the same player routinely appears on more than one of the three
+ * boards.
+ */
+function attachWardrobe(
+  board: RankedBoard,
+  wardrobeById: Map<string, Partial<Record<WardrobeSlot, string>>>
+): LeaderboardBoard {
+  const withGear = (e: RankedEarner): LeaderboardEntry => ({
+    ...e,
+    wardrobe: wardrobeById.get(e.userId) ?? {}
+  });
+  return {
+    top: board.top.map(withGear),
+    me: board.me ? withGear(board.me) : null
+  };
 }
 
 /** The full three-window response for GET /leaderboard. */
@@ -203,5 +259,16 @@ export async function getLeaderboard(
     loadBoard(tx, "weekly", userId, now),
     loadBoard(tx, "allTime", userId, now)
   ]);
-  return { daily, weekly, allTime };
+
+  // One wardrobe lookup per distinct player actually shown across all three
+  // boards, not per row - see boardUserIds/attachWardrobe's own comments.
+  const ids = boardUserIds([daily, weekly, allTime]);
+  const wardrobes = await Promise.all(ids.map(async (id) => [id, await getEquippedWardrobe(tx, id)] as const));
+  const wardrobeById = new Map(wardrobes);
+
+  return {
+    daily: attachWardrobe(daily, wardrobeById),
+    weekly: attachWardrobe(weekly, wardrobeById),
+    allTime: attachWardrobe(allTime, wardrobeById)
+  };
 }
