@@ -176,11 +176,21 @@ export class RoomScene extends Phaser.Scene {
     // uiHelpers.ts's SAFE_ZONE_TOP/BOTTOM), same coordinates OverworldScene
     // uses for its own corner button/prompt so the two scenes' chrome lines
     // up when you walk between them.
+    //
+    // X for the right-anchored/centered elements below comes from the live
+    // canvas (this.scale.width), not literals - same reasoning as
+    // OverworldScene's `cornerX`/`screenCenterX` (see that scene's comment):
+    // main.ts can widen the game's logical width on a wide phone in
+    // landscape, and a literal 730/400 would drift away from the true
+    // right edge/center as the canvas gets wider.
+    const cornerX = this.scale.width - 70;
+    const screenCenterX = this.scale.width / 2;
+
     this.balanceText = makeTextChip(this, 70, 155, "", { fontSize: "13px", color: Theme.textGold });
     this.balanceText.container.setScrollFactor(0).setDepth(90);
     this.updateHud();
 
-    makeButton(this, 730, 155, 130, 40, "🎨 Decorate", Theme.neutral, Theme.neutralHover, () =>
+    makeButton(this, cornerX, 155, 130, 40, "🎨 Decorate", Theme.neutral, Theme.neutralHover, () =>
       this.openDecoratePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -189,11 +199,11 @@ export class RoomScene extends Phaser.Scene {
     // third row inside openRoomSlotMenu: furniture's picker (RoomPanel.ts
     // ui/FurniturePanel.ts) is a slot-position grid, not a per-category
     // piece list, different enough to be its own entry point.
-    makeButton(this, 730, 200, 130, 40, "🪑 Furniture", Theme.neutral, Theme.neutralHover, () =>
+    makeButton(this, cornerX, 200, 130, 40, "🪑 Furniture", Theme.neutral, Theme.neutralHover, () =>
       this.openFurniturePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
-    this.promptText = makeTextChip(this, 400, 435, "Press E to return to the casino", {
+    this.promptText = makeTextChip(this, screenCenterX, 435, "Press E to return to the casino", {
       fontSize: "16px",
       color: Theme.textPrimary
     });
@@ -354,9 +364,11 @@ export class RoomScene extends Phaser.Scene {
    * OverworldScene's showToast (makeTextChip, fade in/hold/fade out).
    */
   private showToast(message: string, color: string) {
+    // X is the live screen center, not a literal 400 - see create()'s
+    // screenCenterX comment.
     const toast = makeTextChip(
       this,
-      400,
+      this.scale.width / 2,
       145,
       message,
       { fontSize: "13px", color, fontStyle: "bold" },

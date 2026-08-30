@@ -120,25 +120,41 @@ const config: Phaser.Types.Core.GameConfig = {
     activePointers: 2
   },
   scale: {
-    // FIT at boot, ENVELOP switched on at runtime for touch devices only
-    // (see the isTouchDevice() block below) - desktop keeps FIT
-    // unconditionally, letterboxed but with zero crop risk.
+    // FIT always, on every platform - see updateMobileLayoutMode() below
+    // for the mobile-landscape half of the story.
     //
-    // History: ENVELOP was tried and reverted once already - it fills the
-    // viewport edge-to-edge with no bars, but crops whatever overflows to
-    // get there, and on a typical wide phone aspect ratio that meant
-    // cropping roughly the top/bottom 100px of the 800x600 canvas, which
-    // put the touch joystick out of reach (confirmed live). This time,
-    // every scene's UI (uiHelpers.ts's makeGameShell/makeBetControl,
-    // TouchControls.ts, TutorialGuide.ts, and OverworldScene's own
-    // corner/prompt/panel elements) has been deliberately laid out to fit
-    // entirely within that same safe y=[100,500] band first, so the crop
-    // this time doesn't cut off anything real - see each file's own
-    // "SAFE_ZONE"/"main.ts's Scale.ENVELOP" comments for the specific
-    // repositioning. Kept mobile-only (not applied on desktop) since
-    // desktop windows aren't usually pushed to the same aspect-ratio
-    // extremes a phone's landscape screen is, and FIT already has zero
-    // downside there.
+    // History: this used to be FIT at boot, ENVELOP switched on at runtime
+    // for touch devices in landscape. ENVELOP fills the viewport edge-to-
+    // edge with no bars, but by CROPPING whatever overflows to get there -
+    // on a typical wide phone aspect ratio that meant cropping roughly the
+    // top/bottom 100-120px of the fixed 800x600 canvas. A first pass tried
+    // to live with that by laying every scene's UI out inside a measured
+    // "safe zone" band (y=[130,470], see uiHelpers.ts's SAFE_ZONE_TOP/
+    // BOTTOM) narrow enough to survive the worst-case crop. That held for a
+    // while but failed twice in real play on different handsets (the coin
+    // balance still got cropped on Samsung, then a general "top and bottom
+    // get cut off" report) - different phones crop by different amounts,
+    // so no single fixed safe band can be correct for all of them, and a
+    // band narrow enough to survive the worst real device eats into space
+    // that should have been usable on every other one.
+    //
+    // Fixed for real this time by not cropping at all: ENVELOP is gone.
+    // updateMobileLayoutMode() below now resizes the game's own logical
+    // resolution to match the device's live aspect ratio before FIT ever
+    // scales it - height stays a fixed 600 (so every one of this game's
+    // existing y-coordinates, including the old safe-zone band, keeps
+    // meaning exactly what it always meant), width grows to
+    // `600 * (viewport width / viewport height)`, clamped to a floor of
+    // 800 (the original design width - every existing layout keeps working
+    // completely untouched at or below this) and a ceiling of 1600 (a
+    // sanity cap; real target phones in the 20:9-21:9 range land around
+    // 1300-1400). Once the canvas's own aspect ratio matches the device's,
+    // FIT scales it to fill the screen with no crop AND no letterbox bars,
+    // because there is no longer a mismatch for either technique to paper
+    // over. Kept mobile-only (not applied on desktop) since desktop
+    // windows aren't usually pushed to the same aspect-ratio extremes a
+    // phone's landscape screen is, and FIT at the fixed 800x600 already
+    // has zero downside there.
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH,
     width: 800,
@@ -184,40 +200,36 @@ const game = new Phaser.Game(config);
 (window as unknown as { __game: Phaser.Game }).__game = game;
 
 /**
- * Mobile scale mode is not a fixed choice - it depends on BOTH orientation
- * AND which scene is showing:
+ * Mobile GAME SIZE (not scale mode - that's always FIT now, see the config
+ * block above) depends on BOTH orientation AND which scene is showing:
  *
- * - Landscape, any scene: ENVELOP (fills the screen edge-to-edge - every
- *   scene's UI was laid out to survive this crop, see uiHelpers.ts's
- *   SAFE_ZONE_TOP/BOTTOM).
- * - Portrait, LoginScene/BootScene: FIT (letterboxed, zero crop) - per
- *   user direction, typing a username/password is easier holding the
- *   phone upright, so login is deliberately exempted from the landscape
- *   lock (see index.html's "portrait-ok" class, toggled below). ENVELOP
- *   would be actively wrong here, not just unnecessary: in portrait,
- *   ENVELOP fills based on the TALLER dimension, which for this 4:3
- *   canvas means cropping away roughly two-thirds of the WIDTH to cover
- *   the extra height - the login form would render badly cut off, not
- *   just small. FIT avoids that entirely (shows the whole canvas,
- *   letterboxed instead of cropped) at the cost of the form appearing
- *   smaller than a landscape/ENVELOP fill would.
- * - Portrait, any other scene: doesn't matter which mode - the canvas is
- *   hidden behind #rotate-prompt regardless (index.html), so nothing
- *   renders either way; FIT is used here too just to avoid computing a
- *   heavily-cropped layout behind the scenes for no reason.
+ * - Landscape, any scene: the game's logical resolution is resized to
+ *   `computeLandscapeWidth()` x 600 - width matches the device's live
+ *   aspect ratio (floored at the original 800, so nothing already laid
+ *   out for the 800x600 design ever loses space; ceilinged at 1600 as a
+ *   sanity cap). FIT then scales that already-matching-aspect canvas to
+ *   fill the screen with no crop and no letterbox bars.
+ * - Portrait, LoginScene/BootScene: game size stays the original 800x600
+ *   (landscape-shaped) - per user direction, typing a username/password is
+ *   easier holding the phone upright, so login is deliberately exempted
+ *   from the landscape lock (see index.html's "portrait-ok" class, toggled
+ *   below). FIT then letterboxes that landscape-shaped canvas inside the
+ *   portrait viewport (shows the whole canvas, just smaller) - widening it
+ *   to match the portrait aspect ratio the way the landscape case does
+ *   would be actively wrong here, squeezing the login form's actual
+ *   horizontal layout rather than just shrinking it. `applyPortraitLoginZoom`
+ *   below then CSS-zooms that letterboxed result back up.
+ * - Portrait, any other scene: also kept at 800x600 - doesn't matter
+ *   either way since the canvas is hidden behind #rotate-prompt regardless
+ *   (index.html), this just avoids computing a pointless resize.
  *
- * Setting `game.scale.scaleMode` alone is NOT enough, despite reading
- * back correctly afterward - verified live (checked Phaser's own source,
- * then confirmed with actual canvas measurements): the real FIT/ENVELOP/
- * etc. sizing math reads `displaySize.aspectMode` (a separate internal
- * value on the Size helper object), which Phaser only ever copies
- * `scaleMode` into once, during initial config parsing at boot. Setting
- * `game.scale.scaleMode` after that point updates a value nothing else
- * actually reads. `displaySize.setAspectMode()` is what updates the
- * value the layout math uses; `refresh()` then forces an immediate
- * recompute against it (this pairing is undocumented as a public runtime
- * API - Phaser expects scaleMode to be set once via config - but it's
- * what the source shows actually drives the sizing decision).
+ * `setGameSize()` is Phaser's own supported API for changing a game's
+ * logical resolution at runtime while staying in a Scale Manager mode like
+ * FIT (as opposed to `resize()`, which is for `NONE` mode) - it updates
+ * `displaySize`'s aspect ratio itself and triggers its own `refresh()`, so
+ * unlike the old FIT<->ENVELOP runtime mode switch this used to do, there
+ * is no separate undocumented step needed to make the change actually take
+ * effect.
  */
 /**
  * Sign Up/Sign In tab pair (LoginScene.ts) - the WIDEST real element on
@@ -270,7 +282,27 @@ function applyPortraitLoginZoom(active: boolean): void {
   container.style.transform = `scale(${zoomFactor})`;
 }
 
-let lastAppliedMode: number | null = null;
+/**
+ * The game's fixed logical height in landscape (see the scale config
+ * comment above) - every existing y-coordinate in the game, including the
+ * old safe-zone band, was authored against a 600-tall canvas and keeps
+ * meaning exactly the same thing at this height regardless of device
+ * width.
+ */
+const LANDSCAPE_HEIGHT = 600;
+/** Original design width - the floor. Never resize narrower than this: everything already laid out for 800x600 keeps working completely untouched at or below it. */
+const LANDSCAPE_MIN_WIDTH = 800;
+/** Sanity ceiling for pathological aspect ratios - real target phones (20:9-21:9, where Samsung handsets sit) land around 1300-1400, comfortably under this. */
+const LANDSCAPE_MAX_WIDTH = 1600;
+
+/** `600 * live viewport aspect ratio`, clamped to [LANDSCAPE_MIN_WIDTH, LANDSCAPE_MAX_WIDTH]. */
+function computeLandscapeWidth(): number {
+  const aspect = window.innerWidth / Math.max(1, window.innerHeight);
+  const raw = Math.round(LANDSCAPE_HEIGHT * aspect);
+  return Math.max(LANDSCAPE_MIN_WIDTH, Math.min(LANDSCAPE_MAX_WIDTH, raw));
+}
+
+let lastAppliedGameWidth: number | null = null;
 let lastAppliedPortraitLogin: boolean | null = null;
 
 /**
@@ -300,17 +332,17 @@ function updateMobileLayoutMode(): void {
   const isPortraitLogin = isPortrait && loginOk;
   document.body.classList.toggle("portrait-ok", loginOk);
 
-  const desiredMode = isPortraitLogin ? Phaser.Scale.FIT : Phaser.Scale.ENVELOP;
-  const modeChanged = desiredMode !== lastAppliedMode;
+  // Portrait (either the exempted login case or the rotate-prompt case)
+  // keeps the original landscape-shaped 800x600 game size - see this
+  // function's own doc comment above for why. Only real landscape play
+  // resizes to match the device's own aspect ratio.
+  const desiredWidth = isPortrait ? LANDSCAPE_MIN_WIDTH : computeLandscapeWidth();
+  const sizeChanged = desiredWidth !== lastAppliedGameWidth;
   const portraitLoginChanged = isPortraitLogin !== lastAppliedPortraitLogin;
 
-  if (modeChanged) {
-    game.scale.scaleMode = desiredMode;
-    game.scale.displaySize.setAspectMode(desiredMode);
-    lastAppliedMode = desiredMode;
-  }
-  if (modeChanged || portraitLoginChanged) {
-    game.scale.refresh();
+  if (sizeChanged) {
+    game.scale.setGameSize(desiredWidth, LANDSCAPE_HEIGHT);
+    lastAppliedGameWidth = desiredWidth;
   }
   if (portraitLoginChanged) {
     applyPortraitLoginZoom(isPortraitLogin);
