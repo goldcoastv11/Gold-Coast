@@ -519,6 +519,22 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   create(data?: OverworldSceneData) {
+    // Phaser reuses the SCENE INSTANCE across start/stop cycles - create()
+    // re-runs but class-field initialisers do not, so any state left set when
+    // this scene was last stopped is still set now. panelOpen gates movement
+    // in update(), and a panel that never got to run its own close handler
+    // (because something faded to another scene while it was open - the
+    // level-up minigame launching mid-claim is exactly this) leaves it stuck
+    // true. The result is a player who can never move again: a permanent
+    // softlock, reported from real play.
+    //
+    // Resetting here fixes the whole class of bug rather than that one path -
+    // re-entering the overworld ALWAYS starts unblocked, whatever happened
+    // before. Both flags are set through their setters so the touch controls
+    // are re-shown too.
+    this.panelOpen = false;
+    this.tutorialAllowMovement = false;
+
     fadeInOnCreate(this);
     playMusic(this, "alphaDance"); // lobby background loop - see ui/SoundManager.ts
 
