@@ -8,10 +8,12 @@
  */
 
 import type { WardrobeSlot } from "../wardrobeCatalog";
+import type { RoomSlot } from "../roomCatalog";
 
 // Re-exported so api/client.ts and its callers can name a slot without also
 // importing the catalog - the catalog is the definition, this is the wire type.
 export type { WardrobeSlot };
+export type { RoomSlot };
 
 /** GET /me, and embedded as `user` in most economy/auth responses. */
 export interface MeResponse {
@@ -36,6 +38,16 @@ export interface MeResponse {
   wardrobe: {
     owned: string[];
     equipped: Partial<Record<WardrobeSlot, string>>;
+  };
+  /**
+   * The Player Room's decor (see server/src/economy/room.ts) - wallpaper +
+   * flooring only so far (furniture is a planned follow-up). `owned`
+   * always contains both free defaults; `equipped` always has a WALLPAPER
+   * and FLOORING entry.
+   */
+  room: {
+    owned: string[];
+    equipped: Partial<Record<RoomSlot, string>>;
   };
   /** Accessory/pet ids owned (see server/src/economy/itemShop.ts). */
   ownedItems: string[];
@@ -115,6 +127,32 @@ export interface EquipWardrobePieceResponse {
 
 /** POST /wardrobe/unequip */
 export interface UnequipWardrobeSlotResponse {
+  user: MeResponse;
+}
+
+/** One room decor piece as the server describes it (server/src/roomCatalog.ts). */
+export interface RoomPieceDto {
+  id: string;
+  slot: RoomSlot;
+  name: string;
+  price: number;
+}
+
+/** GET /room/catalog */
+export interface RoomCatalogResponse {
+  slots: { slot: RoomSlot; name: string; optional: boolean }[];
+  pieces: RoomPieceDto[];
+}
+
+/** POST /room/buy */
+export interface BuyRoomPieceResponse {
+  piece: RoomPieceDto;
+  user: MeResponse;
+}
+
+/** POST /room/equip */
+export interface EquipRoomPieceResponse {
+  piece: RoomPieceDto;
   user: MeResponse;
 }
 

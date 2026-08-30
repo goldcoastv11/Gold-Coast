@@ -257,6 +257,13 @@ export class BootScene extends Phaser.Scene {
     this.createCarpetBlueTexture();
     this.createWallTexture();
     this.createExitDoorTexture();
+    // Player Room decor (roadmap/player-room-v2) - wallpaper/flooring tiles
+    // for every piece in roomCatalog.ts's ROOM_CATALOG. Reuses "exit_door"
+    // above for the Room's own door back to the casino floor - a door
+    // reads as a door regardless of which room it's in, so no new texture
+    // is needed there.
+    this.createRoomWallpaperTextures();
+    this.createRoomFlooringTextures();
     this.createMinesTexture();
     this.createDiceTexture();
     this.createLimboTexture();
@@ -502,6 +509,122 @@ export class BootScene extends Phaser.Scene {
     g.fillCircle(w - 11, h / 2, 2.5);
     g.generateTexture("exit_door", w, h);
     g.destroy();
+  }
+
+  /**
+   * Player Room wallpaper tiles, 16x16 tileable - one per WALLPAPER piece
+   * in roomCatalog.ts's ROOM_CATALOG. A piece's `id` IS its texture key
+   * here, same convention wardrobe pieces use, so adding a wallpaper is
+   * purely a catalogue + generator pair, never a renderer change.
+   *
+   * Same warm PALETTE as everything else in this file, but deliberately
+   * NOT a reuse of createWallTexture's sandstone plaster: that texture is
+   * the outdoor casino plaza's perimeter wall, and the whole point of the
+   * Room is that it reads as a distinct, private space rather than another
+   * patch of the same building - so its wall gets its own lighter, cozier
+   * register (indoor wallpaper, not exterior masonry).
+   */
+  private createRoomWallpaperTextures() {
+    const s = 16;
+
+    // Plain - the free default every player starts with. Deliberately the
+    // quietest of the three: per the roadmap's design point, a sparse
+    // starting room should read as fillable, not unfinished, and a loud
+    // default wallpaper would fight that read.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.cream, 1);
+      g.fillRect(0, 0, s, s);
+      g.fillStyle(PALETTE.litEdge, 0.25);
+      g.fillRect(0, 0, s, 1);
+      g.fillStyle(PALETTE.shadeEdge, 0.08);
+      g.fillRect(0, s - 1, s, 1);
+      g.generateTexture("room_wallpaper_plain", s, s);
+      g.destroy();
+    }
+
+    // Sunset Stripe - alternating cream/coral vertical bands.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.cream, 1);
+      g.fillRect(0, 0, s, s);
+      g.fillStyle(PALETTE.coral, 0.85);
+      g.fillRect(0, 0, 4, s);
+      g.fillRect(8, 0, 4, s);
+      g.fillStyle(PALETTE.litEdge, 0.2);
+      g.fillRect(0, 0, s, 1);
+      g.generateTexture("room_wallpaper_stripe", s, s);
+      g.destroy();
+    }
+
+    // Garden Bloom - cream base with a small scatter of mint bloom dots.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.cream, 1);
+      g.fillRect(0, 0, s, s);
+      g.fillStyle(PALETTE.mint, 0.8);
+      g.fillCircle(4, 4, 1.4);
+      g.fillCircle(12, 12, 1.4);
+      g.fillStyle(PALETTE.mintBright, 0.6);
+      g.fillCircle(12, 4, 1);
+      g.fillCircle(4, 12, 1);
+      g.fillStyle(PALETTE.litEdge, 0.2);
+      g.fillRect(0, 0, s, 1);
+      g.generateTexture("room_wallpaper_floral", s, s);
+      g.destroy();
+    }
+  }
+
+  /**
+   * Player Room flooring tiles, 16x16 tileable - one per FLOORING piece in
+   * roomCatalog.ts's ROOM_CATALOG. Same id-is-texture-key convention as
+   * createRoomWallpaperTextures above.
+   */
+  private createRoomFlooringTextures() {
+    const s = 16;
+
+    // Bare Wood - the free default. Warm plank tone with a single seam.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillRect(0, 0, s, s);
+      g.fillStyle(PALETTE.shadeEdge, 0.15);
+      g.fillRect(0, 7, s, 1);
+      g.fillStyle(PALETTE.litEdge, 0.2);
+      g.fillRect(0, 0, s, 1);
+      g.generateTexture("room_floor_plain", s, s);
+      g.destroy();
+    }
+
+    // Checkerboard - two-tone squares, the pattern baked into one 16px
+    // tile (two 8x8 quadrants) rather than depending on placement math to
+    // alternate it.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.cabinet, 1);
+      g.fillRect(0, 0, s, s);
+      g.fillStyle(PALETTE.cabinetDark, 1);
+      g.fillRect(0, 0, 8, 8);
+      g.fillRect(8, 8, 8, 8);
+      g.generateTexture("room_floor_checker", s, s);
+      g.destroy();
+    }
+
+    // Woven Rug - same weave technique as createCarpetBlueTexture (the
+    // casino floor's own rug tile), under a distinct key so a player who's
+    // seen both can still tell "my room" from "the casino floor" at a
+    // glance.
+    {
+      const g = this.add.graphics();
+      g.fillStyle(PALETTE.rug, 1);
+      g.fillRect(0, 0, s, s);
+      g.fillStyle(PALETTE.rugFleck, 0.55);
+      for (let x = 0; x < s; x += 2) g.fillRect(x, 0, 1, s);
+      g.fillStyle(PALETTE.litEdge, 0.05);
+      for (let y = 1; y < s; y += 2) g.fillRect(0, y, s, 1);
+      g.generateTexture("room_floor_rug", s, s);
+      g.destroy();
+    }
   }
 
   /**

@@ -4,6 +4,7 @@ import { BootScene } from "./scenes/BootScene";
 import { LoginScene } from "./scenes/LoginScene";
 import { StartMenuScene } from "./scenes/StartMenuScene";
 import { OverworldScene } from "./scenes/OverworldScene";
+import { RoomScene } from "./scenes/RoomScene";
 import { SlotsScene } from "./scenes/SlotsScene";
 import { BlackjackScene } from "./scenes/BlackjackScene";
 import { RouletteScene } from "./scenes/RouletteScene";
@@ -155,6 +156,7 @@ const config: Phaser.Types.Core.GameConfig = {
     LoginScene,
     StartMenuScene,
     OverworldScene,
+    RoomScene,
     SlotsScene,
     BlackjackScene,
     RouletteScene,

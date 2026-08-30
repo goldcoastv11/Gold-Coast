@@ -54,6 +54,7 @@ import {
   EquippedWardrobe,
   WardrobeSlot
 } from "./wardrobeCatalog";
+import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, EquippedRoom, RoomSlot } from "./roomCatalog";
 import {
   PlaceBetOutcome,
   ResolveBetOutcome,
@@ -203,6 +204,23 @@ class GameState {
    * body in it. Server-hydrated only.
    */
   equippedWardrobe: EquippedWardrobe = { BODY: DEFAULT_BODY_PIECE_ID };
+
+  /**
+   * Player Room decor piece ids the player owns (see src/roomCatalog.ts).
+   * Both free defaults (plain wallpaper, bare wood floor) are always in
+   * here, same reasoning as ownedWardrobe above. Server-hydrated only.
+   */
+  ownedRoomDecor: string[] = [ROOM_DEFAULT_PIECE_ID.WALLPAPER, ROOM_DEFAULT_PIECE_ID.FLOORING];
+
+  /**
+   * What the room currently looks like, one piece per slot. Always has
+   * both a WALLPAPER and FLOORING entry - a room is never undecorated.
+   * Server-hydrated only.
+   */
+  equippedRoom: EquippedRoom = {
+    WALLPAPER: ROOM_DEFAULT_PIECE_ID.WALLPAPER,
+    FLOORING: ROOM_DEFAULT_PIECE_ID.FLOORING
+  };
 
   /**
    * Accessory/pet ids owned - see economy/itemShop.ts's server counterpart.
@@ -390,6 +408,16 @@ class GameState {
     return this.equippedWardrobe[slot] ?? null;
   }
 
+  /** True if the player owns room decor piece `id`. Either free default always reads true. */
+  ownsRoomPiece(id: string): boolean {
+    return id === ROOM_DEFAULT_PIECE_ID.WALLPAPER || id === ROOM_DEFAULT_PIECE_ID.FLOORING || this.ownedRoomDecor.includes(id);
+  }
+
+  /** The piece currently applied to `slot`, falling back to the free default (a room slot is never empty). */
+  roomPieceInSlot(slot: RoomSlot): string {
+    return this.equippedRoom[slot] ?? ROOM_DEFAULT_PIECE_ID[slot];
+  }
+
   ownsItem(id: string): boolean {
     return this.ownedItems.includes(id);
   }
@@ -547,6 +575,20 @@ class GameState {
     this.ownedWardrobe = [...(me.wardrobe?.owned ?? [DEFAULT_BODY_PIECE_ID])];
     this.equippedWardrobe = { ...(me.wardrobe?.equipped ?? { BODY: DEFAULT_BODY_PIECE_ID }) };
     if (!this.equippedWardrobe.BODY) this.equippedWardrobe.BODY = DEFAULT_BODY_PIECE_ID;
+    // Same defensive `??` as the wardrobe above - an older deployed backend,
+    // or one whose room migration hasn't been run, must still leave the
+    // room fully decorated (both defaults) rather than empty.
+    this.ownedRoomDecor = [
+      ...(me.room?.owned ?? [ROOM_DEFAULT_PIECE_ID.WALLPAPER, ROOM_DEFAULT_PIECE_ID.FLOORING])
+    ];
+    this.equippedRoom = {
+      ...(me.room?.equipped ?? {
+        WALLPAPER: ROOM_DEFAULT_PIECE_ID.WALLPAPER,
+        FLOORING: ROOM_DEFAULT_PIECE_ID.FLOORING
+      })
+    };
+    if (!this.equippedRoom.WALLPAPER) this.equippedRoom.WALLPAPER = ROOM_DEFAULT_PIECE_ID.WALLPAPER;
+    if (!this.equippedRoom.FLOORING) this.equippedRoom.FLOORING = ROOM_DEFAULT_PIECE_ID.FLOORING;
     this.ownedItems = [...me.ownedItems];
     this.equippedAccessory = me.equippedAccessory;
     this.equippedPet = me.equippedPet;

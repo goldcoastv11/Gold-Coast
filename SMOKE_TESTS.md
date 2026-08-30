@@ -234,6 +234,30 @@ full suite (46/46, includes economy's new tests for both fixes), ran
 - [ ] Walking into each game's entrance/kiosk transitions to the right scene.
 - [ ] Skin shop kiosk (if present) opens and reflects owned vs. lockable skins.
 
+## Player Room (`RoomScene`, roadmap/player-room-v2)
+
+- [ ] Walking to the Overworld's Exit door and pressing E leads to the Room,
+      not the title screen.
+- [ ] The player's character (body + worn wardrobe) looks the same in the
+      Room as it does on the casino floor.
+- [ ] The Room starts sparsely decorated (plain wallpaper, bare wood floor)
+      on a brand-new account - this is intentional, not a bug (see
+      roomCatalog.ts's header on the "visibly incomplete" design point).
+- [ ] "🎨 Decorate" opens a Wallpaper/Flooring picker; buying an unowned
+      piece deducts Gold Coins, applies it immediately, and the room's
+      wall/floor visibly repaints without a scene reload.
+- [ ] Switching back to an already-owned piece ("Apply") is free and instant.
+- [ ] An unaffordable piece's Buy button is disabled/shows the right price;
+      attempting it anyway (e.g. two tabs) surfaces "Not enough Gold Coins."
+      rather than silently charging.
+- [ ] Reloading the page (or logging out and back in) keeps whatever
+      wallpaper/flooring was last applied - this is server-persisted, not
+      local-only.
+- [ ] Walking to the Room's own door and pressing E returns to the Overworld
+      at the same spot the player left it from.
+- [ ] No furniture/placement UI exists yet in this slice - that's expected,
+      not a regression (see the roadmap doc / PR description for scope).
+
 ## Bet control (shared across all games)
 
 - [ ] Bet stepper (+/-) clamps at BET_MIN (5) and BET_MAX (500), does not go

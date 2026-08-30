@@ -9,6 +9,8 @@ import { TxClient } from "./economy/ledger";
 import { getBalance } from "./economy/ledger";
 import { listOwnedPieces, getEquippedWardrobe } from "./economy/wardrobe";
 import { DEFAULT_BODY_PIECE_ID, WardrobeSlot } from "./wardrobeCatalog";
+import { listOwnedPieces as listOwnedRoomPieces, getEquippedRoom } from "./economy/room";
+import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, RoomSlot } from "./roomCatalog";
 import { listOwnedItems, getEquippedItem } from "./economy/itemShop";
 import { getProgressionForDisplay } from "./progression/progress";
 import { prisma } from "./db";
@@ -31,6 +33,22 @@ export interface MeResponse {
   wardrobe: {
     owned: string[];
     equipped: Partial<Record<WardrobeSlot, string>>;
+  };
+  /**
+   * The Player Room's decor (see economy/room.ts) - wallpaper + flooring
+   * only in this slice (furniture is a planned follow-up, see
+   * roomCatalog.ts's header). `owned` always contains both free defaults;
+   * `equipped` always has a WALLPAPER and FLOORING entry, so a client can
+   * render the room from this payload alone with no special-casing for a
+   * brand-new account.
+   *
+   * Read defensively (see getRoomState's doc comment) - never breaks the
+   * rest of this response if the room tables aren't migrated yet on this
+   * environment.
+   */
+  room: {
+    owned: string[];
+    equipped: Partial<Record<RoomSlot, string>>;
   };
   /** Accessory/pet ids owned - see economy/itemShop.ts. Read defensively (see getItemShopState's doc comment) - never breaks the rest of this response if the items_owned/equipped_items tables aren't migrated yet on this environment. */
   ownedItems: string[];
@@ -153,11 +171,37 @@ async function getWardrobeState(userId: string): Promise<MeResponse["wardrobe"]>
   }
 }
 
+/**
+ * Same isolation as getWardrobeState above, same reason: room_owned/
+ * room_equipped are a brand-new migration that won't exist on any
+ * environment until someone runs `railway run npx prisma migrate deploy`
+ * against it. The degraded fallback reports both free defaults as owned
+ * and applied, so a player on an un-migrated backend sees a plain,
+ * default-decorated room rather than a broken one - same
+ * always-decorated-room invariant economy/room.ts enforces, held on the
+ * failure path too.
+ */
+async function getRoomState(userId: string): Promise<MeResponse["room"]> {
+  try {
+    const [owned, equipped] = await Promise.all([
+      listOwnedRoomPieces(prisma, userId),
+      getEquippedRoom(prisma, userId)
+    ]);
+    return { owned, equipped };
+  } catch {
+    return {
+      owned: [ROOM_DEFAULT_PIECE_ID.WALLPAPER, ROOM_DEFAULT_PIECE_ID.FLOORING],
+      equipped: { WALLPAPER: ROOM_DEFAULT_PIECE_ID.WALLPAPER, FLOORING: ROOM_DEFAULT_PIECE_ID.FLOORING }
+    };
+  }
+}
+
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
   const [
     goldCoins,
     tickets,
     wardrobe,
+    room,
     itemShopState,
     lastPosition,
     attendantClaim,
@@ -168,6 +212,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     getBalance(tx, userId, "GC"),
     getBalance(tx, userId, "TICKETS"),
     getWardrobeState(userId),
+    getRoomState(userId),
     getItemShopState(userId),
     tx.lastPosition.findUnique({ where: { userId } }),
     tx.attendantClaim.findUnique({ where: { userId } }),
@@ -181,6 +226,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     goldCoins,
     tickets,
     wardrobe,
+    room,
     ownedItems: itemShopState.ownedItems,
     equippedAccessory: itemShopState.equippedAccessory,
     equippedPet: itemShopState.equippedPet,

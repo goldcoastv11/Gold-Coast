@@ -70,6 +70,8 @@ model User {
   equippedSkin        EquippedSkin?
   wardrobeOwned       WardrobeOwned[]
   equippedWardrobe    EquippedWardrobe[]
+  roomOwned           RoomOwned[]
+  roomEquipped        RoomEquipped[]
   itemsOwned          ItemOwned[]
   equippedItems       EquippedItem[]
   lastPosition        LastPosition?
@@ -303,6 +305,48 @@ model EquippedWardrobe {
 
   @@id([userId, slot])
   @@map("equipped_wardrobe")
+}
+
+// The Player Room (roadmap/player-room-v2) - a private space, reached by
+// exiting the casino floor, decorated with GC-bought wallpaper and flooring.
+// Mirrors WardrobeSlot/WardrobeOwned/EquippedWardrobe exactly, one level
+// simpler: both slots are non-optional with a free default piece (like
+// BODY, not like the wardrobe's five optional slots) - a room always has
+// SOME wallpaper and SOME floor, there is no "undecorated" state to
+// represent, so there is no unequip route/table entry to match.
+// FURNITURE is a third, later slot (see src/roomCatalog.ts's header) -
+// deliberately not added here yet: furniture is placed into fixed slots
+// rather than worn, which is a different shape (a slot INDEX, not just a
+// category) and is scoped as its own follow-up migration.
+enum RoomSlot {
+  WALLPAPER
+  FLOORING
+}
+
+// One row per decor piece a player owns. Mirrors WardrobeOwned's shape
+// exactly. The free default wallpaper/floor (roomCatalog.ts's
+// DEFAULT_PIECE_ID) are NEVER stored here - owned implicitly by everyone,
+// same as the wardrobe's free default body.
+model RoomOwned {
+  userId  String @map("user_id")
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pieceId String @map("piece_id")
+
+  @@id([userId, pieceId])
+  @@map("room_owned")
+}
+
+// One row per (user, slot) - what the player currently has applied there.
+// Absence of a row means "the free default", not "nothing" - see this
+// section's header comment on why neither slot has an empty state.
+model RoomEquipped {
+  userId  String   @map("user_id")
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slot    RoomSlot
+  pieceId String   @map("piece_id")
+
+  @@id([userId, slot])
+  @@map("room_equipped")
 }
 
 // Cosmetic equip-slot categories beyond skins (see server/src/itemCatalog.ts
