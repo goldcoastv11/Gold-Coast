@@ -27,6 +27,7 @@ import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel"
 import { claimableCount } from "../ui/challengeDisplay";
 import { openQuickplayPanel, QuickplayPanelHost } from "../ui/QuickplayPanel";
 import { uniqueGames } from "../ui/quickplayGrid";
+import { openMagazinePanel, MagazinePanelHost } from "../ui/MagazinePanel";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { offerCoinKiosk } from "../ui/CoinKioskOffer";
@@ -897,6 +898,17 @@ export class OverworldScene extends Phaser.Scene {
     // those two buttons' own comments for why this column exists at all.
     makeButton(this, 730, 255, 130, 40, "🎮 Quickplay", Theme.neutral, Theme.neutralHover, () =>
       this.openQuickplayPanel()
+    ).container.setScrollFactor(0).setDepth(150);
+
+    // "Magazine" corner button - founder ask: "a 'Magazine' button that
+    // shows 5 players rooms... make it random and change every day." One
+    // more step down the same safe-band column as Clothes/Challenges/
+    // Quickplay above (y=130-470, x=730 - see those buttons' own
+    // comments). A leaderboard button is also landing in this same corner
+    // column from a parallel change; if the two collide on this y slot,
+    // that's an intentionally trivial merge for whoever lands second.
+    makeButton(this, 730, 305, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
+      this.openMagazinePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
     this.updateHud();
@@ -2213,6 +2225,21 @@ export class OverworldScene extends Phaser.Scene {
         this.panelOpen = open;
       },
       goToGame: (sceneKey) => this.goToGame(sceneKey)
+    };
+  }
+
+  /** The Magazine corner button's handler - same named-seam shape as openQuickplayPanel() above; the panel itself lives in ui/MagazinePanel.ts. */
+  private openMagazinePanel() {
+    openMagazinePanel(this.magazinePanelHost);
+  }
+
+  /** Everything ui/MagazinePanel.ts needs back from this scene - just the modal flag, since this panel is read-only and never changes scene. */
+  private get magazinePanelHost(): MagazinePanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      }
     };
   }
 

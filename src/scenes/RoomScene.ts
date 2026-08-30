@@ -11,6 +11,14 @@ import { FurnitureSlotId } from "../furnitureCatalog";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { playSfx, playMusic } from "../ui/SoundManager";
 import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
+import {
+  ROOM_TILE,
+  ROOM_COLS,
+  ROOM_ROWS,
+  FURNITURE_SLOT_POSITIONS,
+  buildFloorTiles,
+  buildFurnitureImages
+} from "../roomRenderer";
 
 /**
  * The Player Room (roadmap/player-room-v2) - a private space reached by
@@ -57,9 +65,13 @@ import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/T
  * fresh object (`scene: this`) instead of `this` itself.
  */
 
-const TILE = 16;
-const ROOM_COLS = 50;
-const ROOM_ROWS = 38;
+// TILE/ROOM_COLS/ROOM_ROWS/FURNITURE_SLOT_POSITIONS moved to
+// ../roomRenderer.ts (roadmap/magazine) so a read-only viewer of another
+// player's room (ui/MagazinePanel.ts) draws from the exact same grid/slot
+// data this scene does - see that file's header. `TILE` keeps its short
+// local name here since it's used throughout this file's own movement/door
+// math below.
+const TILE = ROOM_TILE;
 const PLAYER_SPEED = 160;
 const INTERACT_RADIUS = 56;
 
@@ -71,25 +83,6 @@ const DOOR_COL = 25;
 const DOOR_ROW = 33;
 const SPAWN_COL = 25;
 const SPAWN_ROW = 28;
-
-/**
- * World pixel position for each furniture slot (roadmap/room-furniture) -
- * the "stable data, not array order" identity furnitureCatalog.ts's header
- * calls for. Four sensible spots, picked to stay clear of the spawn(25,28)
- * -to-door(25,33) walking corridor (a straight vertical line around
- * x=400): two against the side walls at mid-height, one in the top-left
- * corner, one off to the side of the door rather than in front of it.
- * Furniture is purely decorative (see buildFurniture) so nothing here
- * needs to double as a walkable-clearance box, but keeping these off the
- * corridor still matters for how the room READS - a piece the player has
- * to walk through would look broken even without a collider.
- */
-const FURNITURE_SLOT_POSITIONS: Record<FurnitureSlotId, { x: number; y: number }> = {
-  WALL_LEFT: { x: 6 * TILE, y: 19 * TILE },
-  WALL_RIGHT: { x: 44 * TILE, y: 19 * TILE },
-  CORNER: { x: 6 * TILE, y: 6 * TILE },
-  BY_DOOR: { x: 39 * TILE, y: 30 * TILE }
-};
 
 export class RoomScene extends Phaser.Scene {
   private player!: Phaser.Physics.Arcade.Sprite;
@@ -271,13 +264,9 @@ export class RoomScene extends Phaser.Scene {
     this.layeredCharacter?.sync();
   }
 
+  /** Delegates to ../roomRenderer.ts's buildFloorTiles - see that file's header on why this is now shared with the read-only Magazine viewer. */
   private buildFloor() {
-    const key = gameState.roomPieceInSlot("FLOORING");
-    for (let x = 0; x < ROOM_COLS; x++) {
-      for (let y = 0; y < ROOM_ROWS; y++) {
-        this.floorTiles.push(this.add.image(x * TILE + TILE / 2, y * TILE + TILE / 2, key));
-      }
-    }
+    this.floorTiles = buildFloorTiles(this, gameState.roomPieceInSlot("FLOORING"));
   }
 
   private buildWalls() {
@@ -294,28 +283,23 @@ export class RoomScene extends Phaser.Scene {
   }
 
   /**
-   * One image per FURNITURE_SLOT_POSITIONS entry, created once (hidden if
-   * the slot is empty) and repainted in place by applyFurniture - same
-   * "build the object graph once, only swap textures/visibility later"
-   * shape buildFloor/buildWalls already use, so buy/place/remove never
-   * needs a destroy/rebuild.
+   * Delegates to ../roomRenderer.ts's buildFurnitureImages - one image per
+   * FURNITURE_SLOT_POSITIONS entry (now defined there, see its header),
+   * created once (hidden if the slot is empty) and repainted in place by
+   * applyFurniture - same "build the object graph once, only swap
+   * textures/visibility later" shape buildFloor/buildWalls already use, so
+   * buy/place/remove never needs a destroy/rebuild.
    *
    * No physics body: these are purely decorative, not solid. All four
    * slot positions were picked to sit off the spawn-to-door walking
-   * corridor (see FURNITURE_SLOT_POSITIONS's own comment), so there's
-   * nothing here a collider would actually be protecting the player from -
-   * adding one would only be extra bookkeeping (staticGroup membership,
-   * refreshBody() on every place/remove) for a piece the player was never
-   * going to walk into in the first place.
+   * corridor (see roomRenderer.ts's FURNITURE_SLOT_POSITIONS comment), so
+   * there's nothing here a collider would actually be protecting the
+   * player from - adding one would only be extra bookkeeping (staticGroup
+   * membership, refreshBody() on every place/remove) for a piece the
+   * player was never going to walk into in the first place.
    */
   private buildFurniture() {
-    for (const slotDef of Object.keys(FURNITURE_SLOT_POSITIONS) as FurnitureSlotId[]) {
-      const { x, y } = FURNITURE_SLOT_POSITIONS[slotDef];
-      const pieceId = gameState.furniturePieceInSlot(slotDef);
-      const image = this.add.image(x, y, pieceId ?? "furniture_armchair").setOrigin(0.5, 0.9);
-      image.setVisible(pieceId !== null);
-      this.furnitureSprites[slotDef] = image;
-    }
+    this.furnitureSprites = buildFurnitureImages(this, gameState.placedFurniture);
   }
 
   private updateHud() {

@@ -703,3 +703,26 @@ export interface LevelMinigameAlreadyClaimedError {
   error: string;
   code: "ALREADY_CLAIMED";
 }
+
+// ---- The Magazine (roadmap/magazine) ----
+// Mirrors server/src/economy/magazine.ts. Read-only: a room lookalike
+// (wallpaper/flooring/furniture) belonging to a random-but-daily-stable
+// set of other players, plus their usernames - and deliberately nothing
+// else (no balances, no email, no progression - see that file's own
+// MagazineRoomEntry doc comment).
+
+/** One player's room, exactly as much as ui/MagazinePanel.ts needs to draw it. */
+export interface MagazineRoomEntry {
+  username: string;
+  wallpaperId: string;
+  flooringId: string;
+  furniture: Partial<Record<FurnitureSlotId, string>>;
+}
+
+/** GET /magazine */
+export interface MagazineResponse {
+  /** UTC calendar date this selection is stable for - changes at UTC midnight, same clock progression's daily challenges use. */
+  dateKey: string;
+  /** 0-5 rooms - fewer than 5 if there aren't yet 5 decorated rooms to show (see server's isRoomWorthShowing); never padded, never fabricated. */
+  rooms: MagazineRoomEntry[];
+}

@@ -221,7 +221,8 @@ import type {
   ClaimChallengeResponse,
   ProgressionResponse,
   LevelMinigameStartResponse,
-  LevelMinigameStopResponse
+  LevelMinigameStopResponse,
+  MagazineResponse
 } from "./types";
 
 export function signup(username: string, password: string, email?: string): Promise<SignupResponse> {
@@ -477,4 +478,11 @@ export function startLevelMinigame(): Promise<LevelMinigameStartResponse> {
 /** Stops the marker and pays out. Idempotent server-side (a second call for the same sessionId returns 409 ALREADY_CLAIMED rather than paying twice). */
 export function stopLevelMinigame(sessionId: string): Promise<LevelMinigameStopResponse> {
   return request<LevelMinigameStopResponse>("/minigame/levelup/stop", { method: "POST", body: { sessionId } });
+}
+
+// ---- The Magazine (roadmap/magazine) ----
+
+/** Today's five (or fewer) player rooms - stable for the whole UTC day, a new set the next (see server/src/economy/magazine.ts). */
+export function getMagazine(): Promise<MagazineResponse> {
+  return request<MagazineResponse>("/magazine", { method: "GET" });
 }
