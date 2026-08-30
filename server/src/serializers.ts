@@ -11,6 +11,8 @@ import { listOwnedPieces, getEquippedWardrobe } from "./economy/wardrobe";
 import { DEFAULT_BODY_PIECE_ID, WardrobeSlot } from "./wardrobeCatalog";
 import { listOwnedPieces as listOwnedRoomPieces, getEquippedRoom } from "./economy/room";
 import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, RoomSlot } from "./roomCatalog";
+import { listOwnedFurniture, getPlacedFurniture } from "./economy/furniture";
+import { FurnitureSlotId } from "./furnitureCatalog";
 import { listOwnedItems, getEquippedItem } from "./economy/itemShop";
 import { getProgressionForDisplay } from "./progression/progress";
 import { prisma } from "./db";
@@ -35,12 +37,12 @@ export interface MeResponse {
     equipped: Partial<Record<WardrobeSlot, string>>;
   };
   /**
-   * The Player Room's decor (see economy/room.ts) - wallpaper + flooring
-   * only in this slice (furniture is a planned follow-up, see
-   * roomCatalog.ts's header). `owned` always contains both free defaults;
-   * `equipped` always has a WALLPAPER and FLOORING entry, so a client can
-   * render the room from this payload alone with no special-casing for a
-   * brand-new account.
+   * The Player Room's wallpaper + flooring (see economy/room.ts) -
+   * furniture is a separate `furniture` field below, a different enough
+   * shape to not live in this one (see furnitureCatalog.ts's header).
+   * `owned` always contains both free defaults; `equipped` always has a
+   * WALLPAPER and FLOORING entry, so a client can render the room from
+   * this payload alone with no special-casing for a brand-new account.
    *
    * Read defensively (see getRoomState's doc comment) - never breaks the
    * rest of this response if the room tables aren't migrated yet on this
@@ -49,6 +51,22 @@ export interface MeResponse {
   room: {
     owned: string[];
     equipped: Partial<Record<RoomSlot, string>>;
+  };
+  /**
+   * The Player Room's furniture (see economy/furniture.ts) - the third
+   * decor category, added alongside wallpaper/flooring above but
+   * deliberately a different shape: `owned` has no free defaults (there
+   * are none for furniture) and `placed` only has an entry for slots that
+   * are actually occupied - a missing key means genuinely empty, not "fell
+   * back to a default" the way `room.equipped` works.
+   *
+   * Read defensively (see getFurnitureState's doc comment) - never breaks
+   * the rest of this response if the furniture tables aren't migrated yet
+   * on this environment.
+   */
+  furniture: {
+    owned: string[];
+    placed: Partial<Record<FurnitureSlotId, string>>;
   };
   /** Accessory/pet ids owned - see economy/itemShop.ts. Read defensively (see getItemShopState's doc comment) - never breaks the rest of this response if the items_owned/equipped_items tables aren't migrated yet on this environment. */
   ownedItems: string[];
@@ -196,12 +214,34 @@ async function getRoomState(userId: string): Promise<MeResponse["room"]> {
   }
 }
 
+/**
+ * Same isolation as getRoomState above, same reason: furniture_owned/
+ * furniture_placed are a brand-new migration that won't exist on any
+ * environment until someone runs `railway run npx prisma migrate deploy`
+ * against it. The degraded fallback reports nothing owned and every slot
+ * empty - unlike getRoomState's fallback, which reaches for a free
+ * default, there IS no default here to fall back to, so "nothing" is
+ * already the correct degraded state, not a compromise.
+ */
+async function getFurnitureState(userId: string): Promise<MeResponse["furniture"]> {
+  try {
+    const [owned, placed] = await Promise.all([
+      listOwnedFurniture(prisma, userId),
+      getPlacedFurniture(prisma, userId)
+    ]);
+    return { owned, placed };
+  } catch {
+    return { owned: [], placed: {} };
+  }
+}
+
 export async function serializeMe(tx: TxClient, userId: string, username: string): Promise<MeResponse> {
   const [
     goldCoins,
     tickets,
     wardrobe,
     room,
+    furniture,
     itemShopState,
     lastPosition,
     attendantClaim,
@@ -213,6 +253,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     getBalance(tx, userId, "TICKETS"),
     getWardrobeState(userId),
     getRoomState(userId),
+    getFurnitureState(userId),
     getItemShopState(userId),
     tx.lastPosition.findUnique({ where: { userId } }),
     tx.attendantClaim.findUnique({ where: { userId } }),
@@ -227,6 +268,7 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     tickets,
     wardrobe,
     room,
+    furniture,
     ownedItems: itemShopState.ownedItems,
     equippedAccessory: itemShopState.equippedAccessory,
     equippedPet: itemShopState.equippedPet,

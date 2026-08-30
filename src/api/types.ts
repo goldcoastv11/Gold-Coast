@@ -9,11 +9,13 @@
 
 import type { WardrobeSlot } from "../wardrobeCatalog";
 import type { RoomSlot } from "../roomCatalog";
+import type { FurnitureSlotId } from "../furnitureCatalog";
 
 // Re-exported so api/client.ts and its callers can name a slot without also
 // importing the catalog - the catalog is the definition, this is the wire type.
 export type { WardrobeSlot };
 export type { RoomSlot };
+export type { FurnitureSlotId };
 
 /** GET /me, and embedded as `user` in most economy/auth responses. */
 export interface MeResponse {
@@ -40,14 +42,25 @@ export interface MeResponse {
     equipped: Partial<Record<WardrobeSlot, string>>;
   };
   /**
-   * The Player Room's decor (see server/src/economy/room.ts) - wallpaper +
-   * flooring only so far (furniture is a planned follow-up). `owned`
-   * always contains both free defaults; `equipped` always has a WALLPAPER
-   * and FLOORING entry.
+   * The Player Room's wallpaper + flooring (see
+   * server/src/economy/room.ts) - furniture is a separate `furniture`
+   * field below, a different enough shape to not live in this one (see
+   * furnitureCatalog.ts's header). `owned` always contains both free
+   * defaults; `equipped` always has a WALLPAPER and FLOORING entry.
    */
   room: {
     owned: string[];
     equipped: Partial<Record<RoomSlot, string>>;
+  };
+  /**
+   * The Player Room's furniture (see server/src/economy/furniture.ts) -
+   * the third decor category. Unlike `room` above, `owned` has no free
+   * defaults and `placed` only has a key for slots actually occupied - a
+   * missing key means genuinely empty, not "fell back to a default."
+   */
+  furniture: {
+    owned: string[];
+    placed: Partial<Record<FurnitureSlotId, string>>;
   };
   /** Accessory/pet ids owned (see server/src/economy/itemShop.ts). */
   ownedItems: string[];
@@ -153,6 +166,43 @@ export interface BuyRoomPieceResponse {
 /** POST /room/equip */
 export interface EquipRoomPieceResponse {
   piece: RoomPieceDto;
+  user: MeResponse;
+}
+
+/** One furniture piece as the server describes it (server/src/furnitureCatalog.ts). No `slot` - unlike a room piece, a furniture piece isn't tied to one category, it can go in any slot. */
+export interface FurniturePieceDto {
+  id: string;
+  name: string;
+  price: number;
+}
+
+/** One fixed placement position (server/src/furnitureCatalog.ts). */
+export interface FurnitureSlotDto {
+  id: FurnitureSlotId;
+  name: string;
+}
+
+/** GET /furniture/catalog */
+export interface FurnitureCatalogResponse {
+  slots: FurnitureSlotDto[];
+  pieces: FurniturePieceDto[];
+}
+
+/** POST /furniture/buy - does NOT place the piece, see server/src/economy/furniture.ts's header. */
+export interface BuyFurnitureResponse {
+  piece: FurniturePieceDto;
+  user: MeResponse;
+}
+
+/** POST /furniture/place */
+export interface PlaceFurnitureResponse {
+  piece: FurniturePieceDto;
+  slot: FurnitureSlotId;
+  user: MeResponse;
+}
+
+/** POST /furniture/remove */
+export interface RemoveFurnitureResponse {
   user: MeResponse;
 }
 

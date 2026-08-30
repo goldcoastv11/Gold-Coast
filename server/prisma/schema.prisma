@@ -72,6 +72,8 @@ model User {
   equippedWardrobe    EquippedWardrobe[]
   roomOwned           RoomOwned[]
   roomEquipped        RoomEquipped[]
+  furnitureOwned      FurnitureOwned[]
+  furniturePlaced     FurniturePlaced[]
   itemsOwned          ItemOwned[]
   equippedItems       EquippedItem[]
   lastPosition        LastPosition?
@@ -314,10 +316,13 @@ model EquippedWardrobe {
 // BODY, not like the wardrobe's five optional slots) - a room always has
 // SOME wallpaper and SOME floor, there is no "undecorated" state to
 // represent, so there is no unequip route/table entry to match.
-// FURNITURE is a third, later slot (see src/roomCatalog.ts's header) -
-// deliberately not added here yet: furniture is placed into fixed slots
-// rather than worn, which is a different shape (a slot INDEX, not just a
-// category) and is scoped as its own follow-up migration.
+// FURNITURE (roadmap/room-furniture) is the third decor category - see
+// FurnitureSlot/FurnitureOwned/FurniturePlaced below, right after
+// RoomEquipped. It's deliberately NOT folded into RoomSlot/RoomOwned/
+// RoomEquipped above: furniture is placed into fixed position slots rather
+// than worn per-category, and unlike WALLPAPER/FLOORING a furniture slot is
+// normally EMPTY (no free default, no always-decorated invariant) - a
+// genuinely different shape, not just a third value added to this enum.
 enum RoomSlot {
   WALLPAPER
   FLOORING
@@ -347,6 +352,54 @@ model RoomEquipped {
 
   @@id([userId, slot])
   @@map("room_equipped")
+}
+
+// Furniture (roadmap/room-furniture) - the Player Room's third decor
+// category, placed into a handful of fixed POSITION slots rather than worn
+// per-category. Each value is a stable, named position ("against the left
+// wall", "in the corner", etc, see src/furnitureCatalog.ts for exactly
+// where) - a plain array index would silently reassign every existing
+// placement's meaning the moment a slot was inserted or reordered; a named
+// enum value can't. Appending a new value here is safe (existing rows keep
+// meaning what they always meant); reordering or removing one is not.
+enum FurnitureSlot {
+  WALL_LEFT
+  WALL_RIGHT
+  CORNER
+  BY_DOOR
+}
+
+// One row per furniture piece a player owns. Mirrors RoomOwned's shape
+// exactly - owning a piece and placing it are two separate actions here
+// though (see FurniturePlaced below), unlike RoomOwned's pieces which are
+// always also equipped: a chair sitting in inventory, never placed, is a
+// normal, expected state, not an edge case.
+model FurnitureOwned {
+  userId  String @map("user_id")
+  user    User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pieceId String @map("piece_id")
+
+  @@id([userId, pieceId])
+  @@map("furniture_owned")
+}
+
+// One row per (user, slot) currently holding a piece. Absence of a row
+// means the slot is EMPTY - unlike RoomEquipped, there is no free default
+// to fall back to; "nothing here" is the normal starting state for every
+// slot and stays valid forever (mirrors EquippedItem's per-category
+// "equipped or not" shape, generalized from category to a fixed position).
+// A single piece can only ever occupy one slot at a time - the economy
+// layer (server/src/economy/furniture.ts) is responsible for removing any
+// other row for the same (user, piece) before writing a new placement, so
+// this table can't end up with the same pieceId in two slots for one user.
+model FurniturePlaced {
+  userId  String        @map("user_id")
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  slot    FurnitureSlot
+  pieceId String        @map("piece_id")
+
+  @@id([userId, slot])
+  @@map("furniture_placed")
 }
 
 // Cosmetic equip-slot categories beyond skins (see server/src/itemCatalog.ts

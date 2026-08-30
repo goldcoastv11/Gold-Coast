@@ -80,6 +80,21 @@ export const EVENTS = {
    */
   ROOM_DECOR_PURCHASED: "room.decor_purchased",
   /**
+   * A Player Room furniture purchase (see src/furnitureCatalog.ts). Props:
+   * { pieceId, price }. No `slot` prop the way ROOM_DECOR_PURCHASED has one
+   * - buying furniture doesn't place it anywhere (see
+   * server/src/economy/furniture.ts's header), so there's no slot yet at
+   * purchase time.
+   */
+  FURNITURE_PURCHASED: "room.furniture_purchased",
+  /**
+   * A furniture piece was placed into (or moved to) a slot, or removed
+   * from one. Props: { pieceId, slot } for a place, { slot } for a
+   * remove - kept as one event rather than two since "where did this piece
+   * end up" is the same question either way.
+   */
+  FURNITURE_PLACED: "room.furniture_placed",
+  /**
    * A completed challenge's reward was claimed. Props: { challengeId,
    * period, rewardGc, rewardXp } - all catalog facts, nothing a player
    * typed. This is the "does the challenge system actually bring people

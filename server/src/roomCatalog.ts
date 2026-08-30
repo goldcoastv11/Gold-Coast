@@ -5,12 +5,14 @@
  *
  * The founder asked for exiting the casino floor to lead to a private
  * Room, decorated with wallpaper/flooring/furniture bought with GC. This
- * slice ships the Room plus its first two decor categories - wallpaper and
- * flooring. FURNITURE is intentionally not in this file yet: the founder
- * approved fixed placement SLOTS (not free drag-and-drop) for furniture,
- * which is a different shape (a slot INDEX per placed item, not just "one
- * piece per category") and is scoped as its own follow-up rather than
- * bolted on here half-finished.
+ * file covers wallpaper and flooring only. Furniture (roadmap/
+ * room-furniture) lives in its own file, furnitureCatalog.ts - deliberately
+ * NOT a third value in RoomSlot below: the founder approved fixed
+ * placement SLOTS (not free drag-and-drop) for furniture, which is a
+ * different shape (a slot INDEX per placed item, not just "one piece per
+ * category," and no free default/always-decorated invariant) than
+ * WALLPAPER/FLOORING. See furnitureCatalog.ts's header for the full
+ * comparison.
  *
  * ## Why this mirrors wardrobeCatalog.ts almost exactly
  *
@@ -31,7 +33,7 @@
  * look like); the server copy is what's actually charged and persisted.
  */
 
-/** The two decor categories this slice covers. FURNITURE is a planned third slot - see this file's header. */
+/** The two decor categories this slice covers. Furniture is a separate, third category - see this file's header and furnitureCatalog.ts. */
 export type RoomSlot = "WALLPAPER" | "FLOORING";
 
 export interface RoomSlotDef {

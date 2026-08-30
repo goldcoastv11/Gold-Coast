@@ -255,8 +255,38 @@ full suite (46/46, includes economy's new tests for both fixes), ran
       local-only.
 - [ ] Walking to the Room's own door and pressing E returns to the Overworld
       at the same spot the player left it from.
-- [ ] No furniture/placement UI exists yet in this slice - that's expected,
-      not a regression (see the roadmap doc / PR description for scope).
+
+## Player Room furniture (`RoomScene`, `ui/FurniturePanel.ts`, roadmap/room-furniture)
+
+- [ ] The Room starts with all four furniture spots empty on a brand-new
+      account - this is intentional (furniture has no free default, unlike
+      wallpaper/flooring - see furnitureCatalog.ts's header).
+- [ ] "🪑 Furniture" (stacked under "🎨 Decorate") opens a picker listing the
+      four spots (Left Wall, Right Wall, Corner, By the Door) and what, if
+      anything, is in each.
+- [ ] Tapping a spot opens the shared piece list (Armchair, Floor Lamp,
+      Bookshelf, Potted Plant, Side Table). Buying an unowned piece deducts
+      Gold Coins and adds it to inventory - it does NOT appear in the room
+      yet (this is deliberate, unlike wallpaper/flooring's buy-applies-
+      immediately behavior - see economy/furniture.ts's header).
+- [ ] After buying, the same piece's row now shows "Place" instead of
+      "Buy"; tapping it makes the piece appear in the room at that spot
+      without a scene reload.
+- [ ] Placing an owned piece into a spot that already has something in it
+      replaces the occupant - the replaced piece stays owned (visible again
+      next time its row is opened) but disappears from the room.
+- [ ] Placing an already-placed piece into a DIFFERENT spot moves it - it
+      disappears from its old spot and appears at the new one, never both.
+- [ ] "Remove from this spot" (only shown when the spot is occupied) clears
+      it back to empty - the piece stays owned.
+- [ ] An unaffordable piece's Buy button is disabled/shows the right price;
+      attempting it anyway (e.g. two tabs) surfaces "Not enough Gold Coins."
+      rather than silently charging.
+- [ ] Reloading the page (or logging out and back in) keeps whatever was
+      placed where - this is server-persisted, not local-only.
+- [ ] Furniture is purely decorative - walking through a placed piece's
+      position does not block movement (see RoomScene.ts's buildFurniture
+      comment on why collision was deliberately skipped).
 
 ## Bet control (shared across all games)
 

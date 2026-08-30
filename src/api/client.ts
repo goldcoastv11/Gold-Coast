@@ -176,6 +176,10 @@ import type {
   WardrobeSlot,
   BuyRoomPieceResponse,
   EquipRoomPieceResponse,
+  FurnitureSlotId,
+  BuyFurnitureResponse,
+  PlaceFurnitureResponse,
+  RemoveFurnitureResponse,
   BuyItemResponse,
   EquipItemResponse,
   UnequipItemResponse,
@@ -265,6 +269,26 @@ export function buyRoomPiece(pieceId: string): Promise<BuyRoomPieceResponse> {
 
 export function equipRoomPiece(pieceId: string): Promise<EquipRoomPieceResponse> {
   return request<EquipRoomPieceResponse>("/room/equip", { method: "POST", body: { pieceId } });
+}
+
+// ---- Player Room furniture (fixed placement slots - see src/furnitureCatalog.ts) ----
+// No client-side getFurnitureCatalog() - same reasoning as the room's own
+// comment above: the catalogue is static data the client already has
+// bundled.
+
+/** Buys a piece with GC. Does NOT place it anywhere - see server/src/economy/furniture.ts's header on why buying and placing are separate actions here. */
+export function buyFurniturePiece(pieceId: string): Promise<BuyFurnitureResponse> {
+  return request<BuyFurnitureResponse>("/furniture/buy", { method: "POST", body: { pieceId } });
+}
+
+/** Places an owned piece into `slot`, replacing whatever was there (which stays owned, just unplaced) and moving the piece out of any other slot it previously occupied. */
+export function placeFurniturePiece(pieceId: string, slot: FurnitureSlotId): Promise<PlaceFurnitureResponse> {
+  return request<PlaceFurnitureResponse>("/furniture/place", { method: "POST", body: { pieceId, slot } });
+}
+
+/** Clears whatever's placed in `slot`, if anything - idempotent. */
+export function removeFurniturePiece(slot: FurnitureSlotId): Promise<RemoveFurnitureResponse> {
+  return request<RemoveFurnitureResponse>("/furniture/remove", { method: "POST", body: { slot } });
 }
 
 // ---- Items (accessories/pets) ----
