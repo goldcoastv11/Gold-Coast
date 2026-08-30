@@ -10,13 +10,14 @@ import { minesMultiplier, MINES_COUNT, MINES_TOTAL_TILES } from "../src/games/mi
 beforeEach(resetDb);
 
 /**
- * In the arcade-token model, GC is spent on every play regardless of
- * win/lose (wins pay TICKETS, not GC) - so a fixed-size trial loop
- * genuinely can and does exhaust a fresh signup's finite GC balance well
- * before finishing, the same class of bug games5.test.ts's `topUpGold`
- * already guards against for Triple Chance. Seed a bankroll via the real
- * ledger (ADJUST_GC) so a long probabilistic trial loop can actually run
- * to completion.
+ * GC is spent on every play regardless of win/lose, and (as of the
+ * 2026-08-29 GC-only economy restructure) a win pays GC straight back too -
+ * but a loss still nets out negative, so a fixed-size trial loop genuinely
+ * can and does exhaust a fresh signup's finite GC balance well before
+ * finishing, the same class of bug games5.test.ts's `topUpGold` already
+ * guards against for Triple Chance. Seed a bankroll via the real ledger
+ * (ADJUST_GC) so a long probabilistic trial loop can actually run to
+ * completion.
  */
 async function topUpGold(username: string, amount: number): Promise<void> {
   const user = await prisma.user.findUniqueOrThrow({ where: { username } });
@@ -24,7 +25,7 @@ async function topUpGold(username: string, amount: number): Promise<void> {
 }
 
 describe("POST /games/dice/play (single-shot reference)", () => {
-  it("resolves a round in one request: always debits GC, credits TICKETS only on a win, matches the published multiplier formula", async () => {
+  it("resolves a round in one request: always debits the GC wager, credits GC back only on a win, matches the published multiplier formula", async () => {
     const { token } = await signupUser();
     const before = await request(app).get("/me").set(authed(token));
 
@@ -39,17 +40,20 @@ describe("POST /games/dice/play (single-shot reference)", () => {
     expect(res.body.result.roll).toBeGreaterThanOrEqual(0);
     expect(res.body.result.roll).toBeLessThanOrEqual(99);
 
-    // The GC wager is always spent, win or lose - it's a play token, not a stake.
-    expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
+    // TICKETS is retired - never moves, regardless of outcome.
+    expect(res.body.user.tickets).toBe(before.body.tickets);
 
     const won = res.body.result.roll < 50;
     expect(res.body.result.won).toBe(won);
     if (won) {
       expect(res.body.result.payout).toBe(Math.round(10 * diceMultiplier(50)));
-      expect(res.body.user.tickets).toBe(before.body.tickets + res.body.result.payout);
+      // The GC wager is always spent first, then a win pays GC straight
+      // back - net effect is `-bet +payout`, not just `-bet`.
+      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
     } else {
       expect(res.body.result.payout).toBe(0);
-      expect(res.body.user.tickets).toBe(before.body.tickets);
+      // A loss nets out to just the wager - it's a play token, not a stake.
+      expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10);
     }
   });
 
@@ -74,16 +78,19 @@ describe("POST /games/dice/play (single-shot reference)", () => {
   });
 
   it("rejects a bet the player can't afford in GC", async () => {
-    const { token } = await signupUser();
+    const { token, username } = await signupUser();
 
-    // Signup GC (500/1000/2000, always a multiple of 5) always spends
-    // exactly `betAmount` GC on the wager regardless of win/lose (the
-    // arcade-token model), so repeatedly betting the minimum drains the
-    // balance to exactly 0 - then one more bet must be rejected.
-    let last: request.Response;
-    do {
-      last = await request(app).post("/games/dice/play").set(authed(token)).send({ betAmount: 5, target: 50 });
-    } while (last.status === 200 && last.body.user.goldCoins > 0);
+    // Drain to exactly 0 through the real ledger rather than by betting it
+    // down. Under the single-currency model a game pays GC back on a win, so
+    // betting no longer monotonically reduces the balance - the old
+    // drain-by-betting loop could run indefinitely (and did, timing out at
+    // 30s) because wins kept topping it back up. ADJUST_GC is the sanctioned
+    // test-only balance path, same as games5.test.ts's topUpGold.
+    const user = await prisma.user.findUniqueOrThrow({ where: { username } });
+    const before = await request(app).get("/me").set(authed(token));
+    await prisma.$transaction((tx) =>
+      applyTransaction(tx, user.id, "GC", "ADJUST_GC", -before.body.goldCoins, { reason: "test: drain to zero" })
+    );
 
     const res = await request(app).post("/games/dice/play").set(authed(token)).send({ betAmount: 5, target: 50 });
     expect(res.status).toBe(400);
@@ -175,9 +182,9 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(hit!.status).toBe(200);
     expect(hit!.body.minePositions).toHaveLength(MINES_COUNT);
     expect(hit!.body.payout).toBe(0);
-    // Bet was already debited (GC) at start and never refunded - net loss of the full bet, no TICKETS.
+    // Bet was already debited (GC) at start and never refunded - net loss of the full bet, no payout.
     expect(hit!.body.user.goldCoins).toBe(before.body.goldCoins - 10);
-    expect(hit!.body.user.tickets).toBe(before.body.tickets);
+    expect(hit!.body.user.tickets).toBe(before.body.tickets); // TICKETS is retired - never moves
 
     // Round is over - a further pick against the same roundId is rejected.
     const after = await request(app).post("/games/mines/pick").set(authed(token)).send({ roundId, tileIndex: 0 });
@@ -185,7 +192,7 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(after.body.code).toBe("NO_ACTIVE_ROUND");
   });
 
-  it("cash-out after at least one safe pick credits TICKETS = bet * the exact published multiplier, and closes the round", async () => {
+  it("cash-out after at least one safe pick credits GC = bet * the exact published multiplier, and closes the round", async () => {
     const { token } = await signupUser();
 
     // Same "restart on a mine, don't keep polling the now-closed round"
@@ -210,9 +217,10 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(cashout.body.multiplier).toBe(minesMultiplier(1));
     expect(cashout.body.payout).toBe(Math.round(40 * minesMultiplier(1)));
     expect(cashout.body.minePositions).toHaveLength(MINES_COUNT);
-    // Cash-out payout is TICKETS, not GC - GC was already spent at start().
-    expect(cashout.body.user.goldCoins).toBe(preCashout.body.goldCoins);
-    expect(cashout.body.user.tickets).toBe(preCashout.body.tickets + cashout.body.payout);
+    // Cash-out payout is GC, credited on top of whatever GC was already
+    // spent at start() - TICKETS is retired and never moves.
+    expect(cashout.body.user.goldCoins).toBe(preCashout.body.goldCoins + cashout.body.payout);
+    expect(cashout.body.user.tickets).toBe(preCashout.body.tickets);
 
     // Round is closed - a second cash-out attempt is rejected, not double-paid.
     const again = await request(app).post("/games/mines/cashout").set(authed(token)).send({ roundId });

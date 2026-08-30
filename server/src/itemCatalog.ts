@@ -5,8 +5,9 @@
  * source of truth. Keep the two in sync by hand - ids/prices/render fields
  * below are copied verbatim).
  *
- * Two categories beyond skins, both TICKETS-only (repo-root CLAUDE.md's
- * economy rule) and both "wear nothing" is a valid state, unlike a skin:
+ * Two categories beyond skins, both GC-only (repo-root CLAUDE.md's
+ * economy rule - TICKETS is retired) and both "wear nothing" is a valid
+ * state, unlike a skin:
  *
  * - ACCESSORY: a floating emoji badge worn just above the player's head in
  *   the Overworld - always faces the camera, no per-direction art needed.
@@ -27,7 +28,7 @@ export interface ItemDef {
   id: string;
   category: ItemCategory;
   name: string;
-  price: number; // TICKETS
+  price: number; // Gold Coins
   /** ACCESSORY only - the emoji rendered as a floating badge above the head. */
   emoji?: string;
   /** PET only - an already-loaded Kenney character spritesheet key (see BootScene.ts) shown at a smaller scale, walking via that key's existing `${textureKey-without-_sheet}_walk_${dir}` anims. */

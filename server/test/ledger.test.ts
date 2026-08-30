@@ -52,31 +52,50 @@ describe("applyTransaction (core ledger)", () => {
 
   it("keeps GC and TICKETS as fully separate ledgers", async () => {
     const userId = await makeUser(1000, 0);
+    // TICKETS_RETIRED is the one legal TICKETS transaction left (see the
+    // retirement tests below) - debiting 1 from a 0 balance still hits the
+    // ordinary InsufficientBalanceError path, same as any other currency.
     await expect(
-      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "SKIN_PURCHASE_TICKETS", -1))
+      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "TICKETS_RETIRED", -1))
     ).rejects.toThrow(InsufficientBalanceError);
     expect(await prisma.$transaction((t) => getBalance(t, userId, "GC"))).toBe(1000);
   });
 
-  it("rejects crediting TICKETS via anything other than GAME_WIN_TICKETS", async () => {
+  // ---------------------------------------------------------------------
+  // TICKETS is retired (2026-08-29 GC-only economy restructure). These
+  // replace the old "TICKETS has exactly one sanctioned credit path" tests -
+  // now nothing may touch TICKETS at all, except the one-time balance
+  // zero-out.
+  // ---------------------------------------------------------------------
+
+  it("rejects crediting TICKETS via GAME_WIN_TICKETS - that path is retired too, not just every other type", async () => {
     const userId = await makeUser(0, 100);
     await expect(
-      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "ADJUST_GC" as never, 50))
-    ).rejects.toThrow(/TICKETS may only be credited via GAME_WIN_TICKETS/);
-    // Balance untouched.
+      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "GAME_WIN_TICKETS", 50))
+    ).rejects.toThrow(/TICKETS is retired/);
     expect(await prisma.$transaction((t) => getBalance(t, userId, "TICKETS"))).toBe(100);
   });
 
-  it("allows crediting TICKETS via GAME_WIN_TICKETS - the one sanctioned path", async () => {
-    const userId = await makeUser(0, 0);
-    const tx = await prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "GAME_WIN_TICKETS", 250));
-    expect(tx.balanceAfter).toBe(250);
+  it("rejects debiting TICKETS via SKIN_PURCHASE_TICKETS - the old purchase path is retired too", async () => {
+    const userId = await makeUser(0, 100);
+    await expect(
+      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "SKIN_PURCHASE_TICKETS", -30))
+    ).rejects.toThrow(/TICKETS is retired/);
+    expect(await prisma.$transaction((t) => getBalance(t, userId, "TICKETS"))).toBe(100);
   });
 
-  it("allows debiting TICKETS via SKIN_PURCHASE_TICKETS", async () => {
+  it("allows the one-time TICKETS_RETIRED debit to zero a balance", async () => {
+    const userId = await makeUser(0, 250);
+    const tx = await prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "TICKETS_RETIRED", -250));
+    expect(tx.balanceAfter).toBe(0);
+  });
+
+  it("rejects a positive (crediting) TICKETS_RETIRED amount - it may only ever zero out, never credit", async () => {
     const userId = await makeUser(0, 100);
-    const tx = await prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "SKIN_PURCHASE_TICKETS", -30));
-    expect(tx.balanceAfter).toBe(70);
+    await expect(
+      prisma.$transaction((t) => applyTransaction(t, userId, "TICKETS", "TICKETS_RETIRED", 50))
+    ).rejects.toThrow(/TICKETS_RETIRED may only debit/);
+    expect(await prisma.$transaction((t) => getBalance(t, userId, "TICKETS"))).toBe(100);
   });
 
   it("rejects a zero amount", async () => {

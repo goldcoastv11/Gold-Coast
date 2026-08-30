@@ -360,12 +360,12 @@ export class VideoPokerScene extends Phaser.Scene {
 
         if (res.payout > 0) {
           if (res.multiplier === 1) {
-            // A push still pays TICKETS = the GC bet amount (the GC wager
-            // itself was already spent at deal time) - no "bet returned" in
-            // this currency, just a payout.
-            this.messageText.setText(`${res.rank} - push! +${res.payout} Tickets`).setColor(Tokens.text.secondary);
+            // A push still pays out Gold Coins = the GC bet amount (the GC
+            // wager itself was already spent at deal time) - no "bet
+            // returned", just a payout.
+            this.messageText.setText(`${res.rank} - push! +${res.payout} Gold Coins`).setColor(Tokens.text.secondary);
           } else {
-            this.messageText.setText(`${res.rank}! +${res.payout} Tickets`).setColor(Tokens.text.accent);
+            this.messageText.setText(`${res.rank}! +${res.payout} Gold Coins`).setColor(Tokens.text.accent);
             popIn(this, this.messageText);
           }
           showWinCelebration(this, res.payout);
@@ -398,6 +398,6 @@ export class VideoPokerScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

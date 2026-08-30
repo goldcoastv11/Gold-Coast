@@ -1115,15 +1115,20 @@ router.post(
 // ---------------------------------------------------------------------
 // Triple Chance (#46, single-shot) - bonus round offered after every
 // shuffle-cup GC win (signup bonus, attendant claim). GC in, GC out - NOT
-// routed through games/shared.ts's settleSingleShotBet (that function
-// always pays TICKETS now, see its doc comment), because this round is
-// double-or-nothing on GC the player just received from the Coin Kiosk's
-// ad-gated shuffle-cup claim, not a "wager GC to win TICKETS" game round -
-// see games/triplechance.ts's header for the full mechanic/trust-boundary
-// writeup. betAmount intentionally uses its own bounds (not
-// games/shared.ts's BET_MIN/BET_MAX), since a wager here is a shuffle-cup
-// win (500-2000 GC to start) or a chained previous Triple Chance payout,
-// not a player-configured bet-slider amount.
+// routed through games/shared.ts's settleSingleShotBet, because this round
+// is double-or-nothing on GC the player just received from the Coin
+// Kiosk's ad-gated shuffle-cup claim, not a player-configured wager on an
+// independent game - see games/triplechance.ts's header for the full
+// mechanic/trust-boundary writeup. Every other game is ALSO GC-in/GC-out
+// now (2026-08-29 GC-only economy restructure - TICKETS is retired), so
+// Triple Chance is no longer economically special, but it stays on its own
+// direct ledger calls rather than being rewired through shared.ts: doing so
+// would also pull it through shared.ts's challenge/progress tracking, which
+// was deliberately scoped to exclude it, and changing that is a product
+// call, not a side effect of a currency migration. betAmount intentionally
+// uses its own bounds (not games/shared.ts's BET_MIN/BET_MAX), since a
+// wager here is a shuffle-cup win (500-2000 GC to start) or a chained
+// previous Triple Chance payout, not a player-configured bet-slider amount.
 // ---------------------------------------------------------------------
 
 const TripleChancePlaySchema = z.object({
@@ -1147,12 +1152,10 @@ router.post(
       await applyTransaction(tx, userId, "GC", "WAGER_GC", -betAmount, { game: "triplechance", won: result.won });
       if (result.payout > 0) {
         // PAYOUT_GC - a GC game payout, exactly what this is (double-or-
-        // nothing on GC just received from the Coin Kiosk). Not retired
-        // along with the rest of the SC-era types even though it's grouped
-        // with them in schema.prisma's enum ordering/comment - it's simply
-        // unused by the 14 GC-wager/TICKETS-payout games now that they go
-        // through GAME_WIN_TICKETS instead, but it's still the right type
-        // for this one GC-in/GC-out exception.
+        // nothing on GC just received from the Coin Kiosk). Distinct from
+        // GAME_WIN_GC (what the other 14 games' shared.ts helpers use) so
+        // Triple Chance's chained bonus-round payouts stay separable from a
+        // real game win in the ledger and in any metrics query.
         await applyTransaction(tx, userId, "GC", "PAYOUT_GC", result.payout, {
           game: "triplechance",
           won: result.won

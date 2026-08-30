@@ -1,14 +1,18 @@
 /**
- * Transaction ledger - the single source of truth for GC (Gold Coin) and
- * TICKETS balances, server-side.
+ * Transaction ledger - the single source of truth for GC (Gold Coin)
+ * balances, server-side.
  *
  * Mirrors casino-poc/src/economy/ledger.ts's rules exactly (see repo-root
- * CLAUDE.md, "arcade token" model):
- *   - GC (spend to play) and TICKETS (won from playing, spent in the Item
- *     Shop) are separate ledgers (balances.gold_coins / .tickets - the
- *     `tickets` Prisma field is mapped onto the pre-existing `stake_coins`
- *     physical column, see schema.prisma's header comment), never
- *     conflated or convertible into one another.
+ * CLAUDE.md, GC-only economy):
+ *   - GC is the one live currency - spent on every bet, win or lose, paid
+ *     back out as GC on a win, and topped up via the Coin Kiosk, a package
+ *     purchase, or a challenge/level reward. TICKETS (balances.tickets, the
+ *     old win currency) is retired as of 2026-08-29 - every account's
+ *     balance was zeroed via a one-time balancing transaction, and
+ *     `applyTransaction` below refuses to touch it again (see that
+ *     function). The `tickets` Prisma field stays mapped onto the
+ *     pre-existing `stake_coins` physical column (schema.prisma's header
+ *     comment) purely so historical rows stay readable.
  *   - No code anywhere is allowed to write balances.gold_coins/tickets
  *     directly - `applyTransaction` (below) is the ONLY function that may.
  *     It always inserts one `transactions` row in the same DB transaction
@@ -110,11 +114,25 @@ export async function applyTransaction(
     throw new Error(`applyTransaction: amount must be a non-zero finite number, got ${amount}`);
   }
 
-  if (currency === "TICKETS" && amount > 0 && type !== "GAME_WIN_TICKETS") {
-    throw new Error(
-      `applyTransaction: TICKETS may only be credited via GAME_WIN_TICKETS (got type ${type}) - ` +
-        "see repo-root CLAUDE.md. TICKETS are only ever won by playing, never sold or minted."
-    );
+  // TICKETS is retired (2026-08-29 GC-only economy restructure, see repo-
+  // root CLAUDE.md and schema.prisma's header comment) - the ONLY legal
+  // TICKETS transaction from here on is the one-time TICKETS_RETIRED debit
+  // that zeroed every account's balance, and even that may only ever debit,
+  // never credit. Every other TICKETS type (GAME_WIN_TICKETS,
+  // SKIN_PURCHASE_TICKETS, etc.) still exists in the schema for historical
+  // rows, but new code may never write another one.
+  if (currency === "TICKETS") {
+    if (type !== "TICKETS_RETIRED") {
+      throw new Error(
+        `applyTransaction: TICKETS is retired - the only legal TICKETS transaction is the one-time ` +
+          `TICKETS_RETIRED balance zero-out (got type ${type}). See repo-root CLAUDE.md.`
+      );
+    }
+    if (amount > 0) {
+      throw new Error(
+        "applyTransaction: TICKETS_RETIRED may only debit (zero out) a balance, never credit."
+      );
+    }
   }
 
   const balanceAfter = await creditOrDebitBalance(tx, userId, currency, amount);

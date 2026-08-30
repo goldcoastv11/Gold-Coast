@@ -5,9 +5,10 @@ import { playSfx } from "./SoundManager";
 /**
  * Big, hard-to-miss win reaction for the 14 games (per user direction:
  * "make it a bigger reaction... have gold text flash across the whole
- * game screen"). Purely presentational - callers pass the amount of
- * TICKETS the server already confirmed as the payout; this never decides
- * win/lose or touches the ledger itself, and it's a no-op for a
+ * game screen"). Purely presentational - callers pass the amount of GC
+ * the server already confirmed as the payout (GC-only economy, 2026-08-29
+ * restructure - TICKETS is retired, see repo-root CLAUDE.md); this never
+ * decides win/lose or touches the ledger itself, and it's a no-op for a
  * non-positive payout so callers can pass a game's raw `payout` straight
  * through without their own `if (won)`/`if (payout > 0)` guard.
  *
@@ -18,14 +19,14 @@ import { playSfx } from "./SoundManager";
  * wire up on scene shutdown (a mid-animation scene swap just tears these
  * down with everything else Phaser already destroys).
  */
-/** Any payout at/above this plays the extra `bigWin` bong accent on top of the usual `confirm` chime - a flat TICKETS threshold, not bet-relative (this function only ever sees the payout, never the bet), same spirit as a real slot machine's fixed "jackpot bell" cutoff. */
+/** Any payout at/above this plays the extra `bigWin` bong accent on top of the usual `confirm` chime - a flat GC threshold, not bet-relative (this function only ever sees the payout, never the bet), same spirit as a real slot machine's fixed "jackpot bell" cutoff. */
 const BIG_WIN_THRESHOLD = 500;
 
-export function showWinCelebration(scene: Phaser.Scene, ticketsPayout: number): void {
-  if (!(ticketsPayout > 0)) return;
+export function showWinCelebration(scene: Phaser.Scene, gcPayout: number): void {
+  if (!(gcPayout > 0)) return;
 
   playSfx(scene, "confirm");
-  if (ticketsPayout >= BIG_WIN_THRESHOLD) {
+  if (gcPayout >= BIG_WIN_THRESHOLD) {
     playSfx(scene, "bigWin");
   }
 
@@ -49,7 +50,7 @@ export function showWinCelebration(scene: Phaser.Scene, ticketsPayout: number): 
   });
 
   const label = scene.add
-    .text(width / 2, height / 2, `+${ticketsPayout} TICKETS!`, {
+    .text(width / 2, height / 2, `+${gcPayout} GOLD COINS!`, {
       fontSize: "64px",
       color: Theme.textGold,
       fontStyle: "bold",

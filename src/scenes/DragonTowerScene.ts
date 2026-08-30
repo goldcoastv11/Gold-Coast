@@ -349,7 +349,7 @@ export class DragonTowerScene extends Phaser.Scene {
         if (res.reachedTop) {
           this.active = false;
           this.revealTower(res.badIndexPerRow ?? [], null);
-          this.messageText.setText(`Reached the top! +${res.payout ?? 0} Tickets`).setColor(Tokens.text.accent);
+          this.messageText.setText(`Reached the top! +${res.payout ?? 0} Gold Coins`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
           this.endRun();
@@ -382,7 +382,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.busy = false;
         this.active = false;
         this.revealTower(res.badIndexPerRow, null);
-        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Tokens.text.accent);
+        this.messageText.setText(`Cashed out! +${res.payout} Gold Coins`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
         this.endRun();
@@ -423,6 +423,6 @@ export class DragonTowerScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

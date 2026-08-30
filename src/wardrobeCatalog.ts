@@ -104,7 +104,7 @@ export interface WardrobePieceDef {
   id: string;
   slot: WardrobeSlot;
   name: string;
-  /** Price in TICKETS. 0 = free (the default body). */
+  /** Price in Gold Coins. 0 = free (the default body). */
   price: number;
   /**
    * Filename inside public/assets/characters/lpc/, once real art exists.

@@ -47,10 +47,10 @@ import {
  * XP bar's fill. A challenge in progress, a claimed one, and every label are
  * all surface and text tokens.
  *
- * ECONOMY (repo-root CLAUDE.md, hard rule): challenge and level rewards are
- * GOLD COINS plus XP. Never Tickets - the ledger physically refuses to
- * credit TICKETS outside a real game win. The copy below says "Gold Coins"
- * in full for the same reason the game shell's bet label does.
+ * ECONOMY (repo-root CLAUDE.md): challenge and level rewards are GOLD
+ * COINS plus XP - the only currency there is now (TICKETS is retired; the
+ * ledger no longer credits it at all). The copy below says "Gold Coins" in
+ * full for the same reason the game shell's bet label does.
  */
 
 /** What this panel needs from whoever hosts it - a structural subset of ShopPanelHost. */
@@ -59,7 +59,7 @@ export interface ChallengesPanelHost {
   readonly scene: Phaser.Scene;
   /** Raises/lowers the host's modal flag (real side effects on the host - see OverworldScene). */
   setPanelOpen(open: boolean): void;
-  /** Repaints the host's coin/ticket/level HUD after a balance or level change. */
+  /** Repaints the host's coin/level HUD after a balance or level change. */
   updateHud(): void;
   /** Brief fading confirmation/error message above the panel. */
   showToast(message: string, color: string): void;

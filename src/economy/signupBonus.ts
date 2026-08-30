@@ -10,11 +10,12 @@
  *
  * History: this used to also grant a flat 25 SC ("Sweeps Coin") bonus,
  * back when this game used a two-currency sweepstakes model with a real-
- * money redemption path. That whole model was replaced with the current
+ * money redemption path. That model was replaced by a two-currency
  * "arcade token" one (GC to play, TICKETS won from playing, spent in the
- * Item Shop, no real-money value at all) - see repo-root CLAUDE.md and
- * ledger.ts's doc comment. There's no SC-equivalent starting grant any
- * more: TICKETS are only ever won by playing, never gifted on signup.
+ * Item Shop), which is itself now retired in favor of the current GC-only
+ * economy (2026-08-29 restructure - see repo-root CLAUDE.md and
+ * ledger.ts's doc comment). There's no second-currency starting grant any
+ * more, under either retired model or the current one.
  */
 
 import { LedgerState, Transaction, applyTransaction } from "./ledger";

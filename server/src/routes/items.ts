@@ -1,7 +1,8 @@
 /**
  * Item shop routes (accessories/pets) - mirrors routes/wardrobe.ts's shape
  * exactly, generalized to the ItemOwned/EquippedItem tables (see
- * economy/itemShop.ts). TICKETS-only, fully isolated from GC.
+ * economy/itemShop.ts). GC-only (2026-08-29 GC-only economy restructure -
+ * TICKETS is retired, see repo-root CLAUDE.md).
  */
 
 import { Router } from "express";

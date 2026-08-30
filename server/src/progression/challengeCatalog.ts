@@ -8,10 +8,9 @@
  * The DB only ever stores a player's PROGRESS against an id.
  *
  * ECONOMY (hard rule, repo-root CLAUDE.md): every reward here is GOLD COINS
- * plus XP. Never TICKETS - TICKETS may only be credited by
- * GAME_WIN_TICKETS, an actual game win, and economy/ledger.ts enforces that
- * at runtime. Nothing here rewards spending real money, either: there is no
- * challenge for buying a GC package, and there never should be.
+ * plus XP - the only currency there is now (TICKETS is retired). Nothing
+ * here rewards spending real money, either: there is no challenge for
+ * buying a GC package, and there never should be.
  *
  * All progress is driven from server-computed game settlement (see
  * progress.ts and games/shared.ts), never from client-reported activity.
@@ -26,7 +25,9 @@ import { ChallengePeriod } from "./periods";
  *   ROUNDS_PLAYED  - wagers placed (every round counts, win or lose)
  *   WINS           - rounds that paid out
  *   GC_WAGERED     - total Gold Coins bet
- *   TICKETS_WON    - total Tickets paid out
+ *   GC_WON         - total Gold Coins paid out by a game win (renamed from
+ *                    TICKETS_WON in the 2026-08-29 GC-only economy
+ *                    restructure - wins pay GC now, not a separate currency)
  *   DISTINCT_GAMES - how many different games have been played (a set, so
  *                    replaying the same game can't inflate it)
  */
@@ -34,7 +35,7 @@ export type ChallengeMetric =
   | "ROUNDS_PLAYED"
   | "WINS"
   | "GC_WAGERED"
-  | "TICKETS_WON"
+  | "GC_WON"
   | "DISTINCT_GAMES";
 
 export interface ChallengeDef {
@@ -53,7 +54,7 @@ export interface ChallengeDef {
   rewardXp: number;
   /** Optional: only count activity on this game id (e.g. "mines"). */
   game?: string;
-  /** WINS only: only count wins paying at least this many Tickets. */
+  /** WINS only: only count wins paying at least this many Gold Coins. */
   minPayout?: number;
 }
 
@@ -159,7 +160,7 @@ export const CHALLENGE_CATALOG: ChallengeDef[] = [
     id: "weekly_big_win",
     period: "WEEKLY",
     name: "Big One",
-    description: "Land a single win worth 1,000 Tickets or more.",
+    description: "Land a single win worth 1,000 Gold Coins or more.",
     metric: "WINS",
     target: 1,
     minPayout: 1000,
@@ -209,11 +210,15 @@ export const CHALLENGE_CATALOG: ChallengeDef[] = [
     rewardXp: 1000
   },
   {
+    // id kept as-is (not renamed to "ach_gc_won_50k" or similar) even
+    // though the name/metric changed - it's a free-text String, not an
+    // enum, and a player's existing ChallengeProgress row is keyed by this
+    // id; renaming it would silently orphan any in-progress counter.
     id: "ach_tickets_50k",
     period: "LIFETIME",
-    name: "Ticket Tycoon",
-    description: "Win 50,000 Tickets in total.",
-    metric: "TICKETS_WON",
+    name: "Coin Tycoon",
+    description: "Win 50,000 Gold Coins in total.",
+    metric: "GC_WON",
     target: 50000,
     rewardGc: 4000,
     rewardXp: 800

@@ -20,7 +20,7 @@ export interface ItemDef {
   id: string;
   category: ItemCategory;
   name: string;
-  price: number; // TICKETS
+  price: number; // Gold Coins
   emoji?: string;
   textureKey?: string;
 }

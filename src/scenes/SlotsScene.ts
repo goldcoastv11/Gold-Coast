@@ -371,7 +371,8 @@ export class SlotsScene extends Phaser.Scene {
     // server's settled result, NOT after the staggered reel reveal below:
     // the round is already resolved and the balance already moved by this
     // point, so a player who backs out mid-animation still counts as
-    // having played it. betAmount is Gold Coins; payout is Tickets.
+    // having played it. betAmount and payout are both Gold Coins (GC-only
+    // economy).
     track(EVENTS.GAME_ROUND_PLAYED, {
       game: "slots",
       betAmount: bet,
@@ -405,7 +406,7 @@ export class SlotsScene extends Phaser.Scene {
   ) {
     if (payout > 0 && winKey) {
       const label = winCount === 3 ? `3x ${SYMBOL_EMOJI[winKey]} — JACKPOT!` : `2x ${SYMBOL_EMOJI[winKey]}`;
-      this.messageText.setText(`${label}  +${payout} Tickets`).setColor(Tokens.text.accent);
+      this.messageText.setText(`${label}  +${payout} Gold Coins`).setColor(Tokens.text.accent);
       popIn(this, this.messageText);
       this.highlightWinningCells(reels.reduce<number[]>((acc, key, i) => (key === winKey ? [...acc, i] : acc), []));
       showWinCelebration(this, payout);
@@ -438,6 +439,6 @@ export class SlotsScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

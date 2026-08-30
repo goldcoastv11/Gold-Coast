@@ -424,7 +424,7 @@ export class HiLoScene extends Phaser.Scene {
 
         if (res.deckExhausted) {
           this.active = false;
-          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} Tickets`).setColor(Tokens.text.accent);
+          this.messageText.setText(`Deck cleared! +${res.payout ?? 0} Gold Coins`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
           this.endRun();
@@ -467,7 +467,7 @@ export class HiLoScene extends Phaser.Scene {
         gameState.hydrateFromServer(res.user);
         this.busy = false;
         this.active = false;
-        this.messageText.setText(`Cashed out! +${res.payout} Tickets`).setColor(Tokens.text.accent);
+        this.messageText.setText(`Cashed out! +${res.payout} Gold Coins`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
         this.endRun();
@@ -503,6 +503,6 @@ export class HiLoScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

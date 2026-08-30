@@ -382,7 +382,7 @@ function writeClient(results) {
   fs.writeFileSync(
     CLIENT_OUT,
     `${HEADER(
-      ` *\n * Prices are in TICKETS and are spend-only: TICKETS are still credited\n * solely by GAME_WIN_TICKETS, which the import does not touch.`
+      ` *\n * Prices are in Gold Coins (GC-only economy - TICKETS is retired, see\n * repo-root CLAUDE.md). This import does not touch the ledger.`
     )}
 
 import type { WardrobePieceDef } from "./wardrobeCatalog";

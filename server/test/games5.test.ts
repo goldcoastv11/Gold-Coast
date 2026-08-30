@@ -51,9 +51,9 @@ describe("POST /games/triplechance/play (#46 - bonus round after a shuffle-cup G
         expect(res.body.result.payout).toBe(0);
         expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 100);
       }
-      // Never touches TICKETS in any way, win or lose - Triple Chance is
-      // GC-in/GC-out, chained onto the Coin Kiosk's shuffle-cup GC win, not
-      // one of the TICKETS-paying games.
+      // Never touches TICKETS in any way, win or lose (it's retired, and
+      // Triple Chance was never priced in it to begin with - GC-in/GC-out,
+      // chained onto the Coin Kiosk's shuffle-cup GC win).
       expect(res.body.user.tickets).toBe(before.body.tickets);
     }
 

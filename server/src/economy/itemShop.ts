@@ -1,13 +1,15 @@
 /**
  * Item shop (accessories/pets) backend - server-authoritative, generalizing
  * the (now-removed) skin shop's pattern to the ItemOwned/EquippedItem tables (see
- * schema.prisma's doc comment on those). Reuses the exact same
- * SKIN_PURCHASE_TICKETS transaction type skins use rather than adding a new
- * enum value - the whole panel is already branded "Item Shop", not "Skin
- * Shop" (see OverworldScene.ts's openSkinPanel title), so any purchase made
- * there is legitimately "an Item Shop purchase" per that type's own doc
- * comment in schema.prisma; the specific item/category is recorded in the
- * transaction's `meta` JSON for audit purposes instead of a new type.
+ * schema.prisma's doc comment on those). Reuses the SHOP_PURCHASE_GC
+ * transaction type the wardrobe also uses rather than adding a new enum
+ * value - the whole panel is already branded "Item Shop", not "Skin Shop"
+ * (see OverworldScene.ts's openSkinPanel title), so any purchase made there
+ * is legitimately "an Item Shop purchase"; the specific item/category is
+ * recorded in the transaction's `meta` JSON for audit purposes instead of a
+ * new type. GC-only as of the 2026-08-29 GC-only economy restructure - this
+ * used to be TICKETS-only (see economy/wardrobe.ts's header for why the
+ * price band itself is unchanged).
  *
  * Unlike skins (exactly one always equipped, defaulting to "player"),
  * accessories/pets support genuinely equipping NOTHING - unequipItem
@@ -44,10 +46,10 @@ export type PurchaseItemOutcome =
   | { ok: true; item: ItemDef; transaction: Awaited<ReturnType<typeof applyTransaction>> }
   | { ok: false; reason: "NOT_FOUND" }
   | { ok: false; reason: "ALREADY_OWNED"; item: ItemDef }
-  | { ok: false; reason: "INSUFFICIENT_TICKETS"; item: ItemDef; balanceTickets: number };
+  | { ok: false; reason: "INSUFFICIENT_GC"; item: ItemDef; balanceGc: number };
 
 /**
- * Attempts to buy item `id` with TICKETS for `userId`. On success, debits
+ * Attempts to buy item `id` with GC for `userId`. On success, debits
  * the ledger, inserts an items_owned row, and equips it immediately in the
  * same transaction (same "a purchase is always also a wear" product
  * decision economy/wardrobe.ts's purchasePiece also makes) - this REPLACES whatever was
@@ -59,12 +61,12 @@ export async function purchaseItem(tx: TxClient, userId: string, id: string): Pr
   if (!item) return { ok: false, reason: "NOT_FOUND" };
   if (await ownsItem(tx, userId, id)) return { ok: false, reason: "ALREADY_OWNED", item };
 
-  const balanceTickets = await getBalance(tx, userId, "TICKETS");
-  if (balanceTickets < item.price) {
-    return { ok: false, reason: "INSUFFICIENT_TICKETS", item, balanceTickets };
+  const balanceGc = await getBalance(tx, userId, "GC");
+  if (balanceGc < item.price) {
+    return { ok: false, reason: "INSUFFICIENT_GC", item, balanceGc };
   }
 
-  const transaction = await applyTransaction(tx, userId, "TICKETS", "SKIN_PURCHASE_TICKETS", -item.price, {
+  const transaction = await applyTransaction(tx, userId, "GC", "SHOP_PURCHASE_GC", -item.price, {
     itemId: item.id,
     itemCategory: item.category
   });

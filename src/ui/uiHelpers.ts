@@ -806,15 +806,15 @@ export function drawCabinetFrame(
 /**
  * The sidebar balance line, worded and spaced identically in all 14 games.
  *
- * GC and TICKETS are separate ledgers (see CLAUDE.md's economy rules), so
- * they are shown as two named figures and never summed into one total.
- * Spelling both names out - rather than the coin/ticket emoji pair the
- * games used to print - is part of the outstanding display-copy pass, and
- * having exactly one function produce this string is what stops the
- * fourteen copies of it drifting apart again.
+ * GC-only economy (2026-08-29, TICKETS retired - see repo-root CLAUDE.md):
+ * Gold Coins is the only live balance, so this prints exactly one figure.
+ * It used to take a second `tickets` argument and print both currencies -
+ * that balance is retired and permanently 0 now, so showing it would just
+ * read as a broken second wallet. Having exactly one function produce this
+ * string is what stops the fourteen copies of it drifting apart again.
  */
-export function formatBalance(goldCoins: number, tickets: number): string {
-  return `${goldCoins} Gold Coins  ·  ${tickets} Tickets`;
+export function formatBalance(goldCoins: number): string {
+  return `${goldCoins} Gold Coins`;
 }
 
 /**

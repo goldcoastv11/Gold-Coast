@@ -221,10 +221,10 @@ export class PlinkoScene extends Phaser.Scene {
     popIn(this, label);
 
     if (multiplier >= 1) {
-      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Tokens.text.accent);
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Gold Coins`).setColor(Tokens.text.accent);
       showWinCelebration(this, payout);
     } else {
-      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} Tickets`).setColor(Tokens.text.negative);
+      this.messageText.setText(`Landed on ${multiplier}x - only +${payout} Gold Coins`).setColor(Tokens.text.negative);
       playSfx(this, "lose");
     }
 
@@ -235,6 +235,6 @@ export class PlinkoScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

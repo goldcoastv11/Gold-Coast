@@ -366,7 +366,7 @@ export class WheelScene extends Phaser.Scene {
     const { multiplier, payout } = res.result;
 
     if (payout > 0) {
-      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Tickets`).setColor(Tokens.text.accent);
+      this.messageText.setText(`Landed on ${multiplier}x! +${payout} Gold Coins`).setColor(Tokens.text.accent);
       popIn(this, this.legendText);
       showWinCelebration(this, payout);
     } else {
@@ -397,6 +397,6 @@ export class WheelScene extends Phaser.Scene {
   }
 
   private updateBalance() {
-    this.balanceText.setText(formatBalance(gameState.goldCoins, gameState.tickets));
+    this.balanceText.setText(formatBalance(gameState.goldCoins));
   }
 }

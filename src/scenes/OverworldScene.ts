@@ -1746,7 +1746,7 @@ export class OverworldScene extends Phaser.Scene {
       .setDepth(201);
 
     const balance = this.add
-      .text(400, 288, `🪙 Gold Coins: ${gameState.goldCoins}   |   🎟️ Tickets: ${gameState.tickets}`, {
+      .text(400, 288, `🪙 Gold Coins: ${gameState.goldCoins}`, {
         fontSize: "14px",
         color: Theme.textMuted
       })
@@ -1806,13 +1806,16 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private updateHud() {
-    // Level rides along with the two balances: it's the "visible prestige
+    // Level rides along with the balance: it's the "visible prestige
     // number" half of what a level is for (see server/src/progression/
     // levels.ts), and it arrives on every authenticated response already,
     // so showing it here costs no extra request.
-    this.hudText.setText(
-      `🪙 ${gameState.goldCoins}   🎟️ ${gameState.tickets}   ⭐ Lv ${gameState.playerLevel}`
-    );
+    //
+    // GC-only economy (2026-08-29, TICKETS retired - see repo-root
+    // CLAUDE.md): this used to also print `🎟️ ${gameState.tickets}` next to
+    // the coin count. That balance is retired and permanently 0 now, so it
+    // was dropped rather than kept as a second, always-zero figure.
+    this.hudText.setText(`🪙 ${gameState.goldCoins}   ⭐ Lv ${gameState.playerLevel}`);
   }
 
   /**

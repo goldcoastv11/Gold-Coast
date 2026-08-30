@@ -55,7 +55,7 @@ export interface ShopPanelHost {
    * touch controls), which is exactly why it stays the host's job.
    */
   setPanelOpen(open: boolean): void;
-  /** Repaints the host's coin/ticket HUD after a balance change. */
+  /** Repaints the host's coin HUD after a balance change. */
   updateHud(): void;
   /** Brief fading confirmation/error message above the panel. */
   showToast(message: string, color: string): void;
@@ -80,8 +80,8 @@ export interface ShopPanelHost {
 function describeShopError(err: unknown, action: string): string {
   if (err instanceof ApiError) {
     switch (err.code) {
-      case "INSUFFICIENT_TICKETS":
-        return "Not enough Tickets.";
+      case "INSUFFICIENT_GC":
+        return "Not enough Gold Coins.";
       case "ALREADY_OWNED":
         return "You already own that.";
       case "NOT_FOUND":
@@ -224,7 +224,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
       .text(
         400,
         162,
-        mode === "shop" ? `You have ${gameState.tickets} Tickets` : `Pick a ${label.slice(0, -1).toLowerCase()} to wear`,
+        mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : `Pick a ${label.slice(0, -1).toLowerCase()} to wear`,
         { fontSize: "13px", color: Theme.textMuted }
       )
       .setOrigin(0.5)
@@ -277,13 +277,13 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
 
       if (mode === "shop") {
         const priceLabel = scene.add
-          .text(370, y, `${def.price} Tickets`, { fontSize: "13px", color: Theme.textMuted })
+          .text(370, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
           .setOrigin(0, 0.5)
           .setScrollFactor(0)
           .setDepth(201);
         elements.push(priceLabel);
 
-        const canAfford = gameState.tickets >= def.price;
+        const canAfford = gameState.goldCoins >= def.price;
         const buyBtn = makeButton(
           scene,
           540,
@@ -300,7 +300,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
             api
               .buyItem(def.id)
               .then((res) => {
-                // Retention Leg 1: what players spend their TICKETS on -
+                // Retention Leg 1: what players spend their Gold Coins on -
                 // catalog id and price only, both already-public catalog
                 // facts. Fired on the server's confirmed success, never
                 // on the optimistic click.
@@ -449,7 +449,7 @@ export function openWardrobeSlotMenu(host: ShopPanelHost, mode: ShopMode) {
     .text(
       400,
       168,
-      mode === "shop" ? `You have ${gameState.tickets} Tickets` : "Pick a layer to change",
+      mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : "Pick a layer to change",
       { fontSize: "13px", color: Theme.textMuted }
     )
     .setOrigin(0.5)
@@ -589,7 +589,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
       .text(
         400,
         162,
-        mode === "shop" ? `You have ${gameState.tickets} Tickets` : `Pick a ${slotName.toLowerCase()} to wear`,
+        mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : `Pick a ${slotName.toLowerCase()} to wear`,
         { fontSize: "13px", color: Theme.textMuted }
       )
       .setOrigin(0.5)
@@ -636,13 +636,13 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
 
       if (mode === "shop") {
         const priceLabel = scene.add
-          .text(370, y, `${def.price} Tickets`, { fontSize: "13px", color: Theme.textMuted })
+          .text(370, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
           .setOrigin(0, 0.5)
           .setScrollFactor(0)
           .setDepth(201);
         elements.push(priceLabel);
 
-        const canAfford = gameState.tickets >= def.price;
+        const canAfford = gameState.goldCoins >= def.price;
         const buyBtn = makeButton(
           scene,
           540,
@@ -653,7 +653,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
           canAfford ? Theme.accent : Theme.neutral,
           canAfford ? Theme.accentHover : Theme.neutral,
           () => {
-            // POST /wardrobe/buy - TICKETS-only, server-authoritative. The
+            // POST /wardrobe/buy - GC-only, server-authoritative. The
             // affordability/ownership checks above are optimistic UI only;
             // the server re-checks both and is the one that decides. A
             // purchase also wears the piece server-side (see
@@ -663,7 +663,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
             api
               .buyWardrobePiece(def.id)
               .then((res) => {
-                // Retention Leg 1: what players spend TICKETS on - catalog
+                // Retention Leg 1: what players spend Gold Coins on - catalog
                 // id, slot and price, all already-public catalog facts.
                 // Fired on the server's confirmed success, never on the
                 // optimistic click.
