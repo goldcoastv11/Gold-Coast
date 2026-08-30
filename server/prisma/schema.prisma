@@ -80,6 +80,7 @@ model User {
   gameRounds          GameRound[]
   playerProgress      PlayerProgress?
   challengeProgress   ChallengeProgress[]
+  levelMinigameSessions LevelMinigameSession[]
 
   @@map("users")
 }
@@ -158,6 +159,14 @@ enum TransactionType {
   // metrics query.
   CHALLENGE_REWARD_GC
   LEVEL_REWARD_GC
+  // The skill-based "stop the marker" timing minigame offered after a
+  // level-up (see progression/levelMinigame.ts and
+  // progression/levelMinigameSession.ts). GC-ONLY, same reasoning as
+  // LEVEL_REWARD_GC above - TICKETS may only ever be credited by
+  // GAME_WIN_TICKETS. Distinct from LEVEL_REWARD_GC so the flat per-level
+  // payout and this variable, accuracy-curved bonus stay separable in the
+  // ledger and in any metrics query.
+  LEVEL_MINIGAME_REWARD_GC
   // A GC payout - NOT retired, still used by Triple Chance
   // (routes/games.ts), which is GC-in/GC-out (double-or-nothing on GC just
   // received from the Coin Kiosk). Now that every other game also pays GC
@@ -498,14 +507,72 @@ model Event {
 // (rewardedLevel, currentLevel] and advances the column in the same DB
 // transaction with a conditional update, so a level's GC can be paid at
 // most once no matter how many concurrent claims race.
+// `pendingMinigameLevel` (#levelup-minigame): the highest level the player
+// has reached that still owes a "stop the marker" timing minigame (see
+// LevelMinigameSession below), or null if nothing is owed. Set by
+// grantPendingLevelRewards whenever XP crosses a level boundary; cleared
+// once that minigame is completed and its bonus GC paid. Deliberately ONE
+// flag per player, not one per level: a single big XP grant can cross
+// several level boundaries at once (a large challenge/achievement claim),
+// and stacking one timing round per level crossed would both multiply the
+// bonus unfairly (each level's flat LEVEL_REWARD_GC already scales with the
+// level) and be repetitive UX - so a multi-level jump still only offers ONE
+// minigame, anchored to (and paying out based on) the highest level
+// reached, and a later level-up while one is already owed just raises this
+// number rather than queuing a second game.
 model PlayerProgress {
-  userId        String   @id @map("user_id")
-  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  xp            Int      @default(0)
-  rewardedLevel Int      @default(1) @map("rewarded_level")
-  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+  userId               String   @id @map("user_id")
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  xp                   Int      @default(0)
+  rewardedLevel        Int      @default(1) @map("rewarded_level")
+  pendingMinigameLevel Int?     @map("pending_minigame_level")
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 
   @@map("player_progress")
+}
+
+// The level-up "stop the marker" timing minigame (see
+// progression/levelMinigame.ts for the sweep/reward-curve math and
+// progression/levelMinigameSession.ts for the DB flow). One row per attempt.
+//
+// TRUST BOUNDARY: this is the whole reason the table exists rather than the
+// reward being computed and credited in one request. `startedAt` is the
+// SERVER's own clock, stamped when the session is created; the client is
+// never asked to report its own accuracy or elapsed time. When the player
+// taps to stop, the server computes elapsed time as
+// `now() - startedAt` using ITS OWN receive time for `now()`, derives the
+// marker position from that with the same deterministic formula the client
+// used to render the sweep, and pays out from that - a forged "I hit dead
+// centre" claim from the client has no channel to travel through. Network
+// latency between the tap and the request landing does shift the result
+// slightly late (a fairness/UX wrinkle, disclosed in the PR), but it cannot
+// be steered to fabricate a better-than-real result.
+//
+// `status` is both the "is this playable" flag and the double-payout guard,
+// same idiom as ChallengeProgress.claimedAt above: completion is a single
+// conditional `UPDATE ... WHERE status = 'PENDING'`, so a session can be
+// completed (and its GC credited) at most once no matter how many requests
+// race. Values are the plain strings "PENDING" / "COMPLETED" - a real enum
+// wasn't worth a migration for a two-value set only this file's code reads.
+model LevelMinigameSession {
+  id            String    @id @default(cuid())
+  userId        String    @map("user_id")
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  /** The level this session's payout is anchored to - see PlayerProgress.pendingMinigameLevel's comment. */
+  level         Int
+  status        String    @default("PENDING")
+  sweepPeriodMs Int       @map("sweep_period_ms")
+  startedAt     DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(3)
+  /** 0 (stopped at either extreme) to 1 (dead centre) - set on completion only. */
+  accuracy      Float?
+  rewardGc      Int?      @map("reward_gc")
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  // "Does this player already have a live session" - the ensure/start path's
+  // lookup.
+  @@index([userId, status])
+  @@map("level_minigame_sessions")
 }
 
 // Retention Leg 2: per-player progress against one challenge, for one

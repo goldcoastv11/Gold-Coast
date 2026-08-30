@@ -150,7 +150,17 @@ export async function setup() {
   await pg.start();
   await pg.createDatabase(DB_NAME);
 
-  const url = `postgresql://${USER}:${PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}?schema=public`;
+  // connection_limit=3: every test FILE runs in its own forked worker with its
+  // own PrismaClient, and Prisma sizes its pool from the CPU count by default
+  // (num_cpus * 2 + 1), which on a many-core dev machine is well over a dozen
+  // connections PER FILE. The embedded test cluster defaults to
+  // max_connections=100, so the suite silently had a ceiling on how many test
+  // files it could hold - crossing it fails with "sorry, too many clients
+  // already" in whichever file happens to run last, which reads as an
+  // unrelated flake. Adding the 16th test file is what tipped it over. These
+  // tests are serial within a worker and never need a deep pool, so pinning it
+  // small removes the ceiling entirely rather than raising it by one.
+  const url = `postgresql://${USER}:${PASSWORD}@127.0.0.1:${PORT}/${DB_NAME}?schema=public&connection_limit=3`;
   process.env.DATABASE_URL = url;
 
   execSync("npx prisma db push --skip-generate --accept-data-loss", {

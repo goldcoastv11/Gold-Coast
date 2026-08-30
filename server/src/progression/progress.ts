@@ -69,24 +69,35 @@ import {
  * until the migration is deployed and the server restarts; games keep
  * working untouched in the meantime.
  */
-let readinessProbe: Promise<{ challenges: boolean; items: boolean }> | null = null;
+interface Readiness {
+  challenges: boolean;
+  items: boolean;
+  /** `level_minigame_sessions` table (and, since it landed in the same migration, `player_progress.pending_minigame_level`) - see progression/levelMinigameSession.ts. */
+  levelMinigame: boolean;
+}
 
-function probeReadiness(): Promise<{ challenges: boolean; items: boolean }> {
+let readinessProbe: Promise<Readiness> | null = null;
+
+function probeReadiness(): Promise<Readiness> {
   if (!readinessProbe) {
     readinessProbe = prisma
-      .$queryRaw<{ challenges: string | null; players: string | null; items: string | null }[]>`
+      .$queryRaw<
+        { challenges: string | null; players: string | null; items: string | null; levelMinigame: string | null }[]
+      >`
         SELECT to_regclass('public.challenge_progress')::text AS challenges,
                to_regclass('public.player_progress')::text AS players,
-               to_regclass('public.items_owned')::text AS items
+               to_regclass('public.items_owned')::text AS items,
+               to_regclass('public.level_minigame_sessions')::text AS "levelMinigame"
       `
       .then((rows) => {
         const row = rows[0];
         return {
           challenges: Boolean(row?.challenges) && Boolean(row?.players),
-          items: Boolean(row?.items)
+          items: Boolean(row?.items),
+          levelMinigame: Boolean(row?.levelMinigame)
         };
       })
-      .catch(() => ({ challenges: false, items: false }));
+      .catch(() => ({ challenges: false, items: false, levelMinigame: false }));
   }
   return readinessProbe;
 }
@@ -94,6 +105,12 @@ function probeReadiness(): Promise<{ challenges: boolean; items: boolean }> {
 /** True when challenges/levels can safely be read and written on this environment. */
 export async function progressionAvailable(): Promise<boolean> {
   return (await probeReadiness()).challenges;
+}
+
+/** True when the level-up minigame's table/column can safely be read and written on this environment (see LevelMinigameSession's schema.prisma doc comment). */
+export async function levelMinigameAvailable(): Promise<boolean> {
+  const ready = await probeReadiness();
+  return ready.challenges && ready.levelMinigame;
 }
 
 // ---------------------------------------------------------------------
@@ -331,13 +348,28 @@ export async function grantPendingLevelRewards(tx: TxClient, userId: string): Pr
   const level = levelForXp(row.xp);
   if (level <= row.rewardedLevel) return [];
 
+  const readiness = await probeReadiness();
+
   const advanced = await tx.playerProgress.updateMany({
     where: { userId, rewardedLevel: row.rewardedLevel },
-    data: { rewardedLevel: level }
+    data: {
+      rewardedLevel: level,
+      // Flags the level-up minigame as owed, anchored to the highest level
+      // just reached - see PlayerProgress.pendingMinigameLevel's schema.prisma
+      // doc comment for why this always overwrites (never sums/queues) even
+      // if a previous minigame was already owed and unplayed. Only written
+      // once the migration adding this column is actually live (readiness
+      // guard, same reasoning as `itemsReady` below) - this update runs
+      // inside every game-settling transaction's blast radius (see this
+      // file's TRUST BOUNDARY note), so writing a column that doesn't exist
+      // yet on an un-migrated environment would abort far more than just
+      // this feature.
+      ...(readiness.levelMinigame ? { pendingMinigameLevel: level } : {})
+    }
   });
   if (advanced.count !== 1) return [];
 
-  const itemsReady = (await probeReadiness()).items;
+  const itemsReady = readiness.items;
   const grants: LevelGrant[] = [];
 
   for (let l = row.rewardedLevel + 1; l <= level; l += 1) {
@@ -358,6 +390,20 @@ export async function grantPendingLevelRewards(tx: TxClient, userId: string): Pr
   }
 
   return grants;
+}
+
+/**
+ * The level-up minigame owed to this player right now, or null if none is.
+ * Purely a read of PlayerProgress.pendingMinigameLevel - see that field's
+ * doc comment. Used both right after a claim (so the client knows to route
+ * into the minigame) and independently on GET /progression (so re-opening
+ * the challenges panel later still finds a minigame the player closed the
+ * tab on instead of it being silently lost).
+ */
+export async function getPendingLevelMinigame(tx: TxClient, userId: string): Promise<{ level: number } | null> {
+  if (!(await levelMinigameAvailable())) return null;
+  const row = await tx.playerProgress.findUnique({ where: { userId } });
+  return row?.pendingMinigameLevel != null ? { level: row.pendingMinigameLevel } : null;
 }
 
 /** Adds XP, creating the player's progress row on first earn. */
@@ -414,6 +460,8 @@ export type ClaimOutcome =
       rewardXp: number;
       progression: ProgressionState;
       levelsGained: LevelGrant[];
+      /** Set when this claim's level-up(s) now owe a "stop the marker" minigame - see getPendingLevelMinigame. */
+      pendingLevelMinigame: { level: number } | null;
     }
   | { ok: false; reason: "NOT_FOUND" }
   | { ok: false; reason: "UNAVAILABLE" }
@@ -476,6 +524,7 @@ export async function claimChallenge(
   await addXp(tx, userId, def.rewardXp);
   const levelsGained = await grantPendingLevelRewards(tx, userId);
   const progression = await getProgression(tx, userId);
+  const pendingLevelMinigame = await getPendingLevelMinigame(tx, userId);
 
   return {
     ok: true,
@@ -483,7 +532,8 @@ export async function claimChallenge(
     rewardGc: def.rewardGc,
     rewardXp: def.rewardXp,
     progression,
-    levelsGained
+    levelsGained,
+    pendingLevelMinigame
   };
 }
 

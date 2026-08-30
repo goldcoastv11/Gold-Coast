@@ -76,7 +76,14 @@ export const EVENTS = {
    * back" signal, and it's fired on the server's confirmed success, never
    * on the optimistic click.
    */
-  CHALLENGE_CLAIMED: "challenge.claimed"
+  CHALLENGE_CLAIMED: "challenge.claimed",
+  /**
+   * A level-up "stop the marker" minigame round resolved (see
+   * src/scenes/LevelUpMinigameScene.ts). Props: { level, accuracy, rewardGc }
+   * - accuracy/rewardGc are the SERVER's confirmed result, never a
+   * client-computed guess.
+   */
+  LEVEL_MINIGAME_COMPLETED: "levelup.minigame_completed"
 } as const;
 
 export type EventName = (typeof EVENTS)[keyof typeof EVENTS];
