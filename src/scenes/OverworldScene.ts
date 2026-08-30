@@ -26,6 +26,7 @@ import {
 import { openChallengesPanel, ChallengesPanelHost } from "../ui/ChallengesPanel";
 import { claimableCount } from "../ui/challengeDisplay";
 import { openQuickplayPanel, QuickplayPanelHost } from "../ui/QuickplayPanel";
+import { openLeaderboardPanel, LeaderboardPanelHost } from "../ui/LeaderboardPanel";
 import { uniqueGames } from "../ui/quickplayGrid";
 import { openMagazinePanel, MagazinePanelHost } from "../ui/MagazinePanel";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
@@ -552,6 +553,25 @@ export class OverworldScene extends Phaser.Scene {
     // re-entering the overworld ALWAYS starts unblocked, whatever happened
     // before. Both flags are set through their setters so the touch controls
     // are re-shown too.
+    // Clear handles to objects that died with the PREVIOUS run of this scene
+    // BEFORE anything can touch them. Phaser reuses the scene instance, so
+    // these fields still point at game objects Phaser destroyed on shutdown;
+    // calling into them throws and aborts create(), leaving a blank screen
+    // with the old scene's music still looping.
+    //
+    // This bit us for real: setting panelOpen below runs
+    // updateTouchControlsVisibility(), which calls setVisible() on
+    // touchControls - and that handle closes over destroyed sprites and calls
+    // setInteractive()/disableInteractive() on them. touchControls is only
+    // created on touch devices, which is exactly why the failure was
+    // phone-only: on desktop the field is undefined and the optional chain is
+    // a no-op. Each of these is re-created further down create() anyway.
+    this.touchControls = undefined;
+    this.challengesButtonHighlight = undefined;
+    this.activeTutorialHighlight = undefined;
+    this.activeTutorialInstruction = undefined;
+    this.layeredCharacter = undefined;
+
     this.panelOpen = false;
     this.tutorialAllowMovement = false;
 
@@ -900,14 +920,21 @@ export class OverworldScene extends Phaser.Scene {
       this.openQuickplayPanel()
     ).container.setScrollFactor(0).setDepth(150);
 
+    // "Leaderboard" corner button - founder ask: "a small button that shows
+    // the Daily, Weekly, and all time leaderboard for GC earned". One more
+    // step down the same corner column at x=730 (see Clothes/Challenges/
+    // Quickplay above), y=305 - still well inside the safe band (y=[130,470]).
+    makeButton(this, 730, 305, 130, 40, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
+      this.openLeaderboardPanel()
+    ).container.setScrollFactor(0).setDepth(150);
+
     // "Magazine" corner button - founder ask: "a 'Magazine' button that
     // shows 5 players rooms... make it random and change every day." One
     // more step down the same safe-band column as Clothes/Challenges/
     // Quickplay above (y=130-470, x=730 - see those buttons' own
-    // comments). A leaderboard button is also landing in this same corner
-    // column from a parallel change; if the two collide on this y slot,
-    // that's an intentionally trivial merge for whoever lands second.
-    makeButton(this, 730, 305, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
+    // comments). The Leaderboard button took y=305 when it landed, so this sits one
+    // more step down at y=355 - still inside the safe band.
+    makeButton(this, 730, 355, 130, 40, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
       this.openMagazinePanel()
     ).container.setScrollFactor(0).setDepth(150);
 
@@ -2235,6 +2262,25 @@ export class OverworldScene extends Phaser.Scene {
 
   /** Everything ui/MagazinePanel.ts needs back from this scene - just the modal flag, since this panel is read-only and never changes scene. */
   private get magazinePanelHost(): MagazinePanelHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      }
+    };
+  }
+
+  /**
+   * The Leaderboard corner button's handler - same shape as the
+   * Quickplay/Challenges wrappers above: the panel itself lives in
+   * ui/LeaderboardPanel.ts, this is just the named seam.
+   */
+  private openLeaderboardPanel() {
+    openLeaderboardPanel(this.leaderboardPanelHost);
+  }
+
+  /** Everything ui/LeaderboardPanel.ts needs back from this scene. */
+  private get leaderboardPanelHost(): LeaderboardPanelHost {
     return {
       scene: this,
       setPanelOpen: (open) => {

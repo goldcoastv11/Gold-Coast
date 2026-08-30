@@ -704,6 +704,32 @@ export interface LevelMinigameAlreadyClaimedError {
   code: "ALREADY_CLAIMED";
 }
 
+// ---- GC-earned leaderboard ----
+// Mirrors server/src/economy/leaderboard.ts. Usernames are shown - explicit
+// founder call ("they accepted that usernames become publicly visible").
+
+/** One ranked row - see server/src/economy/leaderboard.ts's LeaderboardEntry for what "rank" means with ties. */
+export interface LeaderboardEntry {
+  userId: string;
+  username: string;
+  earnedGc: number;
+  rank: number;
+}
+
+export interface LeaderboardBoard {
+  /** Top ~10 by GC earned in this window. */
+  top: LeaderboardEntry[];
+  /** The caller's own row + rank, even outside `top` - null means they haven't earned anything in this window yet (a real state, not missing data). */
+  me: LeaderboardEntry | null;
+}
+
+/** GET /leaderboard */
+export interface LeaderboardResponse {
+  daily: LeaderboardBoard;
+  weekly: LeaderboardBoard;
+  allTime: LeaderboardBoard;
+}
+
 // ---- The Magazine (roadmap/magazine) ----
 // Mirrors server/src/economy/magazine.ts. Read-only: a room lookalike
 // (wallpaper/flooring/furniture) belonging to a random-but-daily-stable

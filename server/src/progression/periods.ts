@@ -73,6 +73,35 @@ export function weeklyPeriodKey(now: Date): string {
   return `${isoYear}-W${pad2(week)}`;
 }
 
+/**
+ * Midnight UTC on the same calendar day as `now` - the start of the window
+ * `dailyPeriodKey(now)` addresses. Added for the GC-earned leaderboard
+ * (economy/leaderboard.ts), which needs an actual instant to filter
+ * `transactions.created_at >= ...` by rather than a string key (the ledger
+ * already has a real timestamp per row, unlike challenge progress which has
+ * no timestamp of its own and is addressed by key alone) - same UTC-day
+ * definition as dailyPeriodKey, just expressed as a Date instead of a
+ * string, so the two can never drift apart on what "today" means.
+ */
+export function startOfUtcDay(now: Date): Date {
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+}
+
+/**
+ * Midnight UTC on the Monday of the same ISO week as `now` - the start of
+ * the window `weeklyPeriodKey(now)` addresses. Same reasoning as
+ * startOfUtcDay above; the Monday-start math mirrors periodEndsAt's
+ * "daysUntilNextMonday" construction below, just walking backward to the
+ * start of the current week instead of forward to the start of the next
+ * one.
+ */
+export function startOfUtcWeek(now: Date): Date {
+  const day = startOfUtcDay(now);
+  const isoWeekday = day.getUTCDay() === 0 ? 7 : day.getUTCDay();
+  day.setUTCDate(day.getUTCDate() - (isoWeekday - 1));
+  return day;
+}
+
 /** The period key a challenge of `period` addresses at instant `now`. */
 export function periodKeyFor(period: ChallengePeriod, now: Date = new Date()): string {
   switch (period) {

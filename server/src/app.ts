@@ -18,6 +18,7 @@ import gamesRoutes from "./routes/games";
 import adsRoutes from "./routes/ads";
 import eventsRoutes from "./routes/events";
 import progressionRoutes from "./routes/progression";
+import leaderboardRoutes from "./routes/leaderboard";
 import magazineRoutes from "./routes/magazine";
 import { InsufficientBalanceError } from "./economy/ledger";
 
@@ -44,6 +45,7 @@ app.use(gamesRoutes);
 app.use(adsRoutes);
 app.use(eventsRoutes);
 app.use(progressionRoutes);
+app.use(leaderboardRoutes);
 app.use(magazineRoutes);
 
 app.use((req, res) => {
