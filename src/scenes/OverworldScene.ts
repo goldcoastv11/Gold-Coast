@@ -41,6 +41,8 @@ import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
+import { launchLevelUpMinigame } from "../levelUpMinigameLauncher";
+import type { PendingLevelMinigame } from "../api/types";
 import { playSfx, playMusic } from "../ui/SoundManager";
 import { createTouchControls, isTouchDevice, TouchControlsHandle } from "../ui/TouchControls";
 
@@ -443,6 +445,13 @@ export class OverworldScene extends Phaser.Scene {
   /** The Challenge Board station's floating name label, so refreshChallengeBadge() can append a "N ready!" badge to it. */
   private challengeStationLabel?: Phaser.GameObjects.Text;
 
+  /** The Level-Up station's own cabinet sprite, so refreshLevelUpStation() knows where to draw/clear its "one is waiting" ring. */
+  private levelUpStationSprite?: Phaser.Physics.Arcade.Sprite;
+  /** The Level-Up station's pulsing highlight ring (see ui/TutorialGuide.ts's showHighlightRing, the same ring the onboarding tutorial uses), shown exactly while a minigame is owed - undefined when none is. Deliberately its own field, not activeTutorialHighlight below: that one is auto-cleared the instant any real panel opens (see panelOpen's setter), which would hide this ring the moment the player opened, say, the Item Shop - this station's ring has to persist across other panels until the minigame is actually played. */
+  private levelUpHighlight?: HighlightHandle;
+  /** Local cache of GET /progression's pendingLevelMinigame, refreshed by refreshLevelUpStation() - read by the station's own interact handler so pressing E doesn't need a second round trip on top of the one refreshLevelUpStation() already made. */
+  private pendingLevelUpMinigame: PendingLevelMinigame = null;
+
   /** The onboarding tutorial's currently-showing "go do this for real" highlight ring + instruction bubble, if any - see runHandsOnStep/clearTutorialHighlight. */
   private activeTutorialHighlight?: HighlightHandle;
   private activeTutorialInstruction?: InstructionHandle;
@@ -710,8 +719,37 @@ export class OverworldScene extends Phaser.Scene {
     );
     this.refreshChallengeBadge();
 
-    // (67,38), the standalone "Ad Kiosk" station's old spot, is now empty -
-    // that station was retired and consolidated into the Coin Kiosk above.
+    // Level-Up station - the walk-up cabinet for the "stop the marker"
+    // level-up minigame (see levelUpMinigameLauncher.ts and
+    // LevelUpMinigameScene.ts). Founder direction, from real play: "I want
+    // it to be its own kiosk that has a ring around it (similar to the
+    // tutorial) when it is activated" - it used to fire automatically out of
+    // the Challenges panel (see openChallengesPanel's removed calls); this
+    // station replaces that with a real thing to walk up to.
+    //
+    // Wired exactly like the Item Shop/Challenge Board above: a static
+    // cabinet-scale sprite, a collider, and a registerStation walk-up
+    // handler. Placed at (67,38) - the standalone "Ad Kiosk" station's old
+    // spot (that station was retired and consolidated into the Coin Kiosk
+    // above), already verified clear of Hi-Lo (67,28) and Video Poker
+    // (67,48), both 10 tiles/160px away - well beyond any station's own
+    // ~40-48px interaction radius.
+    const levelUpKiosk = this.physics.add.staticSprite(67 * TILE, 38 * TILE, "levelup_kiosk");
+    if (isTouchDevice()) levelUpKiosk.setScale(MOBILE_FURNITURE_SCALE_BOOST);
+    levelUpKiosk.refreshBody();
+    this.physics.add.collider(this.player, levelUpKiosk);
+    this.levelUpStationSprite = levelUpKiosk;
+    this.registerStation(
+      levelUpKiosk,
+      "Level-Up",
+      "Press E to play your Level-Up game",
+      () => this.openLevelUpKiosk()
+    );
+    // Checks pending state right now, on scene entry - not only after a
+    // claim - so a player who levelled up and reloaded (or just walked back
+    // in from a game) sees the ring without having to open Challenges first.
+    // See this method's own doc comment for the login-time gap this closes.
+    this.refreshLevelUpStation();
 
     // Ambient bystanders - purely decorative "social hub" flavor. Back on
     // the three spare Kenney NPC sheets (see AMBIENT_IDLE_FRAME_FOR_DIR's
@@ -1605,6 +1643,24 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   /**
+   * The Level-Up station's walk-up handler. Reads the local
+   * pendingLevelUpMinigame cache (kept fresh by refreshLevelUpStation(),
+   * called on scene entry and on Challenges panel close) rather than making
+   * its own round trip - same "trust the cache, resync on the real action's
+   * own response" shape as openCoinKiosk()'s cooldown check below. If
+   * nothing is owed (the common case - the ring is what tells a player
+   * whether it's worth walking over at all), this is just a toast, not an
+   * error.
+   */
+  private openLevelUpKiosk() {
+    if (!this.pendingLevelUpMinigame) {
+      this.showToast("Nothing to play here right now - level up to unlock it!", Theme.textMuted);
+      return;
+    }
+    launchLevelUpMinigame(this, this.pendingLevelUpMinigame);
+  }
+
+  /**
    * The Coin Kiosk's offer/simulated-ad/shuffle-cup/result flow (formerly
    * "Chip Attendant" + the separate standalone "Ad Kiosk" - see
    * registerStation's comment above and economy/attendantClaim.ts's doc
@@ -1910,6 +1966,53 @@ export class OverworldScene extends Phaser.Scene {
       });
   }
 
+  /**
+   * Checks whether the Level-Up minigame is currently owed and updates the
+   * station's ring to match - shown while one is pending, cleared once it
+   * isn't. Same "check on scene entry" shape as refreshChallengeBadge()
+   * above: called once from create() (so it's correct on walking in, not
+   * only after a claim) and again whenever the Challenges panel closes (so
+   * a level-up claimed mid-session, without ever leaving the overworld,
+   * still lights the ring up promptly rather than waiting for the next real
+   * scene transition).
+   *
+   * This is also what closes the actual known gap the founder flagged:
+   * previously nothing called GET /progression on plain login/reload, so a
+   * player who levelled up and reloaded without opening Challenges never
+   * saw anything owed to them. This station's ring is driven by exactly
+   * that same GET /progression call, made unconditionally on every scene
+   * entry - so that player now sees the ring the moment they're back on the
+   * floor, no Challenges panel required.
+   *
+   * Fire-and-forget and silent on failure, same reasoning as
+   * refreshChallengeBadge(): a station that simply doesn't light up is a
+   * far better failure mode than an error toast on entering the overworld.
+   */
+  private refreshLevelUpStation() {
+    const sprite = this.levelUpStationSprite;
+    if (!sprite) return;
+    api
+      .getProgression()
+      .then((progression) => {
+        // The scene can be torn down (a game entered, the title screen)
+        // while this is in flight; a destroyed sprite has no `scene`.
+        if (!sprite.scene) return;
+        this.pendingLevelUpMinigame = progression.pendingLevelMinigame ?? null;
+        if (this.pendingLevelUpMinigame) {
+          if (!this.levelUpHighlight) {
+            const radius = Math.max(sprite.displayWidth, sprite.displayHeight) / 2 + 6;
+            this.levelUpHighlight = showHighlightRing(this, sprite.x, sprite.y, radius);
+          }
+        } else {
+          this.levelUpHighlight?.destroy();
+          this.levelUpHighlight = undefined;
+        }
+      })
+      .catch(() => {
+        // Silent by design - see this method's doc comment.
+      });
+  }
+
   private activeToast?: TextChip;
 
   /**
@@ -2002,14 +2105,21 @@ export class OverworldScene extends Phaser.Scene {
    *
    * Re-reads the station badge on close, so claiming everything while the
    * panel is open leaves the floor label correct instead of still
-   * advertising rewards that are already banked.
+   * advertising rewards that are already banked. Also re-checks the
+   * Level-Up station's ring on close for the same reason: a claim made
+   * while the panel is open can cross a level boundary, and the ring should
+   * light up right away rather than waiting for the player to next leave
+   * and re-enter the overworld.
    */
   private openChallengesPanel() {
     openChallengesPanel({
       ...this.challengesPanelHost,
       setPanelOpen: (open) => {
         this.panelOpen = open;
-        if (!open) this.refreshChallengeBadge();
+        if (!open) {
+          this.refreshChallengeBadge();
+          this.refreshLevelUpStation();
+        }
       }
     });
   }

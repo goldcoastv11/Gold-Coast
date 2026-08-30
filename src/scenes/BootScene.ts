@@ -276,6 +276,7 @@ export class BootScene extends Phaser.Scene {
     this.createCoinKioskTexture();
     this.createItemShopTexture();
     this.createChallengeBoardTexture();
+    this.createLevelUpKioskTexture();
     this.createComingSoonTexture();
     this.createPlantTexture();
     this.createRouletteTableTexture();
@@ -1152,6 +1153,54 @@ export class BootScene extends Phaser.Scene {
 
     this.drawCabinetBase(g, w, h);
     g.generateTexture("challenge_board", w, h);
+    g.destroy();
+  }
+
+  /**
+   * The overworld Level-Up station - a walk-up cabinet for the "stop the
+   * marker" level-up minigame (see OverworldScene's registerStation call,
+   * levelUpMinigameLauncher.ts, and LevelUpMinigameScene.ts). Same 48x64
+   * cabinet construction as the Coin Kiosk/Item Shop/Challenge Board so it
+   * reads as part of the same floor furniture family, with a rank-chevron
+   * read: an upward arrowhead finial on top (this station's whole job is
+   * signalling "go up a level," so an unmissable "up" shape distinguishes it
+   * from the Challenge Board's star and the Coin Kiosk's antenna at a
+   * glance), plus three stacked gold chevrons on the screen panel - the
+   * universal "promotion/level up" rank-stripe motif. The founder's own
+   * highlight ring (OverworldScene's showHighlightRing, reused from the
+   * tutorial) is what actually signals "one is waiting" - this texture is
+   * just the station's resting-state look.
+   */
+  private createLevelUpKioskTexture() {
+    const w = 48;
+    const h = 64;
+    const g = this.add.graphics();
+    this.drawCabinetBody(g, w, h);
+
+    // Up-arrow finial on top - a single arrowhead + stem, unmistakably "up."
+    const cx = w / 2;
+    g.fillStyle(PALETTE.gold, 1);
+    g.fillTriangle(cx, 0, cx - 7, 9, cx + 7, 9);
+    g.fillRect(cx - 2, 8, 4, 5);
+
+    this.drawCabinetScreen(g, 9, 16, w - 18, 30);
+
+    // Three stacked rank chevrons ("∧∧∧"), cream at the base brightening to
+    // gold at the top so the eye reads them bottom-up like a real level
+    // ladder.
+    const chevronColors = [PALETTE.cream, PALETTE.coral, PALETTE.gold];
+    const chevronYs = [39, 31, 23];
+    for (let i = 0; i < 3; i++) {
+      g.lineStyle(3, chevronColors[i], 1);
+      g.beginPath();
+      g.moveTo(cx - 10, chevronYs[i] + 5);
+      g.lineTo(cx, chevronYs[i]);
+      g.lineTo(cx + 10, chevronYs[i] + 5);
+      g.strokePath();
+    }
+
+    this.drawCabinetBase(g, w, h);
+    g.generateTexture("levelup_kiosk", w, h);
     g.destroy();
   }
 

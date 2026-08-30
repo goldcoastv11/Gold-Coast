@@ -7,7 +7,6 @@ import { playSfx } from "./SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
-import { launchLevelUpMinigame } from "../levelUpMinigameLauncher";
 import type { ChallengeBoardResponse, ChallengeView, ProgressionResponse } from "../api/types";
 import {
   claimableCount,
@@ -493,12 +492,12 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
         showClaimCelebration(scene, res.claimed.rewardGc, res.claimed.rewardXp);
 
         // A claim can cross a level boundary, which owes the player the
-        // level-up minigame. This supersedes the level-up banner below when
-        // one is owed - the minigame shows the new level itself, and this
-        // fades the scene out, cancelling the delayed banner. A no-op when
-        // nothing is pending, so the banner still plays as before.
-        launchLevelUpMinigame(scene, res.pendingLevelMinigame);
-
+        // level-up minigame - it used to launch automatically right here,
+        // superseding the level-up banner below. It no longer does: the
+        // minigame is now its own walk-up station on the casino floor (see
+        // OverworldScene's Level-Up kiosk + refreshLevelUpStation()), so the
+        // banner below plays normally again, uninterrupted, exactly as it
+        // did before the minigame existed.
         if (res.levelsGained.length > 0) {
           // Levelling up mid-session must be visible. Held back until the
           // claim celebration has had its moment so the two don't collide.
@@ -730,13 +729,13 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
         progression = nextProgression;
         claimInFlight = false;
 
-        // Resumption: a player who closed the tab mid-minigame still owes it.
-        // Opening Challenges takes them straight into it rather than showing
-        // a board with nothing claimable yet.
-        if (nextProgression.pendingLevelMinigame) {
-          launchLevelUpMinigame(scene, nextProgression.pendingLevelMinigame);
-          return;
-        }
+        // A player who still owes the Level-Up minigame (e.g. closed the
+        // tab mid-minigame, or levelled up and hasn't played it yet) used to
+        // get dropped straight into it here on opening Challenges. It no
+        // longer does: the minigame is now its own walk-up station on the
+        // casino floor (see OverworldScene's Level-Up kiosk), which reads
+        // this same pendingLevelMinigame flag via GET /progression on its
+        // own, so this panel opens normally and shows the board underneath.
         if (!nextBoard.available) {
           status = "unavailable";
           render();
