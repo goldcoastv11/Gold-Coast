@@ -11,9 +11,13 @@
  * history for that entry - it's been removed now that this claim no longer
  * grants SC at all, so the exception it authorized no longer applies to
  * anything). Per that removal, this is now a plain GC-only free claim, no
- * different in kind from an ad-reward refill (src/economy/adRewards.ts) -
- * it just has a variable multiplier (via the shuffle-cup mini-game) instead
- * of a flat amount, and its own separately-tracked cooldown. It grants via
+ * different in kind from an ad-reward refill - it just has a variable
+ * multiplier (via the shuffle-cup mini-game) instead of a flat amount, and
+ * its own separately-tracked cooldown. (The standalone ad-reward-refill
+ * module this used to be compared against, economy/adRewards.ts, was
+ * itself removed as dead code, 2026-08-30 roadmap/deadcode - nothing in
+ * the client ever called it; this Coin Kiosk claim was always the real,
+ * live path.) It grants via
  * `AD_REWARD_GC` (the same transaction type ad-reward refills use), not
  * `PACKAGE_GC`/`grantPackage` - there's no SC leg left to justify routing
  * this through the purchase-bonus package machinery.

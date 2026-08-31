@@ -501,9 +501,10 @@ export async function getProgression(tx: TxClient, userId: string): Promise<Prog
  * `getProgression` for display-only call sites (serializeMe), read on the
  * top-level `prisma` client rather than a shared `tx` and degrading to a
  * level-1 default on any error. Exactly the same reasoning as
- * serializers.ts's getAdRewardLastClaimedAt/getItemShopState: a table this
- * environment hasn't migrated yet must degrade this one feature, not abort
- * the transaction behind every authenticated response.
+ * serializers.ts's getItemShopState (see that file's header comment on the
+ * isolation trick): a table this environment hasn't migrated yet must
+ * degrade this one feature, not abort the transaction behind every
+ * authenticated response.
  */
 export async function getProgressionForDisplay(userId: string): Promise<{ level: number; xp: number }> {
   try {

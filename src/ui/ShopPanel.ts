@@ -10,7 +10,6 @@ import {
   listPiecesBySlot
 } from "../wardrobeCatalog";
 import { LPC_RIG, idleFrame } from "../characterRig";
-import { ItemDef, ItemCategory, listItemsByCategory } from "../itemCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
 import * as api from "../api/client";
@@ -19,24 +18,28 @@ import { track, EVENTS } from "../api/track";
 import { playSfx } from "./SoundManager";
 
 /**
- * The overworld's shop/wardrobe panels - the category picker, the
- * accessory/pet panel, and the layered-wardrobe slot picker and piece
- * panel. These were lifted out of OverworldScene.ts, which had grown to
- * ~2,400 lines doing the casino floor, the tutorial, the Coin Kiosk, the
- * shuffle mini-game AND all of these panels at once.
+ * The overworld's shop/wardrobe panels - the category picker and the
+ * layered-wardrobe slot picker and piece panel. These were lifted out of
+ * OverworldScene.ts, which had grown to ~2,400 lines doing the casino
+ * floor, the tutorial, the Coin Kiosk, the shuffle mini-game AND all of
+ * these panels at once.
  *
  * The wardrobe panels replaced a single "skin panel" that sold 17 complete
  * characters. Buying a look is now buying one LAYER of it - so where there
  * was one flat list there is now a slot picker (which layer?) fronting a
- * per-slot list (which piece?). The accessory/pet panel is untouched by
- * that change and keeps its original geometry, which the wardrobe panel
- * then copies so the whole shop still feels like one thing.
+ * per-slot list (which piece?).
+ *
+ * This module used to also have an accessory/pet browsing panel
+ * (openItemPanel), mirroring this same shape - removed as dead code
+ * (2026-08-30 roadmap/deadcode) once the founder pulled its only entry
+ * point from the category menu below; see that removal's comment for why,
+ * and OverworldScene.ts for what still renders an already-equipped
+ * accessory/pet.
  *
  * Everything the panels need from the scene that isn't the scene itself
  * (the panel-open flag, the HUD, the toast, the player's layered
- * character, the equipped accessory/pet visuals) comes in through
- * ShopPanelHost below, so this module never reaches back into
- * OverworldScene's privates.
+ * character) comes in through ShopPanelHost below, so this module never
+ * reaches back into OverworldScene's privates.
  */
 
 export type ShopMode = "shop" | "wardrobe";
@@ -59,10 +62,6 @@ export interface ShopPanelHost {
   updateHud(): void;
   /** Brief fading confirmation/error message above the panel. */
   showToast(message: string, color: string): void;
-  /** Re-reads gameState.equippedAccessory and updates the worn badge. */
-  applyEquippedAccessory(): void;
-  /** Re-reads gameState.equippedPet and updates the follower sprite. */
-  applyEquippedPet(): void;
   /**
    * Rebuilds the player's layered character from gameState.equippedWardrobe
    * and re-tunes its collision body + on-screen scale.
@@ -144,13 +143,15 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
   // Accessories/Pets removed from here (founder direction, 2026-08-30):
   // that catalog (src/itemCatalog.ts) is the older cosmetics system the
   // layered wardrobe replaced - emoji badges and companion pets, no longer
-  // sold or wearable through this menu. Backend/routes/catalog are
-  // untouched (additive-only precedent, see CLAUDE.md) - openItemPanel
-  // below still exists and still works, it's just no longer reachable from
-  // here. A player who already equipped one keeps wearing it (see
-  // OverworldScene's applyEquippedAccessory/applyEquippedPet, still called
-  // unconditionally on scene create - this menu removal doesn't touch
-  // that), they just have no in-game way to take it off any more.
+  // sold or wearable through this menu. With no way left to reach it, the
+  // browsing panel this used to open (openItemPanel) and its buy/equip/
+  // unequip backend (routes/items.ts, economy/itemShop.ts's write
+  // functions) were dead code and removed (2026-08-30 roadmap/deadcode,
+  // see repo-root CLAUDE.md). A player who already equipped one keeps
+  // wearing it (see OverworldScene's applyEquippedAccessory/
+  // applyEquippedPet, still called unconditionally on scene create - none
+  // of this removal touches that), they just have no in-game way to take
+  // it off any more.
   const buttons: Array<[string, () => void]> = [
     ["👕 Clothing", () => openWardrobeSlotMenu(host, mode)]
   ];
@@ -169,249 +170,6 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
   });
   closeBtn.container.setScrollFactor(0).setDepth(201);
   elements.push(closeBtn.container);
-}
-
-/**
- * Accessory/Pet browsing panel - structurally mirrors openWardrobePanel()
- * below (same paginated shop/wardrobe shape) but is a fully independent
- * function reading ITEM_CATALOG, so nothing here can regress the live,
- * already-shipped accessory/pet purchase flow. The preview is the drawn
- * accessory texture or a small character-sheet thumbnail rather than a
- * layered character render, since neither is a wardrobe layer.
- */
-export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode: ShopMode) {
-  const scene = host.scene;
-  host.setPanelOpen(true);
-  playSfx(scene, "open");
-  let page = 0;
-  const itemsPerPage = 4;
-  let elements: Phaser.GameObjects.GameObject[] = [];
-
-  const getItems = (): ItemDef[] =>
-    mode === "shop"
-      ? listItemsByCategory(category).filter((i) => !gameState.ownsItem(i.id))
-      : listItemsByCategory(category).filter((i) => gameState.ownsItem(i.id));
-
-  const currentlyEquipped = () => (category === "ACCESSORY" ? gameState.equippedAccessory : gameState.equippedPet);
-
-  const cleanup = () => {
-    elements.forEach((e) => e.destroy());
-    elements = [];
-  };
-
-  const applyEquipped = () => {
-    if (category === "ACCESSORY") host.applyEquippedAccessory();
-    else host.applyEquippedPet();
-  };
-
-  const label = category === "ACCESSORY" ? "Accessories" : "Pets";
-  const emoji = category === "ACCESSORY" ? "🎩" : "🐾";
-
-  const render = () => {
-    cleanup();
-    const items = getItems();
-    const totalPages = Math.max(1, Math.ceil(items.length / itemsPerPage));
-    page = Phaser.Math.Clamp(page, 0, totalPages - 1);
-    const pageItems = items.slice(page * itemsPerPage, page * itemsPerPage + itemsPerPage);
-
-    const panel = makePanel(scene, 400, 300, 460, 440, 200).setScrollFactor(0);
-    elements.push(panel);
-
-    const title = scene.add
-      .text(400, 140, `${emoji} ${mode === "shop" ? `${label} Shop` : label}`, {
-        fontSize: "20px",
-        color: Theme.textGold,
-        fontStyle: "bold"
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(201);
-    elements.push(title);
-
-    const sub = scene.add
-      .text(
-        400,
-        162,
-        mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : `Pick a ${label.slice(0, -1).toLowerCase()} to wear`,
-        { fontSize: "13px", color: Theme.textMuted }
-      )
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(201);
-    elements.push(sub);
-
-    if (pageItems.length === 0) {
-      const empty = scene.add
-        .text(
-          400,
-          280,
-          mode === "shop" ? `You own every ${label.toLowerCase()} item!` : `Nothing owned yet.\nVisit the ${label} Shop to buy one.`,
-          { fontSize: "14px", color: Theme.textMuted, align: "center" }
-        )
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(empty);
-    }
-
-    pageItems.forEach((def, i) => {
-      const y = 165 + i * 58;
-      const row = makeInset(scene, 400, y, 400, 48, 10);
-      row.setScrollFactor(0).setDepth(200);
-      elements.push(row);
-
-      const isEquipped = mode === "wardrobe" && currentlyEquipped() === def.id;
-
-      // Preview: the real drawn accessory texture (see
-      // BootScene.ts's createAccessoryTextures) scaled up so it's legible
-      // in the row, or a small character-sheet thumbnail (frame 1) for pets.
-      const preview =
-        def.category === "ACCESSORY"
-          ? scene.add.image(219, y, def.textureKey ?? "acc_bow").setScale(2.2)
-          : scene.add.image(219, y, def.textureKey ?? "npc2_sheet", 1).setScale(1.6);
-      preview.setScrollFactor(0).setDepth(201);
-      elements.push(preview);
-
-      const nameLabel = scene.add
-        .text(252, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
-          fontSize: "14px",
-          color: isEquipped ? Theme.textAccent : Theme.textPrimary,
-          fontStyle: isEquipped ? "bold" : "normal"
-        })
-        .setOrigin(0, 0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(nameLabel);
-
-      if (mode === "shop") {
-        const priceLabel = scene.add
-          .text(370, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
-          .setOrigin(0, 0.5)
-          .setScrollFactor(0)
-          .setDepth(201);
-        elements.push(priceLabel);
-
-        const canAfford = gameState.goldCoins >= def.price;
-        const buyBtn = makeButton(
-          scene,
-          540,
-          y,
-          90,
-          42,
-          "Buy",
-          canAfford ? Theme.accent : Theme.neutral,
-          canAfford ? Theme.accentHover : Theme.neutral,
-          () => {
-            // Same "a purchase also equips it" product decision the
-            // wardrobe makes (see economy/itemShop.ts's purchaseItem doc comment).
-            buyBtn.setEnabled(false);
-            api
-              .buyItem(def.id)
-              .then((res) => {
-                // Retention Leg 1: what players spend their Gold Coins on -
-                // catalog id and price only, both already-public catalog
-                // facts. Fired on the server's confirmed success, never
-                // on the optimistic click.
-                track(EVENTS.ITEM_PURCHASED, { itemId: def.id, price: def.price });
-                gameState.hydrateFromServer(res.user);
-                applyEquipped();
-                host.updateHud();
-                host.showToast(`✓ Bought & wearing ${def.name}!`, Theme.textAccent);
-                playSfx(scene, "confirm");
-                render();
-              })
-              .catch((err) => {
-                host.showToast(describeShopError(err, `buy ${def.name}`), Theme.textDanger);
-                playSfx(scene, "error");
-                render();
-              });
-          }
-        );
-        if (!canAfford) buyBtn.setEnabled(false);
-        buyBtn.container.setScrollFactor(0).setDepth(201);
-        elements.push(buyBtn.container);
-      } else if (isEquipped) {
-        // "wearing nothing" is a valid state for accessories/pets (as it
-        // is for every wardrobe slot but BODY) - the currently-worn
-        // row gets an active "Take Off" button instead of a disabled
-        // "Worn" one.
-        const takeOffBtn = makeButton(scene, 540, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
-          takeOffBtn.setEnabled(false);
-          api
-            .unequipItem(category)
-            .then((res) => {
-              gameState.hydrateFromServer(res.user);
-              applyEquipped();
-              render();
-            })
-            .catch((err) => {
-              host.showToast(describeShopError(err, `take off ${def.name}`), Theme.textDanger);
-              render();
-            });
-        });
-        takeOffBtn.container.setScrollFactor(0).setDepth(201);
-        elements.push(takeOffBtn.container);
-      } else {
-        const wearBtn = makeButton(scene, 540, y, 90, 42, "Wear", Theme.accent, Theme.accentHover, () => {
-          wearBtn.setEnabled(false);
-          api
-            .equipItem(def.id)
-            .then((res) => {
-              // Retention Leg 1: equipping is the "do players care about
-              // the cosmetics they bought" signal - a bought-and-never-
-              // worn item is a very different product answer to a
-              // bought-and-worn one.
-              track(EVENTS.ITEM_EQUIPPED, { itemId: def.id });
-              gameState.hydrateFromServer(res.user);
-              applyEquipped();
-              render();
-            })
-            .catch((err) => {
-              host.showToast(describeShopError(err, `wear ${def.name}`), Theme.textDanger);
-              render();
-            });
-        });
-        wearBtn.container.setScrollFactor(0).setDepth(201);
-        elements.push(wearBtn.container);
-      }
-    });
-
-    if (totalPages > 1) {
-      const pageLabel = scene.add
-        .text(400, 405, `Page ${page + 1} / ${totalPages}`, { fontSize: "12px", color: Theme.textMuted })
-        .setOrigin(0.5)
-        .setScrollFactor(0)
-        .setDepth(201);
-      elements.push(pageLabel);
-
-      if (page > 0) {
-        const prevBtn = makeButton(scene, 290, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
-          page--;
-          render();
-        });
-        prevBtn.container.setScrollFactor(0).setDepth(201);
-        elements.push(prevBtn.container);
-      }
-      if (page < totalPages - 1) {
-        const nextBtn = makeButton(scene, 510, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
-          page++;
-          render();
-        });
-        nextBtn.container.setScrollFactor(0).setDepth(201);
-        elements.push(nextBtn.container);
-      }
-    }
-
-    const closeBtn = makeButton(scene, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
-      cleanup();
-      host.setPanelOpen(false);
-      host.updateHud();
-    });
-    closeBtn.container.setScrollFactor(0).setDepth(201);
-    elements.push(closeBtn.container);
-  };
-
-  render();
 }
 
 

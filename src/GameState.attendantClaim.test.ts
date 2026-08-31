@@ -22,13 +22,11 @@ describe("GameState.claimAttendantBonus (#18/#19)", () => {
   it("grants GC only (no SC) at the default 1x multiplier", () => {
     gameState.login("gina", "pw");
     const gcBefore = gameState.goldCoins;
-    const ticketsBefore = gameState.tickets;
 
     const outcome = gameState.claimAttendantBonus();
 
     expect(outcome.ok).toBe(true);
     expect(gameState.goldCoins).toBe(gcBefore + GC_MULTIPLIER_BASE);
-    expect(gameState.tickets).toBe(ticketsBefore);
   });
 
   it("is available immediately for a brand-new profile", () => {
@@ -69,15 +67,5 @@ describe("GameState.claimAttendantBonus (#18/#19)", () => {
     const blocked = gameState.claimAttendantBonus();
     expect(blocked.ok).toBe(false);
     expect(gameState.goldCoins).toBe(gcBeforeBlockedClaim);
-  });
-
-  it("does not affect claimBonus()'s independent GC-only ad-reward path", () => {
-    gameState.login("kim", "pw");
-    gameState.claimAttendantBonus(); // now on cooldown
-    const ticketsBefore = gameState.tickets;
-
-    const adAmount = gameState.claimBonus(); // ad-reward path, unrelated cooldown/state
-    expect(adAmount).toBeGreaterThan(0);
-    expect(gameState.tickets).toBe(ticketsBefore); // ad reward never touches TICKETS
   });
 });

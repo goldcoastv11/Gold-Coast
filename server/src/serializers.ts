@@ -74,7 +74,6 @@ export interface MeResponse {
   equippedPet: string | null;
   lastPosition: { x: number; y: number } | null;
   attendantClaim: { lastClaimedAt: string | null };
-  adReward: { lastClaimedAt: string | null };
   /**
    * The user's currently-active stateful-game round (Mines/Dragon Tower/
    * Hi-Lo/Blackjack/Video Poker), or null if none. Added alongside #42
@@ -99,16 +98,21 @@ export interface MeResponse {
 }
 
 /**
- * Reads the ad-reward claim row on the TOP-LEVEL `prisma` client -
- * deliberately NOT on the caller's `tx` (interactive transaction handle) -
- * and swallows any error into `null`.
+ * Reads a display-only row on the TOP-LEVEL `prisma` client - deliberately
+ * NOT on the caller's `tx` (interactive transaction handle) - and swallows
+ * any error into a degraded default. This isolation trick used to also
+ * guard `getAdRewardLastClaimedAt` (the standalone "Ad Kiosk" claim's
+ * cooldown read); that function and the route/module it served were
+ * removed as dead code (2026-08-30 roadmap/deadcode, see repo-root
+ * CLAUDE.md) - the `ad_reward_claim` table stays, unused, same
+ * additive-only precedent as everything else retired in this codebase.
  *
- * Why not just `tx.adRewardClaim.findUnique(...).catch(() => null)`: a
- * first attempt at that shipped and still 500'd every authenticated
- * response in production. Reason - once ANY query inside a Postgres
- * transaction errors (e.g. "relation ad_reward_claim does not exist",
- * because the migration for it hadn't been applied there yet - migrations
- * aren't automatic on deploy, see DEPLOYMENT.md), Postgres marks the WHOLE
+ * Why the isolation matters at all: a first attempt at querying this kind
+ * of row directly on the shared `tx` shipped and still 500'd every
+ * authenticated response in production. Reason - once ANY query inside a
+ * Postgres transaction errors (e.g. "relation ... does not exist", because
+ * the migration for it hadn't been applied there yet - migrations aren't
+ * automatic on deploy, see DEPLOYMENT.md), Postgres marks the WHOLE
  * transaction aborted; every other query sharing that same `tx` then fails
  * too ("current transaction is aborted, commands ignored until end of
  * transaction block"), no matter how the failing query's own promise is
@@ -120,17 +124,9 @@ export interface MeResponse {
  * workaround: this read is purely informational display data, not part of
  * the atomic write the rest of `serializeMe` might be participating in.
  */
-async function getAdRewardLastClaimedAt(userId: string): Promise<string | null> {
-  try {
-    const row = await prisma.adRewardClaim.findUnique({ where: { userId } });
-    return row?.lastClaimedAt ? row.lastClaimedAt.toISOString() : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
- * Same isolation as getAdRewardLastClaimedAt above, same reason: items_owned/
+ * Same isolation as this file's header comment above, same reason: items_owned/
  * equipped_items are a BRAND NEW migration (see schema.prisma's ItemOwned/
  * EquippedItem doc comment) that won't exist on any environment until
  * someone runs `railway run npx prisma migrate deploy` against it (see
@@ -245,7 +241,6 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     itemShopState,
     lastPosition,
     attendantClaim,
-    adRewardLastClaimedAt,
     activeRound,
     progression
   ] = await Promise.all([
@@ -257,7 +252,6 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     getItemShopState(userId),
     tx.lastPosition.findUnique({ where: { userId } }),
     tx.attendantClaim.findUnique({ where: { userId } }),
-    getAdRewardLastClaimedAt(userId),
     tx.gameRound.findFirst({ where: { userId, status: "active" }, select: { id: true, game: true } }),
     getProgressionForDisplay(userId)
   ]);
@@ -275,9 +269,6 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     lastPosition: lastPosition ? { x: lastPosition.x, y: lastPosition.y } : null,
     attendantClaim: {
       lastClaimedAt: attendantClaim?.lastClaimedAt ? attendantClaim.lastClaimedAt.toISOString() : null
-    },
-    adReward: {
-      lastClaimedAt: adRewardLastClaimedAt
     },
     activeRound: activeRound ? { game: activeRound.game, roundId: activeRound.id } : null,
     progression
