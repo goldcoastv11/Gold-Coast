@@ -15,6 +15,7 @@ import { applyTransaction } from "../src/economy/ledger";
 import { getLeaderboard, LeaderboardResponse } from "../src/economy/leaderboard";
 import { resetDb, signupUser, authed, SignedUpUser } from "./helpers";
 import { DEFAULT_BODY_PIECE_ID } from "../src/wardrobeCatalog";
+import { startOfUtcDay, startOfUtcWeek } from "../src/progression/periods";
 
 beforeEach(resetDb);
 
@@ -29,9 +30,28 @@ async function userIdFor(username: string): Promise<string> {
   return user.id;
 }
 
+/**
+ * Window boundaries are derived from the SAME helpers the leaderboard uses,
+ * not from "N days ago". The old version backdated rows by a fixed number of
+ * days and assumed each landed in the window it was named for - which is only
+ * true on most days. On a Monday (UTC) the ISO week starts today, so there is
+ * no earlier day still inside "this week", and "yesterday" fell into the
+ * previous week: the weekly assertion failed every Monday while the
+ * leaderboard itself was behaving correctly.
+ *
+ * Anchoring to the real boundaries makes each instant unambiguous on every
+ * day of the week.
+ */
 const NOW = new Date();
-const YESTERDAY = new Date(NOW.getTime() - 2 * 24 * 60 * 60 * 1000);
-const LAST_WEEK = new Date(NOW.getTime() - 9 * 24 * 60 * 60 * 1000);
+const DAY_START = startOfUtcDay(NOW);
+const WEEK_START = startOfUtcWeek(NOW);
+
+/** Inside today (and therefore inside this week and all-time). */
+const IN_DAY = new Date(DAY_START.getTime() + 60 * 60 * 1000);
+/** Before today started but at or after this week did - so weekly + all-time only. On a Monday this is the same hour as IN_DAY, which is still correct: both are in the day and the week. */
+const IN_WEEK_NOT_DAY = new Date(Math.max(WEEK_START.getTime(), DAY_START.getTime() - 60 * 60 * 1000));
+/** Comfortably before this week began - all-time only. */
+const BEFORE_WEEK = new Date(WEEK_START.getTime() - 2 * 24 * 60 * 60 * 1000);
 
 async function getBoard(token: string): Promise<LeaderboardResponse> {
   const res = await request(app).get("/leaderboard").set(authed(token));
@@ -57,12 +77,20 @@ describe("GET /leaderboard", () => {
     const player = await signupUser();
     const userId = await userIdFor(player.username);
 
-    await grantAt(userId, "GAME_WIN_GC", 100, NOW); // in daily, weekly, all-time
-    await grantAt(userId, "GAME_WIN_GC", 50, YESTERDAY); // out of daily; in weekly + all-time
-    await grantAt(userId, "GAME_WIN_GC", 25, LAST_WEEK); // out of daily + weekly; in all-time only
+    await grantAt(userId, "GAME_WIN_GC", 100, IN_DAY); // daily + weekly + all-time
+    await grantAt(userId, "GAME_WIN_GC", 50, IN_WEEK_NOT_DAY); // weekly + all-time (and daily too, on the week's first day - see below)
+    await grantAt(userId, "GAME_WIN_GC", 25, BEFORE_WEEK); // all-time only
+
+    // On the first day of the UTC week, "before today but inside this week"
+    // does not exist - the week began at the same instant the day did - so
+    // the 50 legitimately lands in the daily bucket too. Deriving the
+    // expectation the same way the instants are derived keeps this correct on
+    // every day rather than only on most of them.
+    const midWeekIsAlsoToday = IN_WEEK_NOT_DAY >= DAY_START;
+    const expectedDaily = midWeekIsAlsoToday ? 150 : 100;
 
     const board = await getBoard(player.token);
-    expect(board.daily.me?.earnedGc).toBe(100);
+    expect(board.daily.me?.earnedGc).toBe(expectedDaily);
     expect(board.weekly.me?.earnedGc).toBe(150);
     expect(board.allTime.me?.earnedGc).toBe(175);
   });
