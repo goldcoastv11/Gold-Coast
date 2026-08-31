@@ -180,12 +180,7 @@ import type {
   BuyFurnitureResponse,
   PlaceFurnitureResponse,
   RemoveFurnitureResponse,
-  BuyItemResponse,
-  EquipItemResponse,
-  UnequipItemResponse,
-  ItemCategory,
   ClaimBonusResponse,
-  ClaimAdRewardResponse,
   Currency,
   DicePlayResponse,
   MinesStartResponse,
@@ -293,19 +288,13 @@ export function removeFurniturePiece(slot: FurnitureSlotId): Promise<RemoveFurni
   return request<RemoveFurnitureResponse>("/furniture/remove", { method: "POST", body: { slot } });
 }
 
-// ---- Items (accessories/pets) ----
-
-export function buyItem(itemId: string): Promise<BuyItemResponse> {
-  return request<BuyItemResponse>("/items/buy", { method: "POST", body: { itemId } });
-}
-
-export function equipItem(itemId: string): Promise<EquipItemResponse> {
-  return request<EquipItemResponse>("/items/equip", { method: "POST", body: { itemId } });
-}
-
-export function unequipItem(category: ItemCategory): Promise<UnequipItemResponse> {
-  return request<UnequipItemResponse>("/items/unequip", { method: "POST", body: { category } });
-}
+// The Items (accessories/pets) buy/equip/unequip client calls that used to
+// live here (POST /items/buy|equip|unequip) called a UI (ShopPanel.ts's
+// openItemPanel) that the founder removed (2026-08-30) - with no way left
+// to reach them, they and their server-side routes were dead code and
+// removed together (2026-08-30 roadmap/deadcode, see repo-root CLAUDE.md).
+// An already-equipped accessory/pet still renders (GET /me still returns
+// ownedItems/equippedAccessory/equippedPet - see api/types.ts).
 
 // ---- Attendant claim ----
 
@@ -313,11 +302,11 @@ export function claimBonus(): Promise<ClaimBonusResponse> {
   return request<ClaimBonusResponse>("/claim-bonus", { method: "POST" });
 }
 
-// ---- Ad reward (simulated - see server/src/economy/adRewards.ts) ----
-
-export function claimAdReward(): Promise<ClaimAdRewardResponse> {
-  return request<ClaimAdRewardResponse>("/ads/claim", { method: "POST" });
-}
+// The standalone, simulated "watch an ad for GC" route (POST /ads/claim)
+// that used to live here was dead code - nothing in the client ever called
+// it (the Coin Kiosk above is the real, live ad-gated claim flow). Removed
+// 2026-08-30 (roadmap/deadcode, see repo-root CLAUDE.md) along with its
+// server-side route/module.
 
 // ---- Games (#36 - server-authoritative RNG/payout) ----
 // Single-shot games (bet resolved in one request) each get one function

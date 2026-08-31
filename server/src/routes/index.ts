@@ -18,13 +18,11 @@
  * order-sensitive (checked before writing this - see app.ts). Kept
  * alphabetical purely so this list stays easy to scan.
  */
-import "./ads";
 import "./auth";
 import "./economy";
 import "./events";
 import "./furniture";
 import "./games";
-import "./items";
 import "./leaderboard";
 import "./magazine";
 import "./me";

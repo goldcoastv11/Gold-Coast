@@ -13,13 +13,12 @@ import {
   petTrailOffset,
   resolveRig
 } from "../characterRig";
-import { ITEM_CATALOG, ItemCategory, getItem, walkAnimPrefixForTexture } from "../itemCatalog";
+import { getItem, walkAnimPrefixForTexture } from "../itemCatalog";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, makeTextChip, TextChip, UIButton } from "../ui/uiHelpers";
 import {
   openShopCategoryMenu,
-  openItemPanel,
   openWardrobeSlotMenu,
   ShopPanelHost
 } from "../ui/ShopPanel";
@@ -781,9 +780,10 @@ export class OverworldScene extends Phaser.Scene {
     // create() above, which opens the same openChallengesPanel() panel and
     // carries the "N ready!" glow that used to be this station's badge (see
     // refreshChallengeBadge() below). BootScene's "challenge_board" texture
-    // is left generated-but-unused, same precedent as adRewards.ts's
-    // retired Ad Kiosk route - not worth touching for a pure cleanup with
-    // no functional benefit.
+    // is left generated-but-unused - a single unused procedural texture,
+    // not worth touching for a pure cleanup with no functional benefit
+    // (unlike the retired Ad Kiosk route, which was a whole dead
+    // route/module/UI chain and was removed - 2026-08-30 roadmap/deadcode).
 
     // Level-Up station - the walk-up cabinet for the "stop the marker"
     // level-up minigame (see levelUpMinigameLauncher.ts and
@@ -2421,10 +2421,6 @@ export class OverworldScene extends Phaser.Scene {
     openShopCategoryMenu(this.shopPanelHost, mode);
   }
 
-  private openItemPanel(category: ItemCategory, mode: "shop" | "wardrobe") {
-    openItemPanel(this.shopPanelHost, category, mode);
-  }
-
   private openWardrobeSlotMenu(mode: "shop" | "wardrobe") {
     openWardrobeSlotMenu(this.shopPanelHost, mode);
   }
@@ -2442,8 +2438,6 @@ export class OverworldScene extends Phaser.Scene {
       },
       updateHud: () => this.updateHud(),
       showToast: (message, color) => this.showToast(message, color),
-      applyEquippedAccessory: () => this.applyEquippedAccessory(),
-      applyEquippedPet: () => this.applyEquippedPet(),
       applyPlayerWardrobe: () => this.applyPlayerWardrobe()
     };
   }

@@ -1,8 +1,10 @@
 /**
- * Layered wardrobe routes - replaces routes/skins.ts, and mirrors
- * routes/items.ts's shape exactly (see economy/wardrobe.ts). GC-only
- * (2026-08-29 GC-only economy restructure - TICKETS is retired, see
- * repo-root CLAUDE.md).
+ * Layered wardrobe routes - replaces routes/skins.ts, and used to mirror
+ * routes/items.ts's shape exactly (see economy/wardrobe.ts) - that file was
+ * the accessories/pets Item Shop's buy/equip/unequip backend, removed as
+ * dead code once its only UI entry point was pulled (2026-08-30
+ * roadmap/deadcode, see repo-root CLAUDE.md). GC-only (2026-08-29 GC-only
+ * economy restructure - TICKETS is retired, see repo-root CLAUDE.md).
  *
  * GET /wardrobe/catalog is public (no auth): it's static catalogue data -
  * slots, their explicit draw order, and every piece's id/name/price - with

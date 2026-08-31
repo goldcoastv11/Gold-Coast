@@ -51,15 +51,14 @@ describe("GameState", () => {
   });
 
   describe("login/logout", () => {
-    it("creates a new profile with default starting balances - GC only, no starting TICKETS", () => {
+    it("creates a new profile with default starting balances - GC only", () => {
       const result = gameState.login("alice", "hunter2");
       expect(result).toEqual({ ok: true, isNew: true });
       expect(gameState.goldCoins).toBe(1000);
-      expect(gameState.tickets).toBe(0);
       // Every player starts owning and wearing the free default body - the
       // layered wardrobe's never-invisible-player guarantee (see
       // src/wardrobeCatalog.ts). Everything else is bought a piece at a
-      // time with TICKETS, server-side.
+      // time with GC, server-side.
       expect(gameState.ownedWardrobe).toEqual([DEFAULT_BODY_PIECE_ID]);
       expect(gameState.wornInSlot("BODY")).toBe(DEFAULT_BODY_PIECE_ID);
     });
@@ -92,11 +91,11 @@ describe("GameState", () => {
    * The old `purchaseSkin - TICKETS only` block lived here. It covered
    * GameState's LOCAL skin-purchase path, which no longer exists: the
    * layered wardrobe that replaced skins is server-authoritative end to
-   * end, so buying a piece is an HTTP call (POST /wardrobe/buy) and its
-   * TICKETS-only, ledger-backed, GC-never-touched behaviour is proved
-   * against the real ledger in server/test/wardrobe.test.ts instead.
-   * Re-adding a local debit path here would be re-adding a way to spend
-   * TICKETS that the server never sees.
+   * end, so buying a piece is an HTTP call (POST /wardrobe/buy), GC-priced
+   * (see server/src/economy/wardrobe.ts), and proved against the real
+   * ledger in server/test/wardrobe.test.ts instead. Re-adding a local
+   * debit path here would be re-adding a client-side balance mutation the
+   * server never sees.
    */
   describe("wardrobe state", () => {
     beforeEach(() => {
@@ -117,14 +116,4 @@ describe("GameState", () => {
     });
   });
 
-  describe("claimBonus", () => {
-    it("grants GC only, never TICKETS (economy rule: ad/bonus refills are GC-only)", () => {
-      gameState.login("frank", "pw");
-      const gcBefore = gameState.goldCoins;
-      const ticketsBefore = gameState.tickets;
-      const amount = gameState.claimBonus();
-      expect(gameState.goldCoins).toBe(gcBefore + amount);
-      expect(gameState.tickets).toBe(ticketsBefore);
-    });
-  });
 });
