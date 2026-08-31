@@ -92,7 +92,7 @@ phones.
 |---|---|
 | Game screens (14) | `src/scenes/*Scene.ts` |
 | Casino floor / player room | `src/scenes/OverworldScene.ts`, `RoomScene.ts` |
-| All procedural art | `src/scenes/BootScene.ts` |
+| All procedural art | `src/scenes/BootScene.ts` (thin loader) calling generators under `src/scenes/bootScene/`, grouped by domain (characters/wardrobe, game cabinets, UI stations, room decor, floor/wall tiles, shared palette/cabinet-shell helpers) |
 | Screen geometry (canvas width/center/safe zone) | `src/ui/Layout.ts` |
 | Shared UI + game shell | `src/ui/uiHelpers.ts`, `src/ui/DesignTokens.ts` |
 | Panels | `src/ui/*Panel.ts` |
