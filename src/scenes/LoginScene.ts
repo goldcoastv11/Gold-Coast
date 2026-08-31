@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel, UIButton, cssHex } from "../ui/uiHelpers";
+import { liveCenterX } from "../ui/Layout";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance } from "../ui/TripleChanceOffer";
 import { GC_MULTIPLIER_BASE } from "../economy/gcMultiplier";
@@ -47,6 +48,17 @@ const PASSWORD_MAX = 24;
 export class LoginScene extends Phaser.Scene {
   private mode: "signup" | "signin" = "signup";
 
+  /**
+   * Live canvas center, not a literal 400 - see ui/Layout.ts's header. Most
+   * devices see this scene only in portrait, where main.ts keeps the game
+   * size pinned at 800x600 (so this equals 400 there, unchanged from
+   * before) - but a device that reaches LoginScene in real landscape gets
+   * the same widened canvas every other scene does, and this scene's own
+   * literal-400 layout was never updated for that case. Recomputed in
+   * create() (scene instance is reused - see repo CLAUDE.md's trap #3).
+   */
+  private cx = 400;
+
   private usernameInput!: Phaser.GameObjects.DOMElement;
   private passwordInput!: Phaser.GameObjects.DOMElement;
   private errorText!: Phaser.GameObjects.Text;
@@ -62,14 +74,15 @@ export class LoginScene extends Phaser.Scene {
   create() {
     fadeInOnCreate(this);
     this.mode = "signup";
+    this.cx = liveCenterX(this);
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 
-    makePanel(this, 400, 300, 460, 460);
+    makePanel(this, this.cx, 300, 460, 460);
 
-    this.add.text(400, 110, "🕹️", { fontSize: "48px" }).setOrigin(0.5);
+    this.add.text(this.cx, 110, "🕹️", { fontSize: "48px" }).setOrigin(0.5);
 
     this.add
-      .text(400, 160, "GOLD COAST ARCADE", {
+      .text(this.cx, 160, "GOLD COAST ARCADE", {
         fontSize: "22px",
         color: Theme.textAccent,
         fontStyle: "bold"
@@ -82,25 +95,25 @@ export class LoginScene extends Phaser.Scene {
     this.renderTabs();
 
     this.add
-      .text(400, 228, "Username", { fontSize: "11px", color: Theme.textMuted })
+      .text(this.cx, 228, "Username", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
     this.usernameInput = this.createTextInput(256, "text", USERNAME_MAX, "username");
 
     this.add
-      .text(400, 291, "Password", { fontSize: "11px", color: Theme.textMuted })
+      .text(this.cx, 291, "Password", { fontSize: "11px", color: Theme.textMuted })
       .setOrigin(0.5);
     this.passwordInput = this.createTextInput(319, "password", PASSWORD_MAX, "current-password");
 
     this.errorText = this.add
-      .text(400, 358, "", { fontSize: "12px", color: Theme.textDanger, align: "center", wordWrap: { width: 400 } })
+      .text(this.cx, 358, "", { fontSize: "12px", color: Theme.textDanger, align: "center", wordWrap: { width: 400 } })
       .setOrigin(0.5);
 
-    this.enterBtn = makeButton(this, 400, 406, 220, 50, "CREATE ACCOUNT", Theme.accent, Theme.accentHover, () =>
+    this.enterBtn = makeButton(this, this.cx, 406, 220, 50, "CREATE ACCOUNT", Theme.accent, Theme.accentHover, () =>
       this.submit()
     );
 
     this.hintText = this.add
-      .text(400, 462, "", { fontSize: "11px", color: Theme.textMuted, align: "center" })
+      .text(this.cx, 462, "", { fontSize: "11px", color: Theme.textMuted, align: "center" })
       .setOrigin(0.5);
     this.updateModeCopy();
 
@@ -118,7 +131,7 @@ export class LoginScene extends Phaser.Scene {
 
   /**
    * Builds one real HTML <input>, wrapped as a Phaser DOM Element centered
-   * at (400, y) so it tracks the canvas's position/scale automatically.
+   * at (this.cx, y) so it tracks the canvas's position/scale automatically.
    * Styled inline to match the dark inset-box look every other field/panel
    * in this game uses (see uiHelpers.ts's makeInset) - focus/blur listeners
    * swap the border color the same way the old hand-drawn box did for
@@ -182,7 +195,7 @@ export class LoginScene extends Phaser.Scene {
       }
     });
 
-    return this.add.dom(400, y, el);
+    return this.add.dom(this.cx, y, el);
   }
 
   private get usernameValue(): string {
@@ -224,10 +237,10 @@ export class LoginScene extends Phaser.Scene {
     const signupColors = this.mode === "signup" ? ([Theme.accent, Theme.accentHover] as const) : ([Theme.neutral, Theme.neutralHover] as const);
     const signinColors = this.mode === "signin" ? ([Theme.accent, Theme.accentHover] as const) : ([Theme.neutral, Theme.neutralHover] as const);
 
-    this.signupTabBtn = makeButton(this, 292, 195, 200, 36, "Sign Up", signupColors[0], signupColors[1], () =>
+    this.signupTabBtn = makeButton(this, this.cx - 108, 195, 200, 36, "Sign Up", signupColors[0], signupColors[1], () =>
       this.setMode("signup")
     );
-    this.signinTabBtn = makeButton(this, 508, 195, 200, 36, "Sign In", signinColors[0], signinColors[1], () =>
+    this.signinTabBtn = makeButton(this, this.cx + 108, 195, 200, 36, "Sign In", signinColors[0], signinColors[1], () =>
       this.setMode("signin")
     );
   }
@@ -432,9 +445,9 @@ export class LoginScene extends Phaser.Scene {
    */
   private playForcedShuffleCup(multiplier: GcMultiplier): Promise<void> {
     return new Promise((resolve) => {
-      const overlay = makePanel(this, 400, 300, 420, 260, 300);
+      const overlay = makePanel(this, this.cx, 300, 420, 260, 300);
       const title = this.add
-        .text(400, 195, "🪙 New Profile Bonus", {
+        .text(this.cx, 195, "🪙 New Profile Bonus", {
           fontSize: "17px",
           color: Theme.textGold,
           fontStyle: "bold"
@@ -450,7 +463,7 @@ export class LoginScene extends Phaser.Scene {
 
       const handle = createShuffleCupReveal(
         this,
-        400,
+        this.cx,
         302,
         GC_MULTIPLIER_BASE,
         () => {
@@ -476,7 +489,7 @@ export class LoginScene extends Phaser.Scene {
    */
   private runTripleChanceOffer(startingAmount: number): Promise<void> {
     return new Promise((resolve) => {
-      offerTripleChance(this, 400, 300, startingAmount, () => resolve());
+      offerTripleChance(this, this.cx, 300, startingAmount, () => resolve());
     });
   }
 }

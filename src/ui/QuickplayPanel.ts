@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Tokens } from "./DesignTokens";
 import { makeText } from "./uiHelpers";
+import { liveWidth, liveHeight } from "./Layout";
 import { playSfx } from "./SoundManager";
 import {
   GridGeometry,
@@ -118,8 +119,8 @@ interface Geometry {
 
 /** Recomputes every screen-size-dependent number from the live canvas at open() time - see the block comment above. */
 function geometryFor(scene: Phaser.Scene): Geometry {
-  const screenW = scene.scale.width;
-  const screenH = scene.scale.height;
+  const screenW = liveWidth(scene);
+  const screenH = liveHeight(scene);
   const cx = screenW / 2;
   const marginX = Tokens.space.xxl;
   const colL = marginX;

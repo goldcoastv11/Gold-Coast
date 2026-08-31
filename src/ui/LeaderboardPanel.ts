@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Tokens } from "./DesignTokens";
 import { makeButton, makePanel, makeInset, makeDivider, makeText } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import { playSfx } from "./SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -148,7 +149,7 @@ export function openLeaderboardPanel(host: LeaderboardPanelHost) {
 
   // See the "Geometry" block above for why these are computed here instead
   // of as module consts.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
   const colL = cx - PANEL_W / 2 + Tokens.space.xl;
   const colR = cx + PANEL_W / 2 - Tokens.space.xl;
   const rankX = colL + Tokens.space.sm;
