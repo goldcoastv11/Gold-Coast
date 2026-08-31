@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Theme } from "./Theme";
 import { makeButton, makePanel } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import { isolateFixedUi, isolateWorldObject } from "./sceneCameraSplit";
 
 /**
@@ -80,7 +81,7 @@ function showDialogue(
 ): DialogueHandle {
   // See the module-scope comment above PANEL_Y for why this is computed
   // here instead of as a fixed module const.
-  const panelX = scene.scale.width / 2;
+  const panelX = liveCenterX(scene);
   const panel = makePanel(scene, panelX, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
 
   const portrait = scene.add
@@ -219,7 +220,7 @@ export interface InstructionHandle {
 export function showInstruction(scene: Phaser.Scene, title: string, text: string, onSkip: () => void): InstructionHandle {
   // See the module-scope comment above PANEL_Y for why this is computed
   // here instead of as a fixed module const.
-  const panelX = scene.scale.width / 2;
+  const panelX = liveCenterX(scene);
   const panel = makePanel(scene, panelX, PANEL_Y, PANEL_W, PANEL_H, DEPTH).setScrollFactor(0);
 
   const portrait = scene.add

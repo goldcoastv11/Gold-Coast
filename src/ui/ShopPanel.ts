@@ -13,6 +13,7 @@ import { LPC_RIG, idleFrame } from "../characterRig";
 import { ItemDef, ItemCategory, listItemsByCategory } from "../itemCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
@@ -111,16 +112,22 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
   host.setPanelOpen(true);
   playSfx(scene, "open");
 
+  // Live canvas center, not a literal 400 - see ui/Layout.ts. This panel is
+  // a standalone screen-fixed modal (no game-shell sidebar to leave room
+  // for), so it belongs on the true live center, unlike the 800-wide game
+  // shell's own design-space centering.
+  const cx = liveCenterX(scene);
+
   let elements: Phaser.GameObjects.GameObject[] = [];
   const cleanup = () => {
     elements.forEach((e) => e.destroy());
     elements = [];
   };
 
-  const panel = makePanel(scene, 400, 260, 320, 220, 200).setScrollFactor(0);
+  const panel = makePanel(scene, cx, 260, 320, 220, 200).setScrollFactor(0);
   elements.push(panel);
   const title = scene.add
-    .text(400, 190, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
+    .text(cx, 190, mode === "shop" ? "🧥 Item Shop" : "👕 Wardrobe", {
       fontSize: "20px",
       color: Theme.textGold,
       fontStyle: "bold"
@@ -130,7 +137,7 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
     .setDepth(201);
   elements.push(title);
   const sub = scene.add
-    .text(400, 214, "What would you like to browse?", { fontSize: "12px", color: Theme.textMuted })
+    .text(cx, 214, "What would you like to browse?", { fontSize: "12px", color: Theme.textMuted })
     .setOrigin(0.5)
     .setScrollFactor(0)
     .setDepth(201);
@@ -155,14 +162,14 @@ export function openShopCategoryMenu(host: ShopPanelHost, mode: ShopMode) {
     ["👕 Clothing", () => openWardrobeSlotMenu(host, mode)]
   ];
   buttons.forEach(([label, openNext], i) => {
-    const btn = makeButton(scene, 400, 250 + i * 50, 260, 42, label, Theme.accent, Theme.accentHover, () =>
+    const btn = makeButton(scene, cx, 250 + i * 50, 260, 42, label, Theme.accent, Theme.accentHover, () =>
       goTo(openNext)
     );
     btn.container.setScrollFactor(0).setDepth(201);
     elements.push(btn.container);
   });
 
-  const closeBtn = makeButton(scene, 400, 400, 140, 38, "Close", Theme.danger, Theme.dangerHover, () => {
+  const closeBtn = makeButton(scene, cx, 400, 140, 38, "Close", Theme.danger, Theme.dangerHover, () => {
     cleanup();
     host.setPanelOpen(false);
     host.updateHud();
@@ -186,6 +193,12 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
   let page = 0;
   const itemsPerPage = 4;
   let elements: Phaser.GameObjects.GameObject[] = [];
+
+  // Live canvas center, not a literal 400 - see openShopCategoryMenu's own
+  // comment above and ui/Layout.ts. Every row position below is expressed
+  // as an offset from this so the whole panel (background, rows, buttons)
+  // stays aligned as one block when it isn't 400.
+  const cx = liveCenterX(scene);
 
   const getItems = (): ItemDef[] =>
     mode === "shop"
@@ -214,11 +227,11 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
     page = Phaser.Math.Clamp(page, 0, totalPages - 1);
     const pageItems = items.slice(page * itemsPerPage, page * itemsPerPage + itemsPerPage);
 
-    const panel = makePanel(scene, 400, 300, 460, 440, 200).setScrollFactor(0);
+    const panel = makePanel(scene, cx, 300, 460, 440, 200).setScrollFactor(0);
     elements.push(panel);
 
     const title = scene.add
-      .text(400, 140, `${emoji} ${mode === "shop" ? `${label} Shop` : label}`, {
+      .text(cx, 140, `${emoji} ${mode === "shop" ? `${label} Shop` : label}`, {
         fontSize: "20px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -230,7 +243,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
 
     const sub = scene.add
       .text(
-        400,
+        cx,
         162,
         mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : `Pick a ${label.slice(0, -1).toLowerCase()} to wear`,
         { fontSize: "13px", color: Theme.textMuted }
@@ -243,7 +256,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
     if (pageItems.length === 0) {
       const empty = scene.add
         .text(
-          400,
+          cx,
           280,
           mode === "shop" ? `You own every ${label.toLowerCase()} item!` : `Nothing owned yet.\nVisit the ${label} Shop to buy one.`,
           { fontSize: "14px", color: Theme.textMuted, align: "center" }
@@ -256,7 +269,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
 
     pageItems.forEach((def, i) => {
       const y = 165 + i * 58;
-      const row = makeInset(scene, 400, y, 400, 48, 10);
+      const row = makeInset(scene, cx, y, 400, 48, 10);
       row.setScrollFactor(0).setDepth(200);
       elements.push(row);
 
@@ -265,15 +278,17 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
       // Preview: the real drawn accessory texture (see
       // BootScene.ts's createAccessoryTextures) scaled up so it's legible
       // in the row, or a small character-sheet thumbnail (frame 1) for pets.
+      // Row-relative offsets from `cx` (was 219/252/370/540 relative to the
+      // literal 400) - see this function's own `cx` comment above.
       const preview =
         def.category === "ACCESSORY"
-          ? scene.add.image(219, y, def.textureKey ?? "acc_bow").setScale(2.2)
-          : scene.add.image(219, y, def.textureKey ?? "npc2_sheet", 1).setScale(1.6);
+          ? scene.add.image(cx - 181, y, def.textureKey ?? "acc_bow").setScale(2.2)
+          : scene.add.image(cx - 181, y, def.textureKey ?? "npc2_sheet", 1).setScale(1.6);
       preview.setScrollFactor(0).setDepth(201);
       elements.push(preview);
 
       const nameLabel = scene.add
-        .text(252, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
+        .text(cx - 148, y, `${def.name}${isEquipped ? " (worn)" : ""}`, {
           fontSize: "14px",
           color: isEquipped ? Theme.textAccent : Theme.textPrimary,
           fontStyle: isEquipped ? "bold" : "normal"
@@ -285,7 +300,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
 
       if (mode === "shop") {
         const priceLabel = scene.add
-          .text(370, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
+          .text(cx - 30, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
           .setOrigin(0, 0.5)
           .setScrollFactor(0)
           .setDepth(201);
@@ -294,7 +309,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
         const canAfford = gameState.goldCoins >= def.price;
         const buyBtn = makeButton(
           scene,
-          540,
+          cx + 140,
           y,
           90,
           42,
@@ -378,14 +393,14 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
 
     if (totalPages > 1) {
       const pageLabel = scene.add
-        .text(400, 405, `Page ${page + 1} / ${totalPages}`, { fontSize: "12px", color: Theme.textMuted })
+        .text(cx, 405, `Page ${page + 1} / ${totalPages}`, { fontSize: "12px", color: Theme.textMuted })
         .setOrigin(0.5)
         .setScrollFactor(0)
         .setDepth(201);
       elements.push(pageLabel);
 
       if (page > 0) {
-        const prevBtn = makeButton(scene, 290, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
+        const prevBtn = makeButton(scene, cx - 110, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
           page--;
           render();
         });
@@ -393,7 +408,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
         elements.push(prevBtn.container);
       }
       if (page < totalPages - 1) {
-        const nextBtn = makeButton(scene, 510, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
+        const nextBtn = makeButton(scene, cx + 110, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
           page++;
           render();
         });
@@ -402,7 +417,7 @@ export function openItemPanel(host: ShopPanelHost, category: ItemCategory, mode:
       }
     }
 
-    const closeBtn = makeButton(scene, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
+    const closeBtn = makeButton(scene, cx, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
       cleanup();
       host.setPanelOpen(false);
       host.updateHud();
@@ -433,17 +448,21 @@ export function openWardrobeSlotMenu(host: ShopPanelHost, mode: ShopMode) {
   host.setPanelOpen(true);
   playSfx(scene, "open");
 
+  // Live canvas center, not a literal 400 - see openShopCategoryMenu's own
+  // comment above and ui/Layout.ts.
+  const cx = liveCenterX(scene);
+
   let elements: Phaser.GameObjects.GameObject[] = [];
   const cleanup = () => {
     elements.forEach((e) => e.destroy());
     elements = [];
   };
 
-  const panel = makePanel(scene, 400, 300, 460, 400, 200).setScrollFactor(0);
+  const panel = makePanel(scene, cx, 300, 460, 400, 200).setScrollFactor(0);
   elements.push(panel);
 
   const title = scene.add
-    .text(400, 145, mode === "shop" ? "🧥 Clothing Shop" : "👕 Wardrobe", {
+    .text(cx, 145, mode === "shop" ? "🧥 Clothing Shop" : "👕 Wardrobe", {
       fontSize: "20px",
       color: Theme.textGold,
       fontStyle: "bold"
@@ -455,7 +474,7 @@ export function openWardrobeSlotMenu(host: ShopPanelHost, mode: ShopMode) {
 
   const sub = scene.add
     .text(
-      400,
+      cx,
       168,
       mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : "Pick a layer to change",
       { fontSize: "13px", color: Theme.textMuted }
@@ -470,7 +489,7 @@ export function openWardrobeSlotMenu(host: ShopPanelHost, mode: ShopMode) {
   WARDROBE_SLOTS.forEach((slotDef, i) => {
     const col = i % 2;
     const row = Math.floor(i / 2);
-    const x = 400 + (col === 0 ? -105 : 105);
+    const x = cx + (col === 0 ? -105 : 105);
     const y = 215 + row * 62;
 
     const wornId = gameState.wornInSlot(slotDef.slot);
@@ -494,7 +513,7 @@ export function openWardrobeSlotMenu(host: ShopPanelHost, mode: ShopMode) {
     elements.push(btn.container);
   });
 
-  const closeBtn = makeButton(scene, 400, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
+  const closeBtn = makeButton(scene, cx, 450, 140, 40, "Close", Theme.danger, Theme.dangerHover, () => {
     cleanup();
     host.setPanelOpen(false);
     host.updateHud();
@@ -533,6 +552,11 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
   let page = 0;
   const itemsPerPage = 4;
   let elements: Phaser.GameObjects.GameObject[] = [];
+
+  // Live canvas center, not a literal 400 - see openShopCategoryMenu's own
+  // comment above and ui/Layout.ts. Every row position below is expressed
+  // as an offset from this so the whole panel stays aligned as one block.
+  const cx = liveCenterX(scene);
 
   const slotDef = getSlotDef(slot);
   const slotName = slotDef?.name ?? slot;
@@ -579,11 +603,11 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
     page = Phaser.Math.Clamp(page, 0, totalPages - 1);
     const pageItems = items.slice(page * itemsPerPage, page * itemsPerPage + itemsPerPage);
 
-    const panel = makePanel(scene, 400, 300, 460, 440, 200).setScrollFactor(0);
+    const panel = makePanel(scene, cx, 300, 460, 440, 200).setScrollFactor(0);
     elements.push(panel);
 
     const title = scene.add
-      .text(400, 140, `${mode === "shop" ? "🧥" : "👕"} ${slotName}`, {
+      .text(cx, 140, `${mode === "shop" ? "🧥" : "👕"} ${slotName}`, {
         fontSize: "20px",
         color: Theme.textGold,
         fontStyle: "bold"
@@ -595,7 +619,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
 
     const sub = scene.add
       .text(
-        400,
+        cx,
         162,
         mode === "shop" ? `You have ${gameState.goldCoins} Gold Coins` : `Pick a ${slotName.toLowerCase()} to wear`,
         { fontSize: "13px", color: Theme.textMuted }
@@ -608,7 +632,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
     if (pageItems.length === 0) {
       const empty = scene.add
         .text(
-          400,
+          cx,
           280,
           mode === "shop"
             ? `You own every ${slotName.toLowerCase()} option!`
@@ -623,16 +647,16 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
 
     pageItems.forEach((def, i) => {
       const y = 165 + i * 58;
-      const row = makeInset(scene, 400, y, 400, 48, 10);
+      const row = makeInset(scene, cx, y, 400, 48, 10);
       row.setScrollFactor(0).setDepth(200);
       elements.push(row);
 
       const isWorn = mode === "wardrobe" && gameState.wornInSlot(slot) === def.id;
 
-      addPreview(def, 219, y);
+      addPreview(def, cx - 181, y);
 
       const nameLabel = scene.add
-        .text(252, y, `${def.name}${isWorn ? " (worn)" : ""}`, {
+        .text(cx - 148, y, `${def.name}${isWorn ? " (worn)" : ""}`, {
           fontSize: "14px",
           color: isWorn ? Theme.textAccent : Theme.textPrimary,
           fontStyle: isWorn ? "bold" : "normal"
@@ -644,7 +668,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
 
       if (mode === "shop") {
         const priceLabel = scene.add
-          .text(370, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
+          .text(cx - 30, y, `${def.price} Gold Coins`, { fontSize: "13px", color: Theme.textMuted })
           .setOrigin(0, 0.5)
           .setScrollFactor(0)
           .setDepth(201);
@@ -653,7 +677,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
         const canAfford = gameState.goldCoins >= def.price;
         const buyBtn = makeButton(
           scene,
-          540,
+          cx + 140,
           y,
           90,
           42,
@@ -703,7 +727,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
       } else if (isWorn && slotDef?.optional) {
         // "Wearing nothing" is valid for every slot but BODY, so the worn
         // row gets an active "Take Off" rather than a disabled "Worn".
-        const takeOffBtn = makeButton(scene, 540, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
+        const takeOffBtn = makeButton(scene, cx + 140, y, 90, 42, "Take Off", Theme.danger, Theme.dangerHover, () => {
           takeOffBtn.setEnabled(false);
           api
             .unequipWardrobeSlot(slot)
@@ -722,7 +746,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
       } else {
         const wearBtn = makeButton(
           scene,
-          540,
+          cx + 140,
           y,
           90,
           42,
@@ -753,7 +777,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
 
     if (totalPages > 1) {
       const pageLabel = scene.add
-        .text(400, 405, `Page ${page + 1} / ${totalPages}`, {
+        .text(cx, 405, `Page ${page + 1} / ${totalPages}`, {
           fontSize: "12px",
           color: Theme.textMuted
         })
@@ -763,7 +787,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
       elements.push(pageLabel);
 
       if (page > 0) {
-        const prevBtn = makeButton(scene, 290, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
+        const prevBtn = makeButton(scene, cx - 110, 405, 90, 34, "◀ Prev", Theme.neutral, Theme.neutralHover, () => {
           page--;
           render();
         });
@@ -771,7 +795,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
         elements.push(prevBtn.container);
       }
       if (page < totalPages - 1) {
-        const nextBtn = makeButton(scene, 510, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
+        const nextBtn = makeButton(scene, cx + 110, 405, 90, 34, "Next ▶", Theme.neutral, Theme.neutralHover, () => {
           page++;
           render();
         });
@@ -782,7 +806,7 @@ export function openWardrobePanel(host: ShopPanelHost, slot: WardrobeSlot, mode:
 
     // "Back" rather than "Close": this panel is now one level deep (the
     // slot picker fronts it), so the natural exit is up a level.
-    const backBtn = makeButton(scene, 400, 450, 140, 40, "Back", Theme.neutral, Theme.neutralHover, () => {
+    const backBtn = makeButton(scene, cx, 450, 140, 40, "Back", Theme.neutral, Theme.neutralHover, () => {
       cleanup();
       openWardrobeSlotMenu(host, mode);
     });

@@ -1,6 +1,7 @@
 import Phaser from "phaser";
 import { Tokens } from "./DesignTokens";
 import { makeButton, makePanel, makeText } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import { playSfx } from "./SoundManager";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -71,7 +72,7 @@ export function openMagazinePanel(host: MagazinePanelHost) {
 
   // See the "Geometry" block above for why this is computed here instead of
   // as a module const.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
 
   let elements: Phaser.GameObjects.GameObject[] = [];
   let status: "loading" | "ready" | "empty" | "error" = "loading";

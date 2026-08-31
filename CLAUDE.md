@@ -29,8 +29,15 @@ render); `economy/adRewards.ts`. Do not build against any of them.
 ## 1. The canvas is NOT 800x600
 `src/main.ts` keeps height at 600 but **widens the logical canvas to match the device's aspect
 ratio**, so a phone in landscape gets 1300+ width. **Never hardcode 800 / 600 / 400 / a screen
-position.** Derive from `scene.scale.width/height`. There are still ~90 literal `400`s in the
-client; they are latent bugs, not precedent.
+position.** `src/ui/Layout.ts` is the single source of truth for screen geometry (design
+constants, live-canvas helpers, the safe zone, and `makeGameShell`'s design-block centering) - read
+its header and use it instead of a literal. Converted so far: the 14 game scenes (already routed
+through the shared game shell), the level-up minigame, LoginScene, StartMenuScene, and every panel
+players actually open (Item Shop/Wardrobe, Room, Furniture, Challenges, Magazine, Leaderboard,
+Quickplay, Tutorial). `OverworldScene.ts`/`RoomScene.ts` were left untouched (their own ad hoc
+`this.scale.width / 2` calls are already correct, and that file is flagged as under separate
+restructuring elsewhere in this repo) - a residual number of stray literal 400/800/600s may remain
+in less-visited corners; treat any you find as a latent bug, not precedent.
 
 ## 2. Two cameras, and creation ORDER decides which one draws you
 `OverworldScene`/`RoomScene` zoom their main camera on touch devices and render screen-fixed UI
@@ -51,8 +58,9 @@ handler running, the flag stays set and the player is **permanently stuck**. `cr
 but any new panel must still clear its own.
 
 ## 5. Mobile safe zone
-`SAFE_ZONE_TOP`/`SAFE_ZONE_BOTTOM` (=130/470) in `src/ui/uiHelpers.ts`. Elements outside get cropped
-on real phones.
+`SAFE_ZONE_TOP`/`SAFE_ZONE_BOTTOM` (=130/470) in `src/ui/Layout.ts` (re-exported from
+`src/ui/uiHelpers.ts` too, so existing imports keep working). Elements outside get cropped on real
+phones.
 
 ---
 
@@ -85,6 +93,7 @@ on real phones.
 | Game screens (14) | `src/scenes/*Scene.ts` |
 | Casino floor / player room | `src/scenes/OverworldScene.ts`, `RoomScene.ts` |
 | All procedural art | `src/scenes/BootScene.ts` |
+| Screen geometry (canvas width/center/safe zone) | `src/ui/Layout.ts` |
 | Shared UI + game shell | `src/ui/uiHelpers.ts`, `src/ui/DesignTokens.ts` |
 | Panels | `src/ui/*Panel.ts` |
 | Character layering | `src/ui/LayeredCharacter.ts`, `src/characterRig.ts` |
