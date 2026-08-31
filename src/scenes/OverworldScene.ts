@@ -29,6 +29,11 @@ import { openQuickplayPanel, QuickplayPanelHost, QuickplayViewHandle } from "../
 import { openLeaderboardPanel, LeaderboardPanelHost } from "../ui/LeaderboardPanel";
 import { uniqueGames } from "../ui/quickplayGrid";
 import { openMagazinePanel, MagazinePanelHost } from "../ui/MagazinePanel";
+import { TopRowButtonHost, TopRowButtonSpec, getRegisteredTopRowButtons } from "../ui/topRowButtonRegistry";
+// Side-effect import only: loads every self-registering top-row button
+// feature so its own `registerTopRowButton()` call runs. Add new features
+// to that file, not here - see its header comment.
+import "../ui/topRowButtonFeatures";
 import { createShuffleCupReveal } from "../ui/ShuffleCupReveal";
 import { offerTripleChance, TripleChanceOutcome } from "../ui/TripleChanceOffer";
 import { offerCoinKiosk } from "../ui/CoinKioskOffer";
@@ -455,8 +460,17 @@ export class OverworldScene extends Phaser.Scene {
   /** The pet's own facing, tracked separately from the player's lastDir since the pet lags behind and can be moving in a different direction than the player at any given moment. */
   private petLastDir: "down" | "left" | "right" | "up" = "down";
 
-  /** The corner "Challenges" button - replaces the old walk-up Challenge Board station, see its creation comment in create(). */
-  private challengesButton!: UIButton;
+  /**
+   * Every top-row button created this visit, keyed by TopRowButtonSpec.id -
+   * built fresh each create() from the built-in specs below plus
+   * getRegisteredTopRowButtons() (see topRowButtonRegistry.ts). Replaces
+   * what used to be two separate fields (challengesButton, quickplayButton)
+   * so any button - built-in or externally registered - can be looked back
+   * up the same way. "Challenges" and "quickplay" are the two built-in ids
+   * this scene's own logic looks up by name below; the map itself treats
+   * every entry identically.
+   */
+  private topRowButtons = new Map<string, UIButton>();
   /** The Challenges button's pulsing "something's ready" ring (same showHighlightRing helper as the Level-Up kiosk/tutorial, screenFixed since this is a fixed UI button) - undefined when nothing is claimable. Same "persist across other panels" reasoning as levelUpHighlight below - it's cleared explicitly by refreshChallengeBadge(), not by panelOpen's setter. */
   private challengesButtonHighlight?: HighlightHandle;
   /** The top row's live button size. The row stretches to the canvas width, so the glow ring around the Challenges button has to size itself from what was actually drawn rather than a fixed constant. */
@@ -472,9 +486,10 @@ export class OverworldScene extends Phaser.Scene {
    * Both are reset in create() below, same defensive reasoning as
    * touchControls/panelOpen above it - if a scene shutdown ever stranded
    * quickplayViewOpen=true with a handle pointing at destroyed game
-   * objects, the next create() must not carry that forward.
+   * objects, the next create() must not carry that forward. The button
+   * itself is looked up from topRowButtons ("quickplay") rather than kept
+   * as its own field.
    */
-  private quickplayButton!: UIButton;
   private quickplayViewOpen = false;
   private quickplayHandle?: QuickplayViewHandle;
 
@@ -588,6 +603,10 @@ export class OverworldScene extends Phaser.Scene {
     // phone-only: on desktop the field is undefined and the optional chain is
     // a no-op. Each of these is re-created further down create() anyway.
     this.touchControls = undefined;
+    // Every entry here points at a UIButton whose game objects belonged to
+    // the PREVIOUS run of this scene - rebuilt fresh a little further down
+    // by the top-row button loop, same reasoning as touchControls above.
+    this.topRowButtons = new Map();
     this.challengesButtonHighlight = undefined;
     this.activeTutorialHighlight = undefined;
     this.activeTutorialInstruction = undefined;
@@ -986,74 +1005,117 @@ export class OverworldScene extends Phaser.Scene {
     const TOP_ROW_BTN_H = 44;
     const TOP_ROW_GAP = 8;
     const TOP_ROW_EDGE = 8;
-    const topRowCount = 5;
+
+    // The row's five built-in buttons (Leaderboard/Magazine/Clothes/
+    // Challenges/Quickplay), plus whatever any feature module registered
+    // via registerTopRowButton() (see topRowButtonRegistry.ts and the
+    // side-effect import of topRowButtonFeatures.ts up top). These five
+    // stay defined here rather than through the registry because Challenges
+    // and Quickplay each carry real per-scene state (the ready-to-claim
+    // ring, the open/closed toggle) that's simplest as ordinary private
+    // methods - see topRowButtonRegistry.ts's header for the full
+    // reasoning. A NEW button that doesn't need that just registers
+    // itself and never touches this file.
+    //
+    // "founder ask" quotes below are preserved from before this became a
+    // list - see git history for the original per-button makeButton() call
+    // this replaced.
+    const builtinTopRowButtons: TopRowButtonSpec[] = [
+      {
+        // founder ask: "a small button that shows the Daily, Weekly, and
+        // all time leaderboard for GC earned".
+        id: "leaderboard",
+        label: "🏅 Leaderboard",
+        onClick: () => this.openLeaderboardPanel()
+      },
+      {
+        // founder ask: "a 'Magazine' button that shows 5 players rooms...
+        // make it random and change every day."
+        id: "magazine",
+        label: "📖 Magazine",
+        onClick: () => this.openMagazinePanel()
+      },
+      {
+        // Always available, opens the wardrobe (change any layer you
+        // already own).
+        id: "clothes",
+        label: "👕 Clothes",
+        onClick: () => this.openShopCategoryMenu("wardrobe")
+      },
+      {
+        // Replaces the old walk-up Challenge Board station so a player
+        // doesn't have to cross the floor to check/claim. Glows via the
+        // same pulsing ring the Level-Up kiosk and the tutorial use
+        // (ui/TutorialGuide.ts's showHighlightRing) whenever something is
+        // ready to claim - see refreshChallengeBadge() below, which also
+        // runs once right after this loop so it's correct on walking in,
+        // not only after a claim.
+        id: "challenges",
+        label: "🏆 Challenges",
+        onClick: () => this.openChallengesPanel()
+      },
+      {
+        // founder ask: "a button that changes the layout of the games to
+        // one like Stake" (a grid of cards instead of walking the floor),
+        // later extended to "the quickplay button needs to take up the
+        // full screen with all the buttons where they usually are, but
+        // swap the quickplay button with an 'Arcade' button that takes
+        // players back to the regular game screen." One button, not two -
+        // see quickplayViewOpen's own field comment - whose label and
+        // handler both come from toggleQuickplayView().
+        id: "quickplay",
+        label: "🎮 Quickplay",
+        onClick: () => this.toggleQuickplayView()
+      }
+    ];
+    const topRowSpecs: TopRowButtonSpec[] = [...builtinTopRowButtons, ...getRegisteredTopRowButtons()];
+
+    // Fixed button width + gap (not N even slots across the live width):
+    // every button stays the same physical size on every device, and the
+    // whole row is centered on the live canvas and grows its OUTER margins
+    // on a wider phone instead of stretching - same "extra width becomes
+    // margin, not a bigger control" choice every modal panel in this
+    // codebase already makes (see e.g. ChallengesPanel.ts's PANEL_W
+    // comment). At the narrowest supported width (800, desktop or a phone
+    // pinned to the floor - see main.ts's LANDSCAPE_MIN_WIDTH) the row's
+    // total width still leaves real margin on both sides, so this never
+    // runs off-canvas.
+    // The row STRETCHES to fill the full canvas width - founder ask: "the
+    // buttons need to be bigger and go across the whole screen on mobile".
+    // Each button gets an equal share of the width, driven by
+    // topRowSpecs.length (built-ins + registered - see this constant's own
+    // comment above), so a newly-registered button correctly shrinks
+    // everyone else's share rather than overflowing the row or bypassing
+    // this maths.
+    const topRowCount = topRowSpecs.length;
     const topRowUsableW = this.scale.width - TOP_ROW_EDGE * 2;
     const TOP_ROW_BTN_W = (topRowUsableW - TOP_ROW_GAP * (topRowCount - 1)) / topRowCount;
     const topRowX = (i: number) => TOP_ROW_EDGE + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
     this.topRowBtnSize = { w: TOP_ROW_BTN_W, h: TOP_ROW_BTN_H };
 
-    // "Leaderboard" corner button - founder ask: "a small button that shows
-    // the Daily, Weekly, and all time leaderboard for GC earned".
-    makeButton(this, topRowX(0), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "🏅 Leaderboard", Theme.neutral, Theme.neutralHover, () =>
-      this.openLeaderboardPanel()
-    ).container.setScrollFactor(0).setDepth(150);
-
-    // "Magazine" corner button - founder ask: "a 'Magazine' button that
-    // shows 5 players rooms... make it random and change every day."
-    makeButton(this, topRowX(1), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "📖 Magazine", Theme.neutral, Theme.neutralHover, () =>
-      this.openMagazinePanel()
-    ).container.setScrollFactor(0).setDepth(150);
-
-    // "Clothes" corner button - always available, opens the wardrobe
-    // (change any layer you already own).
-    makeButton(this, topRowX(2), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "👕 Clothes", Theme.neutral, Theme.neutralHover, () =>
-      this.openShopCategoryMenu("wardrobe")
-    ).container.setScrollFactor(0).setDepth(150);
-
-    // "Challenges" corner button - replaces the old walk-up Challenge Board
-    // station (removed below) so a player doesn't have to cross the floor
-    // to check/claim. Glows via the same pulsing ring the Level-Up kiosk
-    // and the tutorial use (ui/TutorialGuide.ts's showHighlightRing,
-    // screenFixed:true here since this is a fixed UI button, not a world
-    // sprite) whenever something is ready to claim - see
-    // refreshChallengeBadge() below, which also runs once right here so
-    // it's correct on walking in, not only after a claim.
-    this.challengesButton = makeButton(
-      this,
-      topRowX(3),
-      TOP_ROW_Y,
-      TOP_ROW_BTN_W,
-      TOP_ROW_BTN_H,
-      "🏆 Challenges",
-      Theme.neutral,
-      Theme.neutralHover,
-      () => this.openChallengesPanel()
-    );
-    this.challengesButton.container.setScrollFactor(0).setDepth(150);
+    // Build every button the same way, built-in or registered - this loop
+    // is the only place that calls makeButton() for the top row, and it
+    // runs (like the rest of this block) AFTER the worldContentSoFar
+    // snapshot above, so every button lands on the screen-fixed uiCamera
+    // side of the split, not the world/zoomed side (see
+    // ui/sceneCameraSplit.ts's header and this file's own trap notes on
+    // create-order deciding which camera draws an object).
+    topRowSpecs.forEach((spec, i) => {
+      const button = makeButton(
+        this,
+        topRowX(i),
+        TOP_ROW_Y,
+        TOP_ROW_BTN_W,
+        TOP_ROW_BTN_H,
+        spec.label,
+        Theme.neutral,
+        Theme.neutralHover,
+        () => spec.onClick(this.topRowButtonHost, button)
+      );
+      button.container.setScrollFactor(0).setDepth(150);
+      this.topRowButtons.set(spec.id, button);
+    });
     this.refreshChallengeBadge();
-
-    // "Quickplay"/"Arcade" button - founder ask: "a button that changes the
-    // layout of the games to one like Stake" (a grid of cards instead of
-    // walking the floor), later extended to "the quickplay button needs to
-    // take up the full screen with all the buttons where they usually are,
-    // but swap the quickplay button with an 'Arcade' button that takes
-    // players back to the regular game screen." One button, not two - see
-    // quickplayButton's own field comment - whose label and handler both
-    // come from toggleQuickplayView(). Sits in the top row like every other
-    // button now (founder: "all the buttons need to be across the top of the
-    // screen, not the sides").
-    this.quickplayButton = makeButton(
-      this,
-      topRowX(4),
-      TOP_ROW_Y,
-      TOP_ROW_BTN_W,
-      TOP_ROW_BTN_H,
-      "🎮 Quickplay",
-      Theme.neutral,
-      Theme.neutralHover,
-      () => this.toggleQuickplayView()
-    );
-    this.quickplayButton.container.setScrollFactor(0).setDepth(150);
 
     // Second half of the world/fixed-UI split started at
     // `worldContentSoFar` above - everything created between the two
@@ -2213,7 +2275,7 @@ export class OverworldScene extends Phaser.Scene {
    * failures) the moment anyone opens it.
    */
   private refreshChallengeBadge() {
-    const button = this.challengesButton;
+    const button = this.topRowButtons.get("challenges");
     if (!button) return;
     api
       .getChallenges()
@@ -2436,7 +2498,7 @@ export class OverworldScene extends Phaser.Scene {
    */
   private openQuickplayView() {
     this.quickplayViewOpen = true;
-    this.quickplayButton.setLabel("🕹️ Arcade");
+    this.topRowButtons.get("quickplay")?.setLabel("🕹️ Arcade");
     this.quickplayHandle = openQuickplayPanel(this.quickplayPanelHost, uniqueGames(GAME_STATIONS));
   }
 
@@ -2445,7 +2507,7 @@ export class OverworldScene extends Phaser.Scene {
     this.quickplayHandle?.close();
     this.quickplayHandle = undefined;
     this.quickplayViewOpen = false;
-    this.quickplayButton.setLabel("🎮 Quickplay");
+    this.topRowButtons.get("quickplay")?.setLabel("🎮 Quickplay");
   }
 
   /** The one corner button's actual click handler - dispatches to whichever half of the toggle quickplayViewOpen says is current. See the button's own creation comment in create() for why this is one button, not two. */
@@ -2455,6 +2517,25 @@ export class OverworldScene extends Phaser.Scene {
     } else {
       this.openQuickplayView();
     }
+  }
+
+  /**
+   * What any registered top-row button's onClick gets (see
+   * topRowButtonRegistry.ts's TopRowButtonHost) - the union of every
+   * `*PanelHost` shape in this file, built once and handed to every
+   * registered button's onClick regardless of which subset it actually
+   * needs (structural typing - see that interface's own doc comment).
+   */
+  private get topRowButtonHost(): TopRowButtonHost {
+    return {
+      scene: this,
+      setPanelOpen: (open) => {
+        this.panelOpen = open;
+      },
+      updateHud: () => this.updateHud(),
+      showToast: (message, color) => this.showToast(message, color),
+      goToGame: (sceneKey) => this.goToGame(sceneKey)
+    };
   }
 
   /** Everything ui/QuickplayPanel.ts needs back from this scene. */

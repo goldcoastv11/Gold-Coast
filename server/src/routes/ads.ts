@@ -4,6 +4,7 @@
  */
 
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { claimAdReward } from "../economy/adRewards";
@@ -35,5 +36,7 @@ router.post(
     });
   })
 );
+
+registerRoute(router);
 
 export default router;

@@ -13,6 +13,7 @@
  */
 
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import { z } from "zod";
 import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
@@ -101,5 +102,7 @@ router.post(
     return res.json({ user: me });
   })
 );
+
+registerRoute(router);
 
 export default router;

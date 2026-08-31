@@ -12,6 +12,7 @@
  */
 
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import { prisma } from "../db";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { asyncHandler } from "../asyncHandler";
@@ -28,5 +29,7 @@ router.get(
     return res.json(board);
   })
 );
+
+registerRoute(router);
 
 export default router;
