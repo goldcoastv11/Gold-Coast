@@ -486,10 +486,13 @@ model AttendantClaim {
   @@map("attendant_claim")
 }
 
-// Ad-reward GC refill cooldown (see economy/adRewards.ts) - separate table
-// from AttendantClaim since these are two independently-cooled-down claim
-// sources, not the same mechanic. Same @db.Timestamptz(3) note as above
-// applies here too.
+// Retired (2026-08-30 roadmap/deadcode, see repo-root CLAUDE.md): cooldown
+// table for the standalone, simulated "watch an ad for GC" route
+// (POST /ads/claim, economy/adRewards.ts) - a mechanic that predates the
+// Coin Kiosk consolidating ad-gated claims into AttendantClaim above.
+// Nothing in the client ever called it, and the route/module were removed
+// as dead code. Kept here, unused, rather than a destructive table drop -
+// same additive-only precedent as every other retired piece of this schema.
 model AdRewardClaim {
   userId        String    @id @map("user_id")
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)

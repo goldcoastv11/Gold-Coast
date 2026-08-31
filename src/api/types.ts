@@ -68,7 +68,6 @@ export interface MeResponse {
   equippedPet: string | null;
   lastPosition: { x: number; y: number } | null;
   attendantClaim: { lastClaimedAt: string | null };
-  adReward: { lastClaimedAt: string | null };
   /**
    * The user's currently-active stateful-game round (Mines/Dragon Tower/
    * Hi-Lo/Blackjack/Video Poker), or null if none (#42/#43). Present on
@@ -206,33 +205,14 @@ export interface RemoveFurnitureResponse {
   user: MeResponse;
 }
 
-export type ItemCategory = "ACCESSORY" | "PET";
-
-export interface ItemDto {
-  id: string;
-  category: ItemCategory;
-  name: string;
-  price: number;
-  emoji?: string;
-  textureKey?: string;
-}
-
-/** POST /items/buy */
-export interface BuyItemResponse {
-  item: ItemDto;
-  user: MeResponse;
-}
-
-/** POST /items/equip */
-export interface EquipItemResponse {
-  item: ItemDto;
-  user: MeResponse;
-}
-
-/** POST /items/unequip */
-export interface UnequipItemResponse {
-  user: MeResponse;
-}
+/**
+ * ItemCategory/ItemDto and the POST /items/buy|equip|unequip response types
+ * that used to live here served ShopPanel.ts's openItemPanel (a browsing UI
+ * the founder removed, 2026-08-30) and its now-removed server routes -
+ * removed together as dead code (2026-08-30 roadmap/deadcode, see
+ * repo-root CLAUDE.md). `ownedItems`/`equippedAccessory`/`equippedPet`
+ * above are untouched - an already-equipped accessory/pet still renders.
+ */
 
 export interface AttendantClaimGrant {
   gcMultiplier: GcMultiplier;
@@ -252,18 +232,14 @@ export interface ClaimBonusCooldownError {
   remainingMs: number;
 }
 
-/** POST /ads/claim (200) - simulated ad-reward GC refill, see server/src/economy/adRewards.ts. */
-export interface ClaimAdRewardResponse {
-  granted: { gcAmount: number };
-  user: MeResponse;
-}
-
-/** POST /ads/claim (429 COOLDOWN) - same shape as ClaimBonusCooldownError. */
-export interface ClaimAdRewardCooldownError {
-  error: string;
-  code: "COOLDOWN";
-  remainingMs: number;
-}
+/**
+ * POST /ads/claim and its response/error types used to live here - a
+ * standalone, simulated "watch an ad for GC" route (economy/adRewards.ts)
+ * that predates the Coin Kiosk consolidating that mechanic into
+ * POST /claim-bonus's shuffle-cup flow above. Nothing in the client ever
+ * called it (confirmed before removing) - removed as dead code (2026-08-30
+ * roadmap/deadcode, see repo-root CLAUDE.md).
+ */
 
 /** Generic error body every non-2xx response uses (see server/src/app.ts's error handler + each route). */
 export interface ApiErrorBody {

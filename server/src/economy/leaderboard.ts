@@ -27,8 +27,11 @@
  *                                 by name in the founder's own list; included
  *                                 as a level reward, flagged in the PR
  *                                 alongside PAYOUT_GC for the same reason
- *   - AD_REWARD_GC              - "Coin Kiosk claims" (economy/adRewards.ts,
- *                                 economy/attendantClaim.ts)
+ *   - AD_REWARD_GC              - "Coin Kiosk claims" (economy/attendantClaim.ts;
+ *                                 the standalone, never-reachable-from-any-UI
+ *                                 "Ad Kiosk" route that used to also grant this
+ *                                 type was removed as dead code, 2026-08-30
+ *                                 roadmap/deadcode - see repo-root CLAUDE.md)
  *
  * Deliberately EXCLUDED:
  *   - PACKAGE_GC      - a real-money purchase, not something "earned" - a

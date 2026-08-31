@@ -19,8 +19,20 @@ Landscape, **mobile-first**. Most bugs that reach players are mobile layout bugs
 
 **Retired, kept in the schema as inert history** (this repo is additive-only — never drop a column
 or table for cleanliness): SC and its playthrough/redemption model; the GC/TICKETS two-currency
-model; the accessories/pets item shop (backend live, UI removed — already-equipped items still
-render); `economy/adRewards.ts`. Do not build against any of them.
+model. Do not build against either.
+
+**Also removed as dead code** (2026-08-30 roadmap/deadcode — confirmed zero real callers before
+deleting, not assumed): the accessories/pets Item Shop's buy/equip/unequip backend
+(`routes/items.ts`, `economy/itemShop.ts`'s write functions) and its browsing UI
+(`ShopPanel.ts`'s `openItemPanel`) — the founder pulled its only menu entry point, so nothing could
+reach it. The read side (`economy/itemShop.ts`'s `listOwnedItems`/`getEquippedItem`,
+`itemCatalog.ts` on both sides) stays: an already-equipped accessory/pet still renders in the
+overworld, and `progression/levels.ts`'s level-up cosmetic grants still write ownership rows
+directly. Also removed: the standalone, never-wired-up "Ad Kiosk" (`economy/adRewards.ts` and
+`routes/ads.ts` on both client and server, `POST /ads/claim`) — a claim mechanic the Coin Kiosk
+superseded before anything in the client ever called it. Underlying DB tables
+(`items_owned`/`equipped_items`/`ad_reward_claim`) are untouched, same additive-only precedent as
+the SC/TICKETS retirements above.
 
 ---
 
@@ -101,8 +113,14 @@ phones.
 | Game payout logic | `server/src/games/`, settle helpers in `shared.ts` |
 | Challenges / XP / levels | `server/src/progression/` |
 
-**Catalogs are duplicated client-side and server-side and hand-synced** (`wardrobeCatalog`,
-`furnitureCatalog`, `roomCatalog`, `itemCatalog`). They have already drifted. Change both.
+**Catalogs are duplicated client-side and server-side, not shared** (`wardrobeCatalog`,
+`furnitureCatalog`, `roomCatalog`, `itemCatalog`) - the server's Docker build context is scoped to
+`server/` alone (Railway's Root Directory, see server/DEPLOYMENT.md), so a shared module outside
+`server/` genuinely can't be imported by both sides; investigated 2026-08-30 (roadmap/deadcode)
+before concluding that. All four currently agree (verified, not assumed) and are guarded by a
+same-named "client and server catalogues agree" test in each of
+`src/{wardrobe,furniture,room,item}Catalog.test.ts`, which fails loudly if only one side is edited -
+run those (or the whole suite) after changing either one, and change both files together.
 
 ---
 

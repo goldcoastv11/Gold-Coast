@@ -27,13 +27,23 @@
  * warnings historically in this file for why that's not acceptable beyond
  * a POC.
  *
- * Economy note ("arcade token" model - see ledger.ts's doc comment and
- * repo-root CLAUDE.md): GC (what you spend to play) and TICKETS (what
- * winning a game pays out, spent in the Item Shop) live behind the
+ * Economy note (GC-only, see repo-root CLAUDE.md and ledger.ts's doc
+ * comment): Gold Coins are the one currency, spent on every bet win or
+ * lose, and won straight back out on a win. It lives behind the
  * transaction ledger in src/economy/ledger.ts. GameState is the
  * persistence + convenience layer on top; it should never assign to a
  * balance number directly - everything routes through applyTransaction
  * (or the dedicated economy/*.ts helpers that call it).
+ *
+ * Dead-code cleanup (2026-08-30 roadmap/deadcode): the local
+ * placeBet()/resolveBet() bet-lifecycle wrapper (economy/betting.ts) and
+ * the local claimAdReward()/claimBonus() ad-refill wrapper
+ * (economy/adRewards.ts) were removed - both were TICKETS-era or
+ * never-wired-up plumbing with zero real callers outside their own tests
+ * (every game scene wagers via the server-authoritative
+ * routes/games.ts + gameState.hydrateFromServer(), not through this
+ * class). login()/claimAttendantBonus()/purchasePackage() are untouched -
+ * see the note above for why.
  */
 
 import { Currency, LedgerState, Transaction, applyTransaction, createLedger, getBalance } from "./economy/ledger";
@@ -43,7 +53,6 @@ import {
   PackagePurchaseOutcome,
   purchasePackage as purchasePackageInternal
 } from "./economy/packages";
-import { claimAdRewardGc } from "./economy/adRewards";
 import {
   AttendantClaimOutcome,
   attendantClaimCooldownRemaining,
@@ -56,12 +65,6 @@ import {
 } from "./wardrobeCatalog";
 import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, EquippedRoom, RoomSlot } from "./roomCatalog";
 import { FurnitureSlotId, PlacedFurniture } from "./furnitureCatalog";
-import {
-  PlaceBetOutcome,
-  ResolveBetOutcome,
-  placeBet as placeBetInternal,
-  resolveBet as resolveBetInternal
-} from "./economy/betting";
 import { clearToken } from "./api/client";
 import type { MeResponse } from "./api/types";
 
@@ -88,8 +91,11 @@ interface StoredProfile {
 
 /**
  * Shape of profiles written before the ledger existed (flat goldCoins/
- * stakeCoins numbers - "stakeCoins" predates the "arcade token" rebrand,
- * back when the second currency was SC/"Sweeps Coins").
+ * stakeCoins numbers - "stakeCoins" predates every currency rebrand this
+ * project has had; the second field was SC ("Sweeps Coins"), then briefly
+ * TICKETS, and is now retired outright - GC is the only balance a profile
+ * carries. `stakeCoins` is read (to detect this shape) but no longer
+ * carried over anywhere - see migrateLegacyProfile below.
  *
  * `currentSkin`/`unlockedSkins` are still declared here, and still ignored
  * by migrateLegacyProfile below, purely because these are localStorage
@@ -116,19 +122,18 @@ function isLegacyProfile(p: StoredProfile | LegacyStoredProfile): p is LegacySto
 
 /**
  * Migrates a pre-ledger profile (flat goldCoins/stakeCoins numbers) into
- * the ledger shape. The old "stakeCoins" balance (SC, under the retired
- * two-currency sweepstakes model) carries straight over into the new
- * TICKETS balance 1:1, purely so an old local profile doesn't lose its
- * balance outright in the migration - the two currencies meant different
- * things, but there's no more meaningful mapping available than a direct
- * numeric carry-over for a POC's local-only save data. Never claimed the
- * attendant bonus under this shape, so its cooldown starts fresh (null -
- * available immediately).
+ * the ledger shape. Only `goldCoins` carries over now - the old
+ * `stakeCoins` balance (SC, then briefly TICKETS under the two-currency
+ * "arcade token" model) has no home any more now the ledger is GC-only
+ * (see economy/ledger.ts), matching the server's own TICKETS retirement
+ * (every account's TICKETS balance was zeroed, not carried anywhere - see
+ * repo-root CLAUDE.md). Never claimed the attendant bonus under this
+ * shape, so its cooldown starts fresh (null - available immediately).
  */
 function migrateLegacyProfile(legacy: LegacyStoredProfile): StoredProfile {
   return {
     passwordHash: legacy.passwordHash,
-    ledger: createLedger(legacy.goldCoins, legacy.stakeCoins),
+    ledger: createLedger(legacy.goldCoins),
     betAmount: legacy.betAmount,
     attendantClaimedAt: null
   };
@@ -171,20 +176,10 @@ export type LoginResult =
   | { ok: false; error: string };
 
 class GameState {
-  private _ledger: LedgerState = createLedger(0, 0);
+  private _ledger: LedgerState = createLedger(0);
   private _betAmount = 25;
   /** ms-since-epoch of the last successful attendant claim (#18/#19), or null if never claimed. */
   private _attendantClaimedAt: number | null = null;
-  /**
-   * ms-since-epoch of the last successful ad-reward claim, or null if never
-   * claimed. Server-hydrated only (see hydrateFromServer) - this is a new,
-   * fully server-authoritative feature with no pre-backend local-ledger
-   * equivalent, unlike attendantClaimedAt above, so there's no matching
-   * legacy claim method/local persistence for it - only the read side lives
-   * here, purely for optimistic "is the button enabled" UI display before
-   * the real POST /ads/claim call, which is the actual source of truth.
-   */
-  private _adRewardClaimedAt: number | null = null;
 
   /**
    * Wardrobe piece ids the player owns (see src/wardrobeCatalog.ts). The
@@ -239,9 +234,13 @@ class GameState {
 
   /**
    * Accessory/pet ids owned - see economy/itemShop.ts's server counterpart.
-   * Server-hydrated only, same as _adRewardClaimedAt above - a new, fully
-   * server-authoritative feature with no pre-backend local-profile
-   * equivalent, so there's no legacy save()/login() persistence for these.
+   * Server-hydrated only - a fully server-authoritative feature with no
+   * pre-backend local-profile equivalent, so there's no legacy
+   * save()/login() persistence for these. The Item Shop UI that let a
+   * player buy/equip these was removed (founder direction, 2026-08-30);
+   * these fields stay because an already-equipped accessory/pet still
+   * renders in the overworld (see OverworldScene's applyEquippedAccessory/
+   * applyEquippedPet).
    */
   ownedItems: string[] = [];
   /** Currently-worn accessory item id, or null if none equipped. Server-hydrated only. */
@@ -292,22 +291,6 @@ class GameState {
     this.save();
   }
 
-  /**
-   * Read-only by design (economy rule: TICKETS are NEVER sold/minted -
-   * they're only ever won by playing a game, see ledger.ts's "arcade
-   * token" model doc comment). No legacy `set tickets` bridge - a
-   * generic delta-based setter would let a future `gameState.tickets +=
-   * X` silently mint TICKETS with no ledger-level guard.
-   *
-   * To move TICKETS, use the dedicated ledger-backed methods below:
-   * credit via `resolveBet()` (a game round's win). Debits happen
-   * server-side only now - the Item Shop's wardrobe/accessory/pet purchases
-   * all go through their real endpoints (see api/client.ts), so there is no
-   * local debit path left to mirror them.
-   */
-  get tickets() {
-    return getBalance(this._ledger, "TICKETS");
-  }
 
   /** Current bet size, shared across every game so it only needs to be set
    * once. Adjusted via the +/- bet control on each game screen. */
@@ -372,45 +355,11 @@ class GameState {
     return this._ledger.transactions;
   }
 
-  /**
-   * #20 - bet lifecycle, "arcade token" model. See src/economy/betting.ts
-   * for the full integration guide; short version:
-   *   const bet = gameState.placeBet(amount);
-   *   if (!bet.ok) {/* show why, don't start the round *\/ }
-   *   // ...run the round...
-   *   gameState.resolveBet(ticketsPayout); // 0 payout = total loss, valid
-   *
-   * placeBet always debits GC (the only wagerable currency now); resolveBet
-   * always credits TICKETS (the only currency a round can win). Not wired
-   * into any game scene yet - that integration is a follow-up for
-   * games/floor (real gameplay already goes through the server-
-   * authoritative equivalent, server/src/games/shared.ts).
-   */
-  placeBet(amount: number): PlaceBetOutcome {
-    const outcome = placeBetInternal(this._ledger, amount);
-    if (outcome.ok) this.save();
-    return outcome;
-  }
-
-  /** See `placeBet` above. Credits the round's TICKETS payout; pass 0 for a total loss. */
-  resolveBet(ticketsPayout: number): ResolveBetOutcome {
-    const outcome = resolveBetInternal(this._ledger, ticketsPayout);
-    if (outcome.transaction) this.save();
-    return outcome;
-  }
-
   /** Buys a GC package tier (see economy/packages.ts). */
   purchasePackage(packageId: string): PackagePurchaseOutcome {
     const result = purchasePackageInternal(this._ledger, packageId);
     if (result.ok) this.save();
     return result;
-  }
-
-  /** GC-only ad-reward refill claim. */
-  claimAdReward(): Transaction {
-    const tx = claimAdRewardGc(this._ledger);
-    this.save();
-    return tx;
   }
 
   /** True if the player owns wardrobe piece `id`. The free default body always reads true. */
@@ -455,33 +404,9 @@ class GameState {
     return this.ownedItems.includes(id);
   }
 
-  /**
-   * Grants a Gold Coin bonus via the GC-only ad-reward path. No cooldown
-   * for this POC - always available. Kept for a future real "watch an ad"
-   * feature; the overworld Coin Kiosk no longer calls this (see
-   * `claimAttendantBonus` below, #18/#19) - it has its own ad-gated flow.
-   */
-  claimBonus(): number {
-    const tx = this.claimAdReward();
-    return tx.amount;
-  }
-
   /** ms remaining before `claimAttendantBonus()` can succeed again. 0 = available now. */
   get attendantClaimCooldownRemainingMs(): number {
     return attendantClaimCooldownRemaining(this._attendantClaimedAt);
-  }
-
-  /**
-   * ms remaining before the ad-reward claim (POST /ads/claim,
-   * AD_REWARD_COOLDOWN_MS = 60s server-side - see
-   * server/src/economy/adRewards.ts) can succeed again, based on the last
-   * server-hydrated value. 0 = available now. Optimistic only - the server
-   * re-checks this on every claim regardless of what this says.
-   */
-  get adRewardCooldownRemainingMs(): number {
-    if (this._adRewardClaimedAt === null) return 0;
-    const AD_REWARD_COOLDOWN_MS = 60_000; // keep in sync with server/src/economy/adRewards.ts
-    return Math.max(0, AD_REWARD_COOLDOWN_MS - (Date.now() - this._adRewardClaimedAt));
   }
 
   /**
@@ -553,7 +478,7 @@ class GameState {
         ? migrateLegacyProfile(existingRaw)
         : existingRaw;
 
-      this._ledger = createLedger(existing.ledger.gc, existing.ledger.tickets);
+      this._ledger = createLedger(existing.ledger.gc);
       this._ledger.transactions = [...existing.ledger.transactions];
       this._betAmount = existing.betAmount;
       this._attendantClaimedAt = existing.attendantClaimedAt ?? null;
@@ -565,7 +490,7 @@ class GameState {
     // New username - create a fresh profile with default starting state,
     // including the no-deposit signup bonus (#27: GC leg resolved from
     // gcMultiplier).
-    this._ledger = createLedger(0, 0);
+    this._ledger = createLedger(0);
     this._betAmount = 25;
     this._attendantClaimedAt = null;
     this.activeUsername = username;
@@ -586,9 +511,11 @@ class GameState {
    * MeResponse (the `user` field of POST /auth/signup, POST /auth/login,
    * POST /wardrobe/buy|equip, POST /claim-bonus, or a plain GET /me) instead
    * of a localStorage profile. Call this after every one of those calls
-   * succeeds so every getter below (goldCoins, tickets, ownedWardrobe,
+   * succeeds so every getter below (goldCoins, ownedWardrobe,
    * equippedWardrobe, lastPlayerPosition, attendantClaim*) reflects the
-   * server's authoritative state.
+   * server's authoritative state. `me.tickets` is intentionally not read -
+   * TICKETS is retired and always 0 (see api/types.ts's MeResponse.tickets
+   * doc comment); it stays on the wire only for wire-shape compatibility.
    *
    * Deliberately does NOT call `save()` - there is no more local profile to
    * write; the server is the source of truth for a hydrated session. The
@@ -600,7 +527,7 @@ class GameState {
    */
   hydrateFromServer(me: MeResponse) {
     this.activeUsername = me.username;
-    this._ledger = createLedger(me.goldCoins, me.tickets);
+    this._ledger = createLedger(me.goldCoins);
     // Defensive `??` on both halves: an older deployed backend, or one
     // whose wardrobe migration hasn't been run, must still leave the player
     // with a body to render rather than an empty stack (the server degrades
@@ -636,7 +563,6 @@ class GameState {
     this._attendantClaimedAt = me.attendantClaim.lastClaimedAt
       ? Date.parse(me.attendantClaim.lastClaimedAt)
       : null;
-    this._adRewardClaimedAt = me.adReward.lastClaimedAt ? Date.parse(me.adReward.lastClaimedAt) : null;
     // Defensive `??` even though the server always sends this: an older
     // deployed backend (or one whose progression migration hasn't been run)
     // must degrade to level 1, not to `undefined` printed in the HUD.

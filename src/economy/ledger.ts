@@ -1,29 +1,23 @@
 /**
- * Transaction ledger — the single source of truth for GC (Gold Coin) and
- * TICKETS balances.
+ * Transaction ledger — the single source of truth for GC (Gold Coin)
+ * balances.
  *
- * Per the project economy rules (see repo-root CLAUDE.md), this is the
- * "arcade token" model: GC is what you spend to play (from the Coin Kiosk,
- * free, or a real-money package purchase - see packages.ts), and is always
- * spent whether a round is won or lost, exactly like inserting a token
- * into an arcade cabinet. Winning a round doesn't return/grow your GC - it
- * pays out TICKETS instead, a completely separate currency with no
- * real-money value, spendable only in the Item Shop. This replaced an
- * earlier GC/SC ("Sweeps Coin") sweepstakes-style model entirely - there
- * is no real-money redemption of anything in this game any more.
+ * Per the project economy rules (see repo-root CLAUDE.md), Gold Coins are
+ * the only currency: bet GC, win GC, buy cosmetics with GC. This replaced
+ * two earlier models entirely (an SC/"Sweeps Coin" sweepstakes model, then a
+ * GC/TICKETS "arcade token" model) - there is no second currency and no
+ * real-money redemption of anything in this game any more.
  *
- * GC and TICKETS are separate ledgers (tracked as two fields on one
- * LedgerState, never conflated or convertible into one another). No code
- * anywhere should mutate a balance number directly - every change
- * (purchase, payout, wager, bonus, Item Shop buy) must go through
- * `applyTransaction` so there is always a full, inspectable audit trail.
+ * No code anywhere should mutate a balance number directly - every change
+ * (purchase, payout, wager, bonus) must go through `applyTransaction` so
+ * there is always a full, inspectable audit trail.
  *
  * This module is intentionally pure/side-effect-free (no localStorage, no
  * DOM, no Phaser) so it's trivial to unit test - it just mutates the
  * LedgerState object it's given and returns the resulting Transaction.
  */
 
-export type Currency = "GC" | "TICKETS";
+export type Currency = "GC";
 
 /**
  * Every distinct reason a balance can change. Keeping this as a closed
@@ -38,12 +32,8 @@ export type TransactionType =
   | "PACKAGE_GC"
   // GC-only ad-reward refill (Coin Kiosk's ad-gated claim)
   | "AD_REWARD_GC"
-  // A game round's TICKETS win - the only way TICKETS are ever credited.
-  | "GAME_WIN_TICKETS"
-  // TICKETS spent in the Item Shop - the only way TICKETS are ever debited.
-  | "SKIN_PURCHASE_TICKETS"
-  // Gameplay wagers, always GC (arcade token model - the bet is spent
-  // whether the round is won or lost; see GAME_WIN_TICKETS for the payout)
+  // Gameplay wagers, always GC (every round's bet is spent whether it's
+  // won or lost, exactly like inserting an arcade token)
   | "WAGER_GC"
   // Generic adjustment - used only as a bridge for legacy call sites
   // (existing game scenes that do `gameState.goldCoins -= bet`) until
@@ -66,7 +56,6 @@ export interface Transaction {
 
 export interface LedgerState {
   gc: number;
-  tickets: number;
   transactions: Transaction[];
 }
 
@@ -87,17 +76,16 @@ function nextTransactionId(): string {
   return `tx_${Date.now().toString(36)}_${txCounter.toString(36)}`;
 }
 
-export function createLedger(initialGc = 0, initialTickets = 0): LedgerState {
-  return { gc: initialGc, tickets: initialTickets, transactions: [] };
+export function createLedger(initialGc = 0): LedgerState {
+  return { gc: initialGc, transactions: [] };
 }
 
 /**
- * The one and only place a GC or TICKETS balance number is allowed to
- * change. Mutates `state` in place and appends a Transaction record;
- * returns that record. Throws InsufficientBalanceError rather than letting
- * a balance go negative - callers that want a friendlier UX should check
- * affordability (e.g. via getBalance) before calling this and surface
- * their own message.
+ * The one and only place a GC balance number is allowed to change. Mutates
+ * `state` in place and appends a Transaction record; returns that record.
+ * Throws InsufficientBalanceError rather than letting a balance go negative
+ * - callers that want a friendlier UX should check affordability (e.g. via
+ * getBalance) before calling this and surface their own message.
  */
 export function applyTransaction(
   state: LedgerState,
@@ -112,15 +100,14 @@ export function applyTransaction(
     );
   }
 
-  const balanceKey = currency === "GC" ? "gc" : "tickets";
-  const current = state[balanceKey];
+  const current = state.gc;
   const next = current + amount;
 
   if (next < 0) {
     throw new InsufficientBalanceError(currency, current, amount);
   }
 
-  state[balanceKey] = next;
+  state.gc = next;
 
   const transaction: Transaction = {
     id: nextTransactionId(),
@@ -136,7 +123,8 @@ export function applyTransaction(
 }
 
 export function getBalance(state: LedgerState, currency: Currency): number {
-  return currency === "GC" ? state.gc : state.tickets;
+  void currency; // only one currency exists; kept for call-site symmetry with the server ledger
+  return state.gc;
 }
 
 /** True if a debit of `amount` from `currency` would succeed without throwing. */
