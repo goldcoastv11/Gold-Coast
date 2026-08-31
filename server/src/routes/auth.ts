@@ -10,6 +10,7 @@
  */
 
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "../db";
@@ -118,5 +119,7 @@ router.post("/login", asyncHandler(async (req, res) => {
 
   return res.json({ token, user: me });
 }));
+
+registerRoute(router, "/auth");
 
 export default router;

@@ -33,6 +33,7 @@
  */
 
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import { z } from "zod";
 import { prisma } from "../db";
 import { optionalAuth, AuthedRequest } from "../auth/middleware";
@@ -161,5 +162,7 @@ router.post(
     return res.status(202).json({ accepted: parsed.data.events.length });
   })
 );
+
+registerRoute(router);
 
 export default router;

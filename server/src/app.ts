@@ -6,18 +6,7 @@
 import express from "express";
 import cors from "cors";
 import { env } from "./env";
-import authRoutes from "./routes/auth";
-import meRoutes from "./routes/me";
-import economyRoutes from "./routes/economy";
-import wardrobeRoutes from "./routes/wardrobe";
-import roomRoutes from "./routes/room";
-import furnitureRoutes from "./routes/furniture";
-import positionRoutes from "./routes/position";
-import gamesRoutes from "./routes/games";
-import eventsRoutes from "./routes/events";
-import progressionRoutes from "./routes/progression";
-import leaderboardRoutes from "./routes/leaderboard";
-import magazineRoutes from "./routes/magazine";
+import { getRegisteredRoutes } from "./routes/index";
 import { InsufficientBalanceError } from "./economy/ledger";
 
 export const app = express();
@@ -31,18 +20,16 @@ app.use(express.json());
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
-app.use("/auth", authRoutes);
-app.use(meRoutes);
-app.use(economyRoutes);
-app.use(wardrobeRoutes);
-app.use(roomRoutes);
-app.use(furnitureRoutes);
-app.use(positionRoutes);
-app.use(gamesRoutes);
-app.use(eventsRoutes);
-app.use(progressionRoutes);
-app.use(leaderboardRoutes);
-app.use(magazineRoutes);
+// Every route module self-registers - see routes/index.ts and
+// routes/registry.ts. Add a new route module there; nothing here needs to
+// change.
+for (const { router, prefix } of getRegisteredRoutes()) {
+  if (prefix) {
+    app.use(prefix, router);
+  } else {
+    app.use(router);
+  }
+}
 
 app.use((req, res) => {
   res.status(404).json({ error: "Not found", code: "NOT_FOUND" });

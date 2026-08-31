@@ -1,4 +1,5 @@
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { prisma } from "../db";
 import { serializeMe } from "../serializers";
@@ -15,5 +16,7 @@ router.get(
     res.json(me);
   })
 );
+
+registerRoute(router);
 
 export default router;

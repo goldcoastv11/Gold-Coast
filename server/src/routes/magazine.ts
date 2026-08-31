@@ -10,6 +10,7 @@
  */
 
 import { Router } from "express";
+import { registerRoute } from "./registry";
 import { prisma } from "../db";
 import { requireAuth } from "../auth/middleware";
 import { getMagazineRooms } from "../economy/magazine";
@@ -25,5 +26,7 @@ router.get(
     return res.json(result);
   })
 );
+
+registerRoute(router);
 
 export default router;
