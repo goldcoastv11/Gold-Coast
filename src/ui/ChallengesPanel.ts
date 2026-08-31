@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Tokens } from "./DesignTokens";
 import { makeButton, makePanel, makeInset, makeDivider, makeText, UIButton } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import { showClaimCelebration, showLevelUpCelebration } from "./ClaimCelebration";
 import { isolateFixedUi } from "./sceneCameraSplit";
 import { playSfx } from "./SoundManager";
@@ -166,7 +167,7 @@ export function openChallengesPanel(host: ChallengesPanelHost) {
 
   // See the "Geometry" block above for why these are computed here instead
   // of as module consts.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
   const colL = cx - PANEL_W / 2 + Tokens.space.xl;
   const colR = cx + PANEL_W / 2 - Tokens.space.xl;
   const barL = cx;

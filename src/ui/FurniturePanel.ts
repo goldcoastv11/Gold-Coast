@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { FURNITURE_CATALOG, FURNITURE_SLOTS, FurniturePieceDef, FurnitureSlotId, getFurnitureSlotDef } from "../furnitureCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import { isolateFixedUi } from "./sceneCameraSplit";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -67,7 +68,7 @@ export function openFurnitureMenu(host: FurniturePanelHost) {
   // canvas well past 800 on a wide mobile-landscape phone (see its own
   // scale-config comment), and a fixed 400 would leave this panel
   // left-of-true-center there.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
 
   const elements: Phaser.GameObjects.GameObject[] = [];
   const cleanup = () => elements.forEach((e) => e.destroy());
@@ -144,7 +145,7 @@ export function openFurniturePiecePanel(host: FurniturePanelHost, slot: Furnitur
   playSfx(scene, "open");
   // X from the live canvas, not a literal 400 - see openFurnitureMenu's own
   // comment above.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
   let elements: Phaser.GameObjects.GameObject[] = [];
 
   const slotName = getFurnitureSlotDef(slot)?.name ?? slot;

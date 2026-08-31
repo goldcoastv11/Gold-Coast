@@ -3,6 +3,7 @@ import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
 import { makeButton, makeText, makePanel, popIn, UIButton } from "../ui/uiHelpers";
+import { liveCenterX } from "../ui/Layout";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { playSfx } from "../ui/SoundManager";
@@ -52,15 +53,24 @@ import { sweepPosition } from "../levelUpMinigameSweep";
  * mobile-first, touch and mouse both drive the one STOP button.
  */
 
-const CX = 400;
+/**
+ * X was a literal 400 (the design canvas's center) - wrong on any device
+ * wider than the 800 floor (see ui/Layout.ts's header for why). This is a
+ * dedicated full-screen scene, not the left-docked game shell, so it
+ * belongs on the true live center rather than needing the shell's
+ * design-block centering trick - computed fresh in create() into
+ * `this.cx`/`this.trackL`/`this.trackR` below, since main.ts can resize
+ * the canvas between visits and this scene's instance is reused (see
+ * repo CLAUDE.md's scene-instance-reuse trap).
+ */
 const CY = 300;
 const PANEL_W = 520;
 const PANEL_H = 300; // spans y 150-450, inside the 130-470 safe zone.
 
-const TRACK_L = CX - 190;
-const TRACK_R = CX + 190;
 const TRACK_Y = 284;
 const TRACK_H = 26;
+/** Half-width of the sweep track either side of center - see this.trackL/this.trackR. */
+const TRACK_HALF_W = 190;
 
 /** The marker's on-screen size - a tall thin bar, deliberately taller than the track so it visibly crosses it. */
 const MARKER_W = 6;
@@ -81,6 +91,11 @@ export class LevelUpMinigameScene extends Phaser.Scene {
   private phase: Phase = "loading";
   private session: { sessionId: string; level: number; sweepPeriodMs: number; startedAtMs: number } | null = null;
   private frozenPosition = 0;
+
+  /** Live center X and the sweep track's live left/right edges - recomputed every create() (see this file's own CY/PANEL_W doc comment above; scene instance is reused, see repo CLAUDE.md's trap #3). Placeholder values here are never actually rendered from - create() always sets them before buildStaticUi() runs. */
+  private cx = 400;
+  private trackL = 0;
+  private trackR = 0;
 
   private levelText!: Phaser.GameObjects.Text;
   private messageText!: Phaser.GameObjects.Text;
@@ -107,6 +122,11 @@ export class LevelUpMinigameScene extends Phaser.Scene {
     this.phase = "loading";
     this.session = null;
     this.frozenPosition = 0;
+    // Live canvas center, not a literal 400 - see this.cx's own doc comment
+    // above and ui/Layout.ts.
+    this.cx = liveCenterX(this);
+    this.trackL = this.cx - TRACK_HALF_W;
+    this.trackR = this.cx + TRACK_HALF_W;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -130,9 +150,9 @@ export class LevelUpMinigameScene extends Phaser.Scene {
   // ------------------------------------------------------------------
 
   private buildStaticUi() {
-    makePanel(this, CX, CY, PANEL_W, PANEL_H, 0);
+    makePanel(this, this.cx, CY, PANEL_W, PANEL_H, 0);
 
-    makeText(this, CX, 176, "LEVEL UP", {
+    makeText(this, this.cx, 176, "LEVEL UP", {
       size: Tokens.type.size.sm,
       color: Tokens.text.muted,
       tracking: Tokens.type.tracking.caps,
@@ -142,7 +162,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
 
     this.levelText = makeText(
       this,
-      CX,
+      this.cx,
       206,
       this.anchorLevel != null ? `LEVEL ${this.anchorLevel}` : "LEVEL UP",
       {
@@ -154,7 +174,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
       }
     );
 
-    this.messageText = makeText(this, CX, 236, "Loading…", {
+    this.messageText = makeText(this, this.cx, 236, "Loading…", {
       size: Tokens.type.size.md,
       color: Tokens.text.secondary,
       align: "center",
@@ -167,16 +187,16 @@ export class LevelUpMinigameScene extends Phaser.Scene {
     // Marker - hidden until a session actually loads, so nothing appears to
     // move before there is a real sweep to follow.
     this.marker = this.add
-      .rectangle(TRACK_L, TRACK_Y, MARKER_W, MARKER_H, Tokens.color.accent, 1)
+      .rectangle(this.trackL, TRACK_Y, MARKER_W, MARKER_H, Tokens.color.accent, 1)
       .setVisible(false);
 
-    this.resultText = makeText(this, CX, 330, "", {
+    this.resultText = makeText(this, this.cx, 330, "", {
       size: Tokens.type.size.lg,
       color: Tokens.text.secondary,
       align: "center",
       originX: 0.5
     });
-    this.rewardText = makeText(this, CX, 360, "", {
+    this.rewardText = makeText(this, this.cx, 360, "", {
       size: Tokens.type.size.xxl,
       weight: Tokens.type.weight.bold,
       color: Tokens.text.accent,
@@ -186,7 +206,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
 
     this.stopBtn = makeButton(
       this,
-      CX,
+      this.cx,
       414,
       240,
       52,
@@ -208,10 +228,10 @@ export class LevelUpMinigameScene extends Phaser.Scene {
   private drawTrack() {
     const g = this.add.graphics();
     const top = TRACK_Y - TRACK_H / 2;
-    const w = TRACK_R - TRACK_L;
+    const w = this.trackR - this.trackL;
 
     g.fillStyle(Tokens.color.inset, 1);
-    g.fillRoundedRect(TRACK_L, top, w, TRACK_H, TRACK_H / 2);
+    g.fillRoundedRect(this.trackL, top, w, TRACK_H, TRACK_H / 2);
 
     // Nested bands, widest (cool) to narrowest (hot), each centred on the
     // track's own centre.
@@ -224,17 +244,17 @@ export class LevelUpMinigameScene extends Phaser.Scene {
     for (const band of bands) {
       const bw = w * band.frac;
       g.fillStyle(band.color, 1);
-      g.fillRoundedRect(CX - bw / 2, top, bw, TRACK_H, TRACK_H / 2);
+      g.fillRoundedRect(this.cx - bw / 2, top, bw, TRACK_H, TRACK_H / 2);
     }
 
     // Dead-centre hairline, the exact target.
     g.fillStyle(Tokens.color.bg, 1);
-    g.fillRect(CX - 1, top - 4, 2, TRACK_H + 8);
+    g.fillRect(this.cx - 1, top - 4, 2, TRACK_H + 8);
   }
 
   private setMarkerPosition(position: number) {
     const clamped = Math.max(-1, Math.min(1, position));
-    const x = TRACK_L + ((clamped + 1) / 2) * (TRACK_R - TRACK_L);
+    const x = this.trackL + ((clamped + 1) / 2) * (this.trackR - this.trackL);
     this.marker.setX(x);
   }
 
@@ -321,7 +341,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
 
     // Snap-correct the marker to the server's real, scored position - a
     // short honest tween rather than pretending the frozen guess was exact.
-    const targetX = TRACK_L + ((Math.max(-1, Math.min(1, res.result.position)) + 1) / 2) * (TRACK_R - TRACK_L);
+    const targetX = this.trackL + ((Math.max(-1, Math.min(1, res.result.position)) + 1) / 2) * (this.trackR - this.trackL);
     this.tweens.add({
       targets: this.marker,
       x: targetX,
@@ -400,7 +420,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
     this.continueBtn?.destroy();
     this.continueBtn = makeButton(
       this,
-      CX,
+      this.cx,
       414,
       240,
       48,
@@ -418,7 +438,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
     this.continueBtn?.destroy();
     this.continueBtn = makeButton(
       this,
-      CX - 126,
+      this.cx - 126,
       414,
       232,
       48,
@@ -432,7 +452,7 @@ export class LevelUpMinigameScene extends Phaser.Scene {
     this.retryBtn?.destroy();
     this.retryBtn = makeButton(
       this,
-      CX + 126,
+      this.cx + 126,
       414,
       232,
       48,

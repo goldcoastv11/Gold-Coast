@@ -2,6 +2,24 @@ import Phaser from "phaser";
 import { Tokens, toCss } from "./DesignTokens";
 import { gameState, BET_STEP } from "../GameState";
 import { playSfx } from "./SoundManager";
+import {
+  SAFE_ZONE_TOP,
+  SAFE_ZONE_BOTTOM,
+  GAME_SHELL_DESIGN_WIDTH,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y,
+  centerDesignBlock
+} from "./Layout";
+// Re-exported so the 14 game scenes' existing `from "../ui/uiHelpers"`
+// imports of these keep working untouched - Layout.ts is the actual
+// source of truth now, see its own header.
+export {
+  SAFE_ZONE_TOP,
+  SAFE_ZONE_BOTTOM,
+  GAME_SHELL_DESIGN_WIDTH,
+  GAME_SHELL_DISPLAY_CENTER_X,
+  GAME_SHELL_DISPLAY_CENTER_Y
+};
 
 /**
  * SHARED GAME CHROME - rebuilt against `DesignTokens.ts` for the Stake-style
@@ -598,27 +616,12 @@ export function makeBetControl(
  * keeps meaning exactly what it always meant (the correct center for an
  * 800-wide canvas); the shell transparently shifts the rendered result to
  * the true live center at runtime.
+ *
+ * Moved to `Layout.ts` (this repo's single source of truth for screen
+ * geometry - see its own header) and re-exported at the top of this file so
+ * the 14 game scenes' existing `from "../ui/uiHelpers"` imports keep
+ * working untouched.
  */
-/** The width every game screen was designed against, before main.ts began widening the canvas to match a device's aspect ratio. The whole shell is centred as one block within anything wider - see makeGameShell. */
-export const GAME_SHELL_DESIGN_WIDTH = 800;
-export const GAME_SHELL_DISPLAY_CENTER_X = 570;
-export const GAME_SHELL_DISPLAY_CENTER_Y = 300;
-
-/**
- * The X a game's display-area content SHOULD be centered on for the live
- * canvas width - i.e. what `GAME_SHELL_DISPLAY_CENTER_X` would be if it
- * were computed fresh for this device instead of fixed at the 800-wide
- * design value. `345` is the sidebar's own right edge (`SIDEBAR_CX +
- * SIDEBAR_W/2` = 180+165, both below) - the display area runs from there to
- * the live canvas's right edge, so its center is the midpoint of those two.
- * Exported for anything that wants to reason about the live center
- * directly (nothing in this codebase currently needs to); `makeGameShell`
- * uses it internally to compute its camera-scroll shift.
- */
-export function liveGameShellDisplayCenterX(scene: Phaser.Scene): number {
-  const sidebarRightEdge = SIDEBAR_CX + SIDEBAR_W / 2;
-  return (sidebarRightEdge + scene.scale.width) / 2;
-}
 
 export interface GameShellHandle {
   balanceText: Phaser.GameObjects.Text;
@@ -650,9 +653,10 @@ export interface GameShellHandle {
  * GAME_SHELL_DISPLAY_CENTER_Y deliberately stays at the same 300 center for
  * the same reason - each game's own display-area content should stay within
  * roughly +/-170 of it too.
+ *
+ * Values moved to `Layout.ts` (see its own header) - imported at the top
+ * of this file rather than redefined here so there is exactly one copy.
  */
-const SAFE_ZONE_TOP = 130;
-const SAFE_ZONE_BOTTOM = 470;
 
 /** Sidebar geometry. All of it derives from the token spacing scale. */
 const SIDEBAR_CX = 180;
@@ -862,35 +866,18 @@ export function makeGameShell(
   );
   walkAwayBtn.container.setScrollFactor(0);
 
-  // See this function's "CENTERING ON WIDE CANVASES" doc comment above -
-  // this is the one line that actually re-centers every game's board on the
-  // live canvas width, now that the sidebar above is fully screen-fixed and
-  // immune to it. 0 on the original 800-wide canvas (desktop, or a phone at
-  // the width floor), since liveGameShellDisplayCenterX already equals 570
-  // there - main.ts only ever widens the canvas, never narrows it below 800.
-  // Centre the ENTIRE 800-wide game design as one block in the live canvas.
-  //
-  // The previous attempt re-centred only the board (scrollFactor-1) while
-  // pinning the sidebar (scrollFactor-0) to the far left. On a wide phone
-  // that pulled the two halves apart - sidebar jammed against the left edge,
-  // board floating off to the right - which is what the founder reported as
-  // "the whole game screen sits off to one side".
-  //
-  // Instead: shift everything by the same amount. Board content, being
-  // scrollFactor 1, moves with the camera; the screen-fixed sidebar elements
-  // are nudged by the same offset below, so the composition holds together
-  // and lands centred. 0 on an 800-wide canvas, so desktop is unchanged.
+  // See this function's "CENTERING ON WIDE CANVASES" doc comment above, and
+  // `centerDesignBlock`'s own doc comment in Layout.ts (the shared home for
+  // this logic - board content and every other panel's block-centering both
+  // go through the same function now, rather than each keeping its own
+  // copy). 0 on the original 800-wide canvas (desktop, or a phone at the
+  // width floor) - main.ts only ever widens the canvas, never narrows it
+  // below 800.
   const screenFixed = scene.children.list.filter(
     (obj): obj is Phaser.GameObjects.GameObject & { x: number } =>
       !beforeShellChrome.has(obj) && typeof (obj as { x?: unknown }).x === "number"
   );
-  const shellOffsetX = Math.max(0, (scene.scale.width - GAME_SHELL_DESIGN_WIDTH) / 2);
-  scene.cameras.main.scrollX = -shellOffsetX;
-  if (shellOffsetX !== 0) {
-    for (const obj of screenFixed) {
-      obj.x += shellOffsetX;
-    }
-  }
+  centerDesignBlock(scene, screenFixed);
 
   return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }

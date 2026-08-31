@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel } from "../ui/uiHelpers";
+import { liveCenterX } from "../ui/Layout";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 
 interface StartMenuData {
@@ -26,7 +27,7 @@ export class StartMenuScene extends Phaser.Scene {
     // drifting off-center-left on a wide screen. Computed once here at
     // scene-create time, same scope boundary as OverworldScene's
     // `screenCenterX` (see that comment for why not reactive on resize).
-    const cx = this.scale.width / 2;
+    const cx = liveCenterX(this);
 
     makePanel(this, cx, 300, 460, 340);
 

@@ -220,6 +220,38 @@ full suite (46/46, includes economy's new tests for both fixes), ran
 - [ ] Logout returns to login screen and a subsequent login as a different
       user does not see the first user's balances/skins.
 
+## Screen geometry / wide-canvas centering (`ui/Layout.ts`, roadmap/layoutconst)
+
+Automated coverage is `src/ui/Layout.test.ts` - pure geometry maths, exercised
+at the exact widths `main.ts`'s `computeLandscapeWidth()` produces for the
+device classes below (canvas screenshots don't render in this environment,
+see the note at the top of this file, so the maths is the real check;
+these manual entries are for whoever can test on a real device).
+
+- [ ] Desktop / any non-touch device: canvas stays 800x600 (main.ts only
+      resizes on `isTouchDevice()`) - unaffected by this change by
+      construction, but worth one pass to confirm nothing regressed.
+- [ ] A phone at the design floor (~4:3 or narrower landscape, canvas stays
+      800 wide): every screen should look pixel-identical to before this
+      change - `blockOffsetX`/`liveCenterX` both equal the old fixed values
+      there.
+- [ ] A ~20:9 phone in landscape (canvas ~1333 wide - most Samsung/Pixel
+      handsets): coin balance/HUD fully visible (not cropped), each of the
+      14 game screens' sidebar+board sits centered as one block (not
+      sidebar-left/board-right split apart), Item Shop/Wardrobe/Room/
+      Furniture/Challenges/Magazine/Leaderboard/Login panels all open
+      centered on the true middle of the screen.
+- [ ] A ~21:9 phone in landscape (canvas ~1400 wide): same checklist as
+      above - this is the widest realistic phone case and the one most
+      likely to expose anything still reading a literal 400/800.
+- [ ] A tablet in landscape (canvas ~960-1067 wide depending on aspect):
+      same checklist again.
+- [ ] Rotate a phone to landscape WHILE still on the login screen (not the
+      usual portrait-login path) - LoginScene's panel/tabs/inputs should
+      still be centered, not drifted left (this was a latent bug fixed in
+      this change: LoginScene previously hardcoded 400 for its whole
+      layout).
+
 ## Start Menu (`StartMenuScene`)
 
 - [ ] All game entries listed navigate to the correct scene.

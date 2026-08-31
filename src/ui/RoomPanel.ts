@@ -3,6 +3,7 @@ import { gameState } from "../GameState";
 import { ROOM_SLOTS, RoomPieceDef, RoomSlot, getSlotDef, listPiecesBySlot } from "../roomCatalog";
 import { Theme } from "./Theme";
 import { makeButton, makePanel, makeInset } from "./uiHelpers";
+import { liveCenterX } from "./Layout";
 import { isolateFixedUi } from "./sceneCameraSplit";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
@@ -70,7 +71,7 @@ export function openRoomSlotMenu(host: RoomPanelHost) {
   // canvas well past 800 on a wide mobile-landscape phone (see its own
   // scale-config comment), and a fixed 400 would leave this panel
   // left-of-true-center there.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
 
   const elements: Phaser.GameObjects.GameObject[] = [];
   const cleanup = () => elements.forEach((e) => e.destroy());
@@ -121,7 +122,7 @@ export function openRoomPiecePanel(host: RoomPanelHost, slot: RoomSlot) {
   playSfx(scene, "open");
   // X from the live canvas, not a literal 400 - see openRoomSlotMenu's own
   // comment above.
-  const cx = scene.scale.width / 2;
+  const cx = liveCenterX(scene);
   let elements: Phaser.GameObjects.GameObject[] = [];
 
   const slotDef = getSlotDef(slot);
