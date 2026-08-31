@@ -228,14 +228,18 @@ export class RoomScene extends Phaser.Scene {
     // reasoning) - the two scenes' chrome no longer lines up 1:1 (that was
     // only ever a byproduct of both using the same cornerX column, not a
     // requirement), but both now read as "buttons live along the top."
+    // Stretches to the full canvas width, matching OverworldScene's row
+    // (founder: "the buttons need to be bigger and go across the whole
+    // screen on mobile"). Two buttons here rather than five, so each gets a
+    // correspondingly larger share.
     const TOP_ROW_Y = 100;
-    const TOP_ROW_BTN_W = 130;
-    const TOP_ROW_BTN_H = 40;
-    const TOP_ROW_GAP = 12;
+    const TOP_ROW_BTN_H = 44;
+    const TOP_ROW_GAP = 8;
+    const TOP_ROW_EDGE = 8;
     const topRowCount = 2;
-    const topRowTotalW = TOP_ROW_BTN_W * topRowCount + TOP_ROW_GAP * (topRowCount - 1);
-    const topRowLeft = screenCenterX - topRowTotalW / 2;
-    const topRowX = (i: number) => topRowLeft + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
+    const topRowUsableW = this.scale.width - TOP_ROW_EDGE * 2;
+    const TOP_ROW_BTN_W = (topRowUsableW - TOP_ROW_GAP * (topRowCount - 1)) / topRowCount;
+    const topRowX = (i: number) => TOP_ROW_EDGE + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
 
     makeButton(this, topRowX(0), TOP_ROW_Y, TOP_ROW_BTN_W, TOP_ROW_BTN_H, "🎨 Decorate", Theme.neutral, Theme.neutralHover, () =>
       this.openDecoratePanel()

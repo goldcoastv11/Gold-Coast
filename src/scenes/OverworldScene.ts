@@ -459,6 +459,8 @@ export class OverworldScene extends Phaser.Scene {
   private challengesButton!: UIButton;
   /** The Challenges button's pulsing "something's ready" ring (same showHighlightRing helper as the Level-Up kiosk/tutorial, screenFixed since this is a fixed UI button) - undefined when nothing is claimable. Same "persist across other panels" reasoning as levelUpHighlight below - it's cleared explicitly by refreshChallengeBadge(), not by panelOpen's setter. */
   private challengesButtonHighlight?: HighlightHandle;
+  /** The top row's live button size. The row stretches to the canvas width, so the glow ring around the Challenges button has to size itself from what was actually drawn rather than a fixed constant. */
+  private topRowBtnSize = { w: CHALLENGES_BTN_W, h: CHALLENGES_BTN_H };
 
   /**
    * The corner "Quickplay"/"Arcade" button - one button whose label and
@@ -974,14 +976,21 @@ export class OverworldScene extends Phaser.Scene {
     // pinned to the floor - see main.ts's LANDSCAPE_MIN_WIDTH) the row's
     // total width (5*130 + 4*12 = 698) still leaves real margin on both
     // sides, so this never runs off-canvas.
+    // The row STRETCHES to fill the full canvas width - founder ask: "the
+    // buttons need to be bigger and go across the whole screen on mobile".
+    // Each button gets an equal share of the width rather than a fixed 130,
+    // so on a wide phone they grow into the space instead of leaving it as
+    // margin, giving the biggest possible tap targets. Derived from the live
+    // canvas so it holds at any width.
     const TOP_ROW_Y = 100;
-    const TOP_ROW_BTN_W = 130;
-    const TOP_ROW_BTN_H = 40;
-    const TOP_ROW_GAP = 12;
+    const TOP_ROW_BTN_H = 44;
+    const TOP_ROW_GAP = 8;
+    const TOP_ROW_EDGE = 8;
     const topRowCount = 5;
-    const topRowTotalW = TOP_ROW_BTN_W * topRowCount + TOP_ROW_GAP * (topRowCount - 1);
-    const topRowLeft = this.scale.width / 2 - topRowTotalW / 2;
-    const topRowX = (i: number) => topRowLeft + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
+    const topRowUsableW = this.scale.width - TOP_ROW_EDGE * 2;
+    const TOP_ROW_BTN_W = (topRowUsableW - TOP_ROW_GAP * (topRowCount - 1)) / topRowCount;
+    const topRowX = (i: number) => TOP_ROW_EDGE + TOP_ROW_BTN_W / 2 + i * (TOP_ROW_BTN_W + TOP_ROW_GAP);
+    this.topRowBtnSize = { w: TOP_ROW_BTN_W, h: TOP_ROW_BTN_H };
 
     // "Leaderboard" corner button - founder ask: "a small button that shows
     // the Daily, Weekly, and all time leaderboard for GC earned".
@@ -1013,8 +1022,8 @@ export class OverworldScene extends Phaser.Scene {
       this,
       topRowX(3),
       TOP_ROW_Y,
-      CHALLENGES_BTN_W,
-      CHALLENGES_BTN_H,
+      TOP_ROW_BTN_W,
+      TOP_ROW_BTN_H,
       "🏆 Challenges",
       Theme.neutral,
       Theme.neutralHover,
@@ -2221,7 +2230,8 @@ export class OverworldScene extends Phaser.Scene {
             // max(w,h)/2 - that button is near-square, but a circle sized
             // off this one's much wider rectangle would either swallow
             // neighbouring UI or clip the button's corners.
-            const radius = Math.sqrt((CHALLENGES_BTN_W / 2) ** 2 + (CHALLENGES_BTN_H / 2) ** 2) + 6;
+            const { w: btnW, h: btnH } = this.topRowBtnSize;
+            const radius = Math.sqrt((btnW / 2) ** 2 + (btnH / 2) ** 2) + 6;
             this.challengesButtonHighlight = showHighlightRing(
               this,
               button.container.x,
