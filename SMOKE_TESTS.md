@@ -268,6 +268,21 @@ these manual entries are for whoever can test on a real device).
 
 ## Multiplayer presence (`api/realtime.ts`, `scenes/overworld/RemotePlayers.ts`)
 
+> **Verified live on 2026-09-02**, against a running dev server and the real
+> dev database, with two real accounts on two real WebSocket connections
+> (throwaway script, not kept). Confirmed end to end: both handshakes, the
+> roster carrying a real equipped wardrobe, movement and emotes crossing
+> between players, leaving the floor, both players seated at the same
+> Roulette round, a bet placed over HTTP appearing on the other player's
+> table, a duplicate bet refused, no debit at bet time, the same winning
+> number on both screens, **both balances landing exactly on the settled
+> figures** (2000 → 2020 on a winning red, 500 → 480 on a losing black),
+> and a bet sent over the socket rejected. 18/18.
+>
+> So the mechanics below are known to work. What is still unverified is
+> everything you can only see: layout, sprites, name tags, the countdown,
+> readability on a phone. That is what this checklist is for.
+
 **Needs two browsers.** Two accounts in the same browser will NOT work: the
 server keys presence by account, so a second connection from the same account
 deliberately displaces the first (see `server/src/realtime/presence.ts`). Use
