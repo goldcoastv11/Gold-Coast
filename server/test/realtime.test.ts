@@ -16,7 +16,8 @@ import WebSocket from "ws";
 import { app } from "../src/app";
 import { attachRealtime, REALTIME_PATH, RealtimeHandle } from "../src/realtime/server";
 import { ClientMessage, ServerMessage } from "../src/realtime/protocol";
-import { resetDb, signupUser } from "./helpers";
+import { resetDb, signupUser, authed } from "./helpers";
+import request from "supertest";
 
 let server: Server;
 let realtime: RealtimeHandle;
@@ -331,6 +332,78 @@ describe("realtime presence on the casino floor", () => {
     expect(bobClient.received.filter((m) => m.t === "state")).toEqual([]);
     aliceClient.close();
     bobClient.close();
+  });
+});
+
+describe("the live Roulette table over the socket", () => {
+  /** Sits a client at the table (the socket half; bets go over HTTP). */
+  async function sitAtTable(token: string): Promise<TestClient> {
+    const client = await TestClient.open();
+    client.send({ t: "hello", token });
+    await client.next("welcome");
+    client.send({ t: "room", room: "roulette" });
+    await client.next("table");
+    return client;
+  }
+
+  it("sends the table's current state on sitting down", async () => {
+    const user = await signupUser();
+    const client = await sitAtTable(user.token);
+
+    const table = await client.next("table");
+    expect(["betting", "spinning", "payout"]).toContain(table.snapshot.phase);
+    expect(table.snapshot.msRemaining).toBeGreaterThan(0);
+    client.close();
+  });
+
+  it("relays a bet placed over HTTP to everyone at the table", async () => {
+    const alice = await signupUser({ username: "alice_live" });
+    const bob = await signupUser({ username: "bob_live" });
+    const aliceClient = await sitAtTable(alice.token);
+    await sitAtTable(bob.token);
+
+    // The bet itself goes through the authenticated HTTP API - the socket
+    // is how the table is watched, never how it is played.
+    const res = await request(app)
+      .post("/games/roulette/table/bet")
+      .set(authed(bob.token))
+      .send({ betAmount: 25, bet: "red" });
+    expect(res.status).toBe(200);
+
+    const relayed = await aliceClient.next("tablebet");
+    expect(relayed.bet).toMatchObject({ username: "bob_live", choice: "red", amount: 25 });
+
+    aliceClient.close();
+  });
+
+  it("does not send table traffic to someone standing on the casino floor", async () => {
+    const onFloor = await signupUser();
+    const better = await signupUser();
+    const floorClient = await connectOnFloor(onFloor.token);
+    await sitAtTable(better.token);
+
+    await request(app)
+      .post("/games/roulette/table/bet")
+      .set(authed(better.token))
+      .send({ betAmount: 25, bet: "black" });
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    expect(floorClient.received.filter((m) => m.t === "tablebet")).toEqual([]);
+    floorClient.close();
+  });
+
+  it("refuses a bet from a socket - the channel carries no money", async () => {
+    const user = await signupUser();
+    const client = await sitAtTable(user.token);
+
+    // There is no bet message in the protocol at all, and that is the
+    // point: adding one would move a wager off the authenticated HTTP path
+    // every other bet in this product takes.
+    client.socket.send(JSON.stringify({ t: "bet", betAmount: 25, choice: "red" }));
+
+    const error = await client.next("error");
+    expect(error.code).toBe("BAD_MESSAGE");
+    client.close();
   });
 });
 

@@ -39,6 +39,47 @@ export type Direction = (typeof DIRECTIONS)[number];
 
 export const ROOM_OVERWORLD = "overworld";
 
+/**
+ * The live Roulette table. A second shared room - and unlike the floor, its
+ * occupants have no avatars and send no positions. It uses the same room
+ * mechanism purely so "tell everyone at this table" reuses one fan-out.
+ */
+export const ROOM_ROULETTE = "roulette";
+
+export const ROOMS = [ROOM_OVERWORLD, ROOM_ROULETTE] as const;
+export type RoomName = (typeof ROOMS)[number];
+
+// --- The live Roulette table's wire shapes (mirrors the server's) ---------
+
+export type TableColor = "red" | "black" | "green";
+
+export type TablePhase = "betting" | "spinning" | "payout";
+
+export interface TableBet {
+  userId: string;
+  username: string;
+  choice: TableColor;
+  amount: number;
+}
+
+export interface TableResult extends TableBet {
+  won: boolean;
+  payout: number;
+  /** True when the server couldn't settle this player's wager - nothing was debited and nothing paid. */
+  voided?: boolean;
+}
+
+export interface TableSnapshot {
+  roundId: string;
+  phase: TablePhase;
+  /** Milliseconds left in this phase. A DURATION, not a deadline - so the countdown is right even if this device's clock is wrong. */
+  msRemaining: number;
+  bets: TableBet[];
+  number: number | null;
+  color: TableColor | null;
+  results: TableResult[] | null;
+}
+
 /** Application close code meaning "your account connected from somewhere else" - see the server's CLOSE_DISPLACED. */
 export const CLOSE_DISPLACED = 4001;
 
@@ -65,7 +106,7 @@ export type ClientMessage =
   | { t: "hello"; token: string }
   | { t: "move"; x: number; y: number; dir: Direction; moving: boolean }
   | { t: "emote"; e: Emote }
-  | { t: "room"; room: typeof ROOM_OVERWORLD | null }
+  | { t: "room"; room: RoomName | null }
   | { t: "ping" }
   | { t: "appearance" };
 
@@ -78,6 +119,9 @@ export type ServerMessage =
   | { t: "emote"; id: string; e: Emote }
   | { t: "appearance"; player: PresencePlayer }
   | { t: "pong" }
+  | { t: "table"; snapshot: TableSnapshot }
+  | { t: "tablebet"; roundId: string; bet: TableBet }
+  | { t: "tableresult"; roundId: string; number: number; color: TableColor; results: TableResult[] }
   | { t: "error"; code: string; message: string };
 
 /**

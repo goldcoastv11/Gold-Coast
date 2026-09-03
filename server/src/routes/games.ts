@@ -20,10 +20,14 @@ import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { serializeMe } from "../serializers";
 import { asyncHandler } from "../asyncHandler";
 import { BetAmountSchema, settleSingleShotBet, placeWager, settlePayout } from "../games/shared";
-import { applyTransaction } from "../economy/ledger";
+import { applyTransaction, canAfford } from "../economy/ledger";
 import { DICE_TARGET_MIN, DICE_TARGET_MAX, playDice } from "../games/dice";
 import { playCoinFlip } from "../games/coinflip";
 import { playRoulette } from "../games/roulette";
+// The live table's round state. Imported for its `placeBet`/`snapshot`
+// only - this route never touches the socket layer (see the live-table
+// section below).
+import { rouletteTable } from "../realtime/rouletteTable";
 import { LIMBO_TARGET_MIN, LIMBO_TARGET_MAX, playLimbo } from "../games/limbo";
 import { playPlinko } from "../games/plinko";
 import { playSlots } from "../games/slots";
@@ -341,6 +345,81 @@ router.post(
     });
 
     return res.json({ result, user: me });
+  })
+);
+
+// ---------------------------------------------------------------------
+// Roulette - the live table (multiplayer)
+//
+// The shared wheel every seated player bets on at once. The ROUND itself
+// lives in realtime/rouletteTable.ts and is settled from the realtime tick;
+// this route is only how a bet gets onto it.
+//
+// That split is the point. Placing a bet is a money action, so it comes in
+// here - authenticated, validated, over HTTP - exactly like the solo game
+// above and every other wager in this product. The WebSocket is how the
+// table is WATCHED, never how it is played. See realtime/protocol.ts for
+// why that boundary is drawn where it is.
+//
+// Note there is no balance debit here: a player's whole round settles in
+// one transaction when the wheel stops (realtime/rouletteTable.ts's header
+// explains why). The affordability check below is a courtesy so a player
+// finds out now rather than at the spin - it is not what protects the
+// ledger, which refuses an unaffordable wager on its own.
+// ---------------------------------------------------------------------
+
+const RouletteTableBetSchema = z.object({
+  betAmount: BetAmountSchema,
+  bet: z.enum(["red", "black", "green"])
+});
+
+/** Maps a table refusal onto an HTTP status + stable code, so the client can say something specific. */
+const TABLE_BET_ERRORS: Record<string, { status: number; message: string }> = {
+  TABLE_CLOSED: { status: 503, message: "The live table isn't running right now" },
+  BETTING_CLOSED: { status: 409, message: "Betting has closed for this round" },
+  ALREADY_BET: { status: 409, message: "You already have a bet on this round" },
+  INVALID_AMOUNT: { status: 400, message: "That bet amount isn't allowed" }
+};
+
+router.post(
+  "/games/roulette/table/bet",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { userId, username } = req as AuthedRequest;
+    const parsed = RouletteTableBetSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid table bet payload", code: "INVALID_INPUT" });
+    }
+    const { betAmount, bet } = parsed.data;
+
+    if (!(await canAfford(prisma, userId, "GC", betAmount))) {
+      return res
+        .status(400)
+        .json({ error: "Not enough Gold Coins for that bet", code: "INSUFFICIENT_BALANCE" });
+    }
+
+    const outcome = rouletteTable.placeBet(userId, username, bet, betAmount);
+    if (!outcome.ok) {
+      const mapped = TABLE_BET_ERRORS[outcome.reason];
+      return res.status(mapped.status).json({ error: mapped.message, code: outcome.reason });
+    }
+
+    return res.json({ bet: outcome.bet, table: outcome.snapshot });
+  })
+);
+
+/**
+ * The table's current state.
+ *
+ * The WebSocket is the normal way a client learns this; this route exists so
+ * the live table degrades to "you can still watch the wheel and see the
+ * countdown" rather than a blank screen when presence is down.
+ */
+router.get(
+  "/games/roulette/table",
+  requireAuth,
+  asyncHandler(async (_req, res) => {
+    return res.json({ running: rouletteTable.running, table: rouletteTable.snapshot() });
   })
 );
 

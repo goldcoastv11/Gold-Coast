@@ -113,6 +113,7 @@ phones.
 | Game payout logic | `server/src/games/`, settle helpers in `shared.ts` |
 | Challenges / XP / levels | `server/src/progression/` |
 | Multiplayer presence | `server/src/realtime/` (protocol → presence → server), `src/api/realtime.ts`, `src/scenes/overworld/` |
+| Live Roulette table | `server/src/realtime/rouletteTable.ts` (round loop) + `tableSettlement.ts` (the ledger), `src/scenes/LiveRouletteScene.ts` |
 
 **Catalogs are duplicated client-side and server-side, not shared** (`wardrobeCatalog`,
 `furnitureCatalog`, `roomCatalog`, `itemCatalog`) - the server's Docker build context is scoped to
@@ -147,8 +148,24 @@ Two rules follow, and both are load-bearing:
   decision — it needs the founder, not a follow-up PR.
 
 Presence is in-memory and single-process, like the rate-limit buckets in `routes/events.ts`. If a
-second Railway instance is ever added, players on one would not see players on the other — that is
-the day this needs a shared backplane, and nothing before it does.
+second Railway instance is ever added, players on one would not see players on the other — and the
+live Roulette table would run two independent wheels. That is the day this needs a shared backplane,
+and nothing before it does.
+
+## The live Roulette table's money rules
+
+- **Bets arrive over HTTP** (`POST /games/roulette/table/bet`), never over the socket. There is no
+  bet message in the protocol, and a test asserts that sending one is rejected. Do not add one.
+- **A round settles in one transaction per player, at spin time** — never a debit at bet time (a
+  restart between the legs would strand the stake) and never one transaction for the whole table
+  (one player who cannot cover their bet would roll back everyone else's winnings). Both of those
+  are load-bearing; `rouletteTable.ts` and `tableSettlement.ts` explain each in place.
+- **Settlement goes through `settleSingleShotBet`**, same as all 14 solo games, under the same
+  `roulette` game name. That is what keeps the ledger comparable and makes live rounds count toward
+  challenges and XP. Do not add bespoke currency wiring here — `games/shared.ts` is the whole
+  currency surface.
+- **A bet that cannot be settled is voided, not paid.** Nothing debited, nothing credited, the
+  player is told, and the broadcast result says so. Never report a win that was not paid.
 
 ---
 

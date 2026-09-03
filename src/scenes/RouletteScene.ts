@@ -218,6 +218,30 @@ export class RouletteScene extends Phaser.Scene {
       )
     );
 
+    // The way through to the shared wheel (LiveRouletteScene) - same
+    // paytable, but one spin the whole table bets on together, on the
+    // server's clock. A plain surface button rather than an accent one:
+    // this screen's action is still the three colours below it, and the
+    // solo game stays the default.
+    makeButton(
+      this,
+      BOARD_RIGHT - 52,
+      RESULT_LABEL_Y,
+      104,
+      26,
+      "LIVE TABLE",
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => {
+        // Mid-spin the round is already settling server-side; leaving now
+        // would drop the player out before their own result renders.
+        if (this.spinning) return;
+        fadeToScene(this, "LiveRouletteScene");
+      },
+      undefined,
+      Tokens.radius.sm
+    );
+
     this.updateBalance();
   }
 

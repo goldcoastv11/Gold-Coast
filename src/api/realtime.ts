@@ -33,8 +33,12 @@ import {
   HEARTBEAT_MS,
   PresenceDelta,
   PresencePlayer,
-  ROOM_OVERWORLD,
+  RoomName,
   ServerMessage,
+  TableBet,
+  TableColor,
+  TableResult,
+  TableSnapshot,
   realtimeUrlFor
 } from "./realtimeProtocol";
 
@@ -73,6 +77,22 @@ export interface RealtimeEvents {
   emote: (id: string, emote: Emote) => void;
   appearance: (player: PresencePlayer) => void;
   status: (status: RealtimeStatus) => void;
+  /** The live Roulette table's state - on sitting down and on every phase change. */
+  table: (snapshot: TableSnapshot) => void;
+  /** Somebody got a bet down, between phase changes. */
+  tableBet: (roundId: string, bet: TableBet) => void;
+  /**
+   * The round's settled outcomes. Sent AFTER the server wrote the ledger,
+   * so these figures are what balances actually moved by - the scene holds
+   * them until its wheel animation finishes rather than showing them early.
+   */
+  tableResult: (roundId: string, number: number, color: TableColor, results: TableResult[]) => void;
+  /**
+   * A non-fatal server message aimed at this player - today only
+   * `BET_VOIDED`. Separate from the internal handling of `UNAUTHORIZED`,
+   * which this module deals with itself.
+   */
+  notice: (code: string, message: string) => void;
 }
 
 type Listener<K extends keyof RealtimeEvents> = RealtimeEvents[K];
@@ -90,7 +110,7 @@ export class RealtimeClient {
    * handshake, which is what makes reconnect-into-the-right-place work
    * without any scene having to notice a reconnect happened.
    */
-  private desiredRoom: string | null = null;
+  private desiredRoom: RoomName | null = null;
 
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -109,7 +129,11 @@ export class RealtimeClient {
     state: new Set(),
     emote: new Set(),
     appearance: new Set(),
-    status: new Set()
+    status: new Set(),
+    table: new Set(),
+    tableBet: new Set(),
+    tableResult: new Set(),
+    notice: new Set()
   };
 
   /** This player's own presence id, once the handshake has completed. Used to filter yourself out of a broadcast. */
@@ -174,7 +198,7 @@ export class RealtimeClient {
    * Remembered even when the socket is down, so entering the floor during a
    * reconnect does the right thing once the connection comes back.
    */
-  setRoom(room: typeof ROOM_OVERWORLD | null): void {
+  setRoom(room: RoomName | null): void {
     this.desiredRoom = room;
     // A fresh room means the movement dedupe below has nothing valid to
     // compare against - without this the first move after re-entering a
@@ -308,7 +332,7 @@ export class RealtimeClient {
         // Re-announce the room on every handshake, including a reconnect's
         // - see `desiredRoom`.
         if (this.desiredRoom !== null) {
-          this.send({ t: "room", room: this.desiredRoom as typeof ROOM_OVERWORLD });
+          this.send({ t: "room", room: this.desiredRoom });
         }
         return;
 
@@ -336,6 +360,18 @@ export class RealtimeClient {
         this.emit("appearance", message.player);
         return;
 
+      case "table":
+        this.emit("table", message.snapshot);
+        return;
+
+      case "tablebet":
+        this.emit("tableBet", message.roundId, message.bet);
+        return;
+
+      case "tableresult":
+        this.emit("tableResult", message.roundId, message.number, message.color, message.results);
+        return;
+
       case "pong":
         return;
 
@@ -346,7 +382,12 @@ export class RealtimeClient {
           // needs to do is stop retrying with a credential that doesn't
           // work.
           this.stopped = true;
+          return;
         }
+        // Everything else is advisory and aimed at whatever screen the
+        // player is looking at - passed on rather than swallowed, since a
+        // voided bet is something they need to be told about.
+        this.emit("notice", message.code, message.message);
         return;
     }
   }

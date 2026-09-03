@@ -131,6 +131,40 @@ Emotes are a closed vocabulary and there is deliberately no chat — see
 `src/ui/EmotePanel.ts` for why that is a product decision rather than an
 unfinished feature.
 
+### Live Roulette
+
+The second multiplayer piece: one wheel, everybody at the table betting on
+the same spin. Reach it from the **LIVE TABLE** button on the solo Roulette
+screen; **SOLO TABLE** goes back. The solo game is unchanged — same wheel,
+same paytable, still there.
+
+A round runs betting (12s) → spinning (5s) → results (5s), continuously, on
+the server's clock. `server/src/realtime/rouletteTable.ts` is the state
+machine (no timers, no database, no sockets — driven by the realtime tick,
+which is what makes it testable); `tableSettlement.ts` is the only part of
+the whole multiplayer feature that moves a balance.
+
+Two things about it are worth knowing:
+
+- **Bets go over HTTP** (`POST /games/roulette/table/bet`), authenticated,
+  exactly like every other wager in this product. The socket is how the
+  table is watched, never how it is played — there is no bet message in the
+  protocol at all, and a test asserts that sending one is rejected.
+- **A round settles in one transaction per player, when the wheel stops.**
+  Nothing is debited when a bet is placed. The alternative — debit now,
+  credit later — strands a player's stake if the process restarts between
+  the two, and this table runs unattended and forever. The cost is that
+  someone can bet and then spend the same coins elsewhere before the spin;
+  when that happens the ledger refuses their wager, their bet is voided
+  (nothing taken, nothing paid, and they are told), and everyone else's
+  round settles normally.
+
+Live-table rounds land in the ledger through the same `settleSingleShotBet`
+helper as the solo games, under the same `roulette` game name, so they count
+toward challenges and XP identically and show up in the daily metrics as
+roulette. The transaction metadata carries `table: true` to tell the two
+modes apart.
+
 ## Art credits
 
 The casino tileset (floor, walls, roulette table, slot machine, blackjack

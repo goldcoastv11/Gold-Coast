@@ -25,6 +25,8 @@ import { env } from "../env";
 import { prisma } from "../db";
 import { getEquippedWardrobe } from "../economy/wardrobe";
 import { PresenceHub } from "./presence";
+import { TableEvent, rouletteTable } from "./rouletteTable";
+import { settleTableRound } from "./tableSettlement";
 import {
   EMOTE_RATE_LIMIT_MAX,
   EMOTE_RATE_LIMIT_WINDOW_MS,
@@ -36,6 +38,8 @@ import {
   RATE_LIMIT_WINDOW_MS,
   REALTIME_PATH,
   ROOM_OVERWORLD,
+  ROOM_ROULETTE,
+  RoomName,
   ServerMessage,
   TICK_MS,
   decodeClientMessage,
@@ -274,14 +278,26 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
     send(conn.socket, { t: "welcome", selfId: userId, tickMs: TICK_MS, heartbeatMs: HEARTBEAT_MS });
   }
 
-  async function handleRoom(conn: Connection, room: string | null) {
+  async function handleRoom(conn: Connection, room: RoomName | null) {
     const userId = conn.userId;
     if (!userId) return;
 
     const previous = hub.exit(userId);
-    if (previous) broadcast(previous, { t: "leave", id: userId }, userId);
+    // Only the casino floor draws avatars, so only the casino floor needs to
+    // be told someone stopped standing in it.
+    if (previous === ROOM_OVERWORLD) broadcast(previous, { t: "leave", id: userId }, userId);
 
-    if (room === null) return; // Left the floor for a game screen or their own room.
+    if (room === null) return; // Left for a game screen or their own room.
+
+    if (room === ROOM_ROULETTE) {
+      // Sitting down at the live table. No avatar, no roster, no positions -
+      // this room exists only so "tell everyone at this table" reuses the
+      // same fan-out as "tell everyone on this floor" (see protocol.ts's
+      // ROOM_ROULETTE). Who is at the table is conveyed by the bets on it.
+      hub.enter(ROOM_ROULETTE, seatedPlaceholder(userId, conn.username));
+      send(conn.socket, { t: "table", snapshot: rouletteTable.snapshot() });
+      return;
+    }
 
     const wardrobe = await readWardrobe(userId);
     // The socket may have closed while that DB read was in flight.
@@ -342,11 +358,19 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
 
   /**
    * The heartbeat of the whole channel: once every TICK_MS, each room sends
-   * everyone who moved. Rooms where nobody moved send nothing at all, so an
-   * idle floor is free.
+   * everyone who moved, and the Roulette table's round loop is advanced.
+   * Rooms where nobody moved send nothing at all, so an idle floor is free.
+   *
+   * The table shares this tick rather than owning a timer: it needs a clock
+   * with roughly 100ms resolution against phases measured in seconds, which
+   * is exactly what is already running.
    */
   const tickTimer = setInterval(() => {
     for (const { name, room } of hub.activeRooms()) {
+      // The table room has no avatars in it, so it never has movement to
+      // send - skipped explicitly rather than relying on it happening to be
+      // empty.
+      if (name === ROOM_ROULETTE) continue;
       const players = room.drainDeltas();
       if (players.length === 0) continue;
       // Sent to everyone including the players in it: the client filters
@@ -355,7 +379,60 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
       // the difference between one JSON.stringify and one per occupant.
       broadcast(name, { t: "state", players });
     }
+
+    for (const event of rouletteTable.advance()) {
+      void handleTableEvent(event);
+    }
   }, TICK_MS);
+
+  /**
+   * Turns one round-loop event into broadcasts and, for a settle, ledger
+   * writes.
+   *
+   * This is the only place in the realtime layer that touches money, and it
+   * does so through `settleSingleShotBet` - the same helper every one of the
+   * 14 solo games funnels through, so a live-table round lands in the ledger
+   * as the same shape as a solo one and counts toward challenges and XP
+   * identically. Nothing bespoke about the currency wiring exists here.
+   */
+  async function handleTableEvent(event: TableEvent): Promise<void> {
+    if (event.kind === "phase") {
+      broadcast(ROOM_ROULETTE, { t: "table", snapshot: event.snapshot });
+      return;
+    }
+
+    const { voidedUserIds, settled } = await settleTableRound(
+      event.roundId,
+      event.number,
+      event.results
+    );
+
+    if (voidedUserIds.length > 0) {
+      rouletteTable.markVoided(event.roundId, voidedUserIds);
+      for (const userId of voidedUserIds) {
+        const socket = byUserId.get(userId);
+        // Told individually, not broadcast: why one player's bet did not
+        // stand is between them and the table.
+        if (socket) {
+          send(socket, {
+            t: "error",
+            code: "BET_VOIDED",
+            message: "Your bet was voided - it couldn't be settled when the wheel stopped"
+          });
+        }
+      }
+    }
+
+    // Broadcast AFTER settling, so the numbers a player reads here are the
+    // ones their balance actually moved by.
+    broadcast(ROOM_ROULETTE, {
+      t: "tableresult",
+      roundId: event.roundId,
+      number: event.number,
+      color: event.color,
+      results: settled
+    });
+  }
 
   /**
    * Reaps sockets that have gone quiet. A live client pings every
@@ -392,12 +469,23 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
     }
   }
 
+  // The table only runs while the realtime channel is up. If this attach
+  // ever fails, `rouletteTable.running` stays false and the HTTP bet route
+  // refuses cleanly - rather than taking stakes for a wheel that will never
+  // spin.
+  rouletteTable.start();
+  const unsubscribeTableBets = rouletteTable.onBet((roundId, bet) => {
+    broadcast(ROOM_ROULETTE, { t: "tablebet", roundId, bet });
+  });
+
   return {
     wss,
     hub,
     close() {
       clearInterval(tickTimer);
       clearInterval(sweepTimer);
+      unsubscribeTableBets();
+      rouletteTable.stop();
       for (const conn of connections.values()) {
         if (conn.helloTimer) clearTimeout(conn.helloTimer);
         conn.socket.terminate();
@@ -407,6 +495,19 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
       return new Promise((resolve) => wss.close(() => resolve()));
     }
   };
+}
+
+/**
+ * A presence entry for someone sitting at a table rather than standing on
+ * the floor.
+ *
+ * The position and wardrobe fields are inert here - nothing draws a table's
+ * occupants as avatars (see handleRoom). They exist because the hub is a
+ * presence hub, and reusing it for the table's fan-out is worth more than a
+ * second, near-identical "who is in this room" structure would be.
+ */
+function seatedPlaceholder(userId: string, username: string): PresencePlayer {
+  return { id: userId, username, x: 0, y: 0, dir: "down", moving: false, wardrobe: {} };
 }
 
 function send(socket: WebSocket, message: ServerMessage) {

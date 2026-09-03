@@ -10,6 +10,10 @@
 import type { WardrobeSlot } from "../wardrobeCatalog";
 import type { RoomSlot } from "../roomCatalog";
 import type { FurnitureSlotId } from "../furnitureCatalog";
+// The live Roulette table's shapes are defined once, with the rest of the
+// realtime protocol - they arrive over both the socket and this HTTP API,
+// and a second copy here is a second thing to keep in sync.
+import type { TableBet, TableSnapshot } from "./realtimeProtocol";
 
 // Re-exported so api/client.ts and its callers can name a slot without also
 // importing the catalog - the catalog is the definition, this is the wire type.
@@ -320,6 +324,26 @@ export type RouletteColor = "red" | "black" | "green";
 export interface RoulettePlayResponse {
   result: { bet: RouletteColor; number: number; color: RouletteColor; won: boolean; payout: number };
   user: MeResponse;
+}
+
+/**
+ * POST /games/roulette/table/bet — a stake on the LIVE table's open round.
+ *
+ * Note what it does not return: a `user`. Unlike every other bet in this
+ * product, nothing is debited when a table bet is placed - the whole round
+ * settles at once when the wheel stops (see
+ * server/src/realtime/rouletteTable.ts), so there is no new balance to hand
+ * back yet. The scene refreshes the balance when the result arrives.
+ */
+export interface RouletteTableBetResponse {
+  bet: TableBet;
+  table: TableSnapshot;
+}
+
+/** GET /games/roulette/table — the current table, for a client without a live socket. */
+export interface RouletteTableResponse {
+  running: boolean;
+  table: TableSnapshot;
 }
 
 /** POST /games/limbo/play */

@@ -303,6 +303,48 @@ players.
 - [ ] Sign out from one browser: that player disappears from the other's
       floor and does not come back until they sign in again.
 
+## Live Roulette table (`LiveRouletteScene`, `server/src/realtime/rouletteTable.ts`)
+
+**Two browsers again**, both signed in as different players. Walk into
+Roulette, then click **LIVE TABLE** (top-right of the board) on each.
+
+**This section is a money path. Check the balances by hand, do not assume.**
+
+- [ ] Both screens show the SAME countdown and the same round — within a
+      second of each other. If the two are counting different numbers, stop
+      and report it; the server owns the clock and they must agree.
+- [ ] Player A bets → the bet appears in "AT THE TABLE" on B's screen within
+      a moment, with A's username, amount, and colour, and shows "(you)" on
+      A's own screen only.
+- [ ] A tries to bet a second time on the same round → refused with "You
+      already have a bet on this round". The first bet stands.
+- [ ] Betting closes → both screens start spinning at the same moment and
+      land on the SAME number.
+- [ ] **Write down A's Gold Coins before the spin.** After the result:
+      a losing bet leaves them down exactly the stake; a winning red/black
+      bet leaves them up exactly the stake (2x back); a winning green leaves
+      them up 35x the stake (36x back). Anything else is a payout bug.
+- [ ] The result rows list every player's outcome, and the balance in the
+      sidebar matches what the message line said.
+- [ ] Placing a bet does NOT change the balance until the wheel stops —
+      that is deliberate (the whole round settles in one transaction), so a
+      balance that drops at bet time is a bug.
+- [ ] A round nobody bets on still spins and shows a number, and says
+      "you sat this round out".
+- [ ] Bet, then before the wheel stops spend those Gold Coins in another
+      game (open a second tab as the SAME player — note this displaces the
+      live table's socket, so use it to verify the ledger, not the UI). The
+      table bet should be voided, not paid: the message reads "your bet was
+      voided", and the balance shows no wager and no win for that round.
+- [ ] Stop the server mid-round: both screens say "NOT CONNECTED" and the
+      bet buttons disable. **No Gold Coins should have moved** for the
+      interrupted round. Restart it: a new round opens and betting works.
+- [ ] "SOLO TABLE" returns to the single-player wheel, and "LIVE TABLE"
+      there comes back — the solo game must behave exactly as before this
+      feature landed.
+- [ ] Walk Away from the live table returns to the casino floor, and the
+      player reappears on the other browser's floor.
+
 ## Quickplay (`ui/QuickplayPanel.ts`, roadmap/quickplay-grid)
 
 - [ ] The "🎮 Quickplay" corner button (stacked under Clothes/Challenges)

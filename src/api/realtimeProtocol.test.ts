@@ -6,6 +6,8 @@ import {
   MAP_COLS,
   MAP_ROWS,
   ROOM_OVERWORLD,
+  ROOM_ROULETTE,
+  ROOMS,
   TICK_MS,
   TILE,
   WORLD_HEIGHT,
@@ -20,6 +22,8 @@ import {
   MAP_ROWS as SERVER_MAP_ROWS,
   REALTIME_PATH as SERVER_REALTIME_PATH,
   ROOM_OVERWORLD as SERVER_ROOM_OVERWORLD,
+  ROOM_ROULETTE as SERVER_ROOM_ROULETTE,
+  ROOMS as SERVER_ROOMS,
   TICK_MS as SERVER_TICK_MS,
   TILE as SERVER_TILE,
   WORLD_HEIGHT as SERVER_WORLD_HEIGHT,
@@ -54,8 +58,12 @@ describe("client/server realtime protocol agreement", () => {
     expect([...DIRECTIONS]).toEqual([...SERVER_DIRECTIONS]);
   });
 
-  it("agrees on the room name", () => {
+  it("agrees on the room names", () => {
     expect(ROOM_OVERWORLD).toBe(SERVER_ROOM_OVERWORLD);
+    expect(ROOM_ROULETTE).toBe(SERVER_ROOM_ROULETTE);
+    // The server validates `room` against this exact list, so a name only
+    // one side knows is a room a client can never enter.
+    expect([...ROOMS]).toEqual([...SERVER_ROOMS]);
   });
 
   it("agrees on the socket path", () => {

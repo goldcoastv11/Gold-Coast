@@ -352,6 +352,74 @@ describe("event fan-out", () => {
     expect(calls).toEqual(["third"]);
   });
 
+  it("delivers the live table's messages", () => {
+    const { client, socket } = connected();
+    client.setRoom("roulette");
+
+    const snapshots: string[] = [];
+    const bets: string[] = [];
+    const results: number[] = [];
+    client.on("table", (snapshot) => snapshots.push(snapshot.phase));
+    client.on("tableBet", (_roundId, bet) => bets.push(bet.username));
+    client.on("tableResult", (_roundId, number) => results.push(number));
+
+    socket.deliver({
+      t: "table",
+      snapshot: {
+        roundId: "r1",
+        phase: "betting",
+        msRemaining: 12_000,
+        bets: [],
+        number: null,
+        color: null,
+        results: null
+      }
+    });
+    socket.deliver({
+      t: "tablebet",
+      roundId: "r1",
+      bet: { userId: "u2", username: "bob", choice: "red", amount: 25 }
+    });
+    socket.deliver({
+      t: "tableresult",
+      roundId: "r1",
+      number: 7,
+      color: "red",
+      results: [{ userId: "u2", username: "bob", choice: "red", amount: 25, won: true, payout: 50 }]
+    });
+
+    expect(snapshots).toEqual(["betting"]);
+    expect(bets).toEqual(["bob"]);
+    expect(results).toEqual([7]);
+  });
+
+  it("passes a non-fatal server error on as a notice, and keeps the socket open", () => {
+    const { client, socket } = connected();
+    const notices: string[] = [];
+    client.on("notice", (code) => notices.push(code));
+
+    socket.deliver({
+      t: "error",
+      code: "BET_VOIDED",
+      message: "Your bet was voided"
+    });
+
+    // A voided bet is something the player has to be told; swallowing it
+    // would leave them staring at a round that silently didn't happen.
+    expect(notices).toEqual(["BET_VOIDED"]);
+    expect(socket.readyState).toBe(FakeSocket.OPEN);
+  });
+
+  it("does not raise a notice for the token being rejected - that is handled internally", () => {
+    const { client, socket } = connected();
+    const notices: string[] = [];
+    client.on("notice", (code) => notices.push(code));
+
+    socket.deliver({ t: "error", code: "UNAUTHORIZED", message: "Invalid or expired token" });
+
+    expect(notices).toEqual([]);
+  });
+
   it("ignores a malformed frame rather than throwing", () => {
     const { socket } = connected();
     expect(() => socket.onmessage?.({ data: "not json" })).not.toThrow();

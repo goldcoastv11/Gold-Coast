@@ -190,6 +190,8 @@ import type {
   CoinFlipPlayResponse,
   RouletteColor,
   RoulettePlayResponse,
+  RouletteTableBetResponse,
+  RouletteTableResponse,
   LimboPlayResponse,
   PlinkoPlayResponse,
   SlotsPlayResponse,
@@ -336,6 +338,28 @@ export function playCoinFlip(betAmount: number, currency: Currency, guess: CoinS
 
 export function playRoulette(betAmount: number, currency: Currency, bet: RouletteColor): Promise<RoulettePlayResponse> {
   return request<RoulettePlayResponse>("/games/roulette/play", { method: "POST", body: { betAmount, currency, bet } });
+}
+
+/**
+ * Puts a stake on the live table's open round.
+ *
+ * Over HTTP, like every other wager in this product - the realtime socket
+ * is how the table is watched, never how it is played. See
+ * server/src/routes/games.ts's live-table section.
+ */
+export function placeRouletteTableBet(
+  betAmount: number,
+  bet: RouletteColor
+): Promise<RouletteTableBetResponse> {
+  return request<RouletteTableBetResponse>("/games/roulette/table/bet", {
+    method: "POST",
+    body: { betAmount, bet }
+  });
+}
+
+/** The live table's current state. The socket is the normal path; this is the fallback when presence is down. */
+export function getRouletteTable(): Promise<RouletteTableResponse> {
+  return request<RouletteTableResponse>("/games/roulette/table");
 }
 
 export function playLimbo(betAmount: number, currency: Currency, target: number): Promise<LimboPlayResponse> {

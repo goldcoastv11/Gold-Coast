@@ -121,6 +121,23 @@ export type Direction = (typeof DIRECTIONS)[number];
  */
 export const ROOM_OVERWORLD = "overworld";
 
+/**
+ * The live Roulette table (see realtime/rouletteTable.ts). A second shared
+ * room, and the reason `room` is a string rather than an "am I on the floor"
+ * boolean.
+ *
+ * Unlike the floor, this room's occupants do not send positions - it is a
+ * screen, not a place you walk around - so nothing on it is drawn from
+ * presence. It uses the same room mechanism purely for the fan-out: "tell
+ * everyone sitting at this table" is the same problem as "tell everyone on
+ * this floor", and one broadcast path is better than two.
+ */
+export const ROOM_ROULETTE = "roulette";
+
+/** Every shared room a client may ask to enter. */
+export const ROOMS = [ROOM_OVERWORLD, ROOM_ROULETTE] as const;
+export type RoomName = (typeof ROOMS)[number];
+
 // ---------------------------------------------------------------------------
 // Client -> server
 // ---------------------------------------------------------------------------
@@ -146,10 +163,10 @@ const EmoteSchema = z.object({
   e: z.enum(EMOTES)
 });
 
-/** Announces which shared room this socket is in; see ROOM_OVERWORLD. `null` means "not in a shared space". */
+/** Announces which shared room this socket is in; see ROOM_OVERWORLD/ROOM_ROULETTE. `null` means "not in a shared space". */
 const RoomSchema = z.object({
   t: z.literal("room"),
-  room: z.union([z.literal(ROOM_OVERWORLD), z.null()])
+  room: z.union([z.enum(ROOMS), z.null()])
 });
 
 /** Heartbeat. Exists so standing still isn't indistinguishable from a dead socket - see IDLE_TIMEOUT_MS. */
@@ -191,6 +208,46 @@ export interface PresencePlayer {
   wardrobe: Record<string, string>;
 }
 
+// ---------------------------------------------------------------------------
+// The live Roulette table's wire shapes
+//
+// Declared here, with the rest of the protocol, rather than in
+// realtime/rouletteTable.ts - these are what goes over the socket and get
+// mirrored on the client, so they belong with everything else the two sides
+// have to agree about. The table module imports them.
+// ---------------------------------------------------------------------------
+
+/** Structurally identical to games/roulette.ts's RouletteColor; restated so this file stays free of game-module imports. */
+export type TableColor = "red" | "black" | "green";
+
+export type TablePhase = "betting" | "spinning" | "payout";
+
+export interface TableBet {
+  userId: string;
+  username: string;
+  choice: TableColor;
+  amount: number;
+}
+
+export interface TableResult extends TableBet {
+  won: boolean;
+  payout: number;
+  /** True when the ledger refused this player's wager at settlement - nothing was debited and nothing paid. See rouletteTable.ts. */
+  voided?: boolean;
+}
+
+export interface TableSnapshot {
+  roundId: string;
+  phase: TablePhase;
+  /** Milliseconds left in this phase - a DURATION, not a deadline, so a client whose clock is wrong still counts down correctly. */
+  msRemaining: number;
+  bets: TableBet[];
+  /** The winning number, known from the moment betting closes. Null while betting is open, because there is nothing to know yet. */
+  number: number | null;
+  color: TableColor | null;
+  results: TableResult[] | null;
+}
+
 /** A per-tick movement delta. Deliberately terser than PresencePlayer: this is the message that repeats 10x a second. */
 export interface PresenceDelta {
   id: string;
@@ -213,6 +270,17 @@ export type ServerMessage =
   /** A player's wardrobe changed; redraw them. Same shape the roster uses so the client has one code path. */
   | { t: "appearance"; player: PresencePlayer }
   | { t: "pong" }
+  /**
+   * The live Roulette table's current state (see realtime/rouletteTable.ts).
+   * Sent on sitting down and on every phase change. Carries no money and no
+   * authority: bets are placed over the HTTP API, and this is only how the
+   * table reports what it did with them.
+   */
+  | { t: "table"; snapshot: TableSnapshot }
+  /** One player just got a bet down. A live feed message, so the table fills in without waiting for the next phase. */
+  | { t: "tablebet"; roundId: string; bet: TableBet }
+  /** The round's settled outcomes, broadcast AFTER the ledger has been written - so what a player reads here is what actually happened to their balance. */
+  | { t: "tableresult"; roundId: string; number: number; color: TableColor; results: TableResult[] }
   /** Terminal for `code === "UNAUTHORIZED"`/"ROOM_FULL" (the socket closes); advisory otherwise. */
   | { t: "error"; code: string; message: string };
 
