@@ -75,6 +75,52 @@ export interface MeResponse {
   lastPosition: { x: number; y: number } | null;
   attendantClaim: { lastClaimedAt: string | null };
   /**
+   * COMPATIBILITY SHIM - always `{ lastClaimedAt: null }`, read by nobody
+   * on the current client. Delete it once the deployed client is current;
+   * see the note at the bottom of this comment for how to know when.
+   *
+   * ## Why this is here
+   *
+   * `eced44f` ("Remove dead TICKETS/SC-era code, the retired Ad Kiosk...")
+   * removed this field from the response and, in the same commit, removed
+   * the client code that read it. Correct as a pair - but they only ship
+   * as a pair if BOTH halves deploy. They didn't:
+   *
+   * - The server (Railway) deployed it.
+   * - The client (Netlify) did NOT. Netlify production deploys have been
+   *   skipped since 2026-08-30 with "Skipped due to account credit usage
+   *   exceeded" - the team ran out of build credits for the billing cycle.
+   *
+   * So production runs a client from BEFORE that commit against a server
+   * from after it. That old client's `hydrateFromServer()` does an
+   * unguarded `me.adReward.lastClaimedAt`, which throws
+   * `TypeError: Cannot read properties of undefined` the moment a player
+   * logs in. LoginScene catches it and shows "Something went wrong - please
+   * try again", so the real error was invisible. Every player was locked
+   * out - the login itself succeeded server-side every time, the browser
+   * just crashed immediately afterwards.
+   *
+   * Sending the field again is the one fix that does not require a Netlify
+   * deploy, which is exactly what we cannot do right now.
+   *
+   * ## Why `null` is honest, not a lie
+   *
+   * The Ad Kiosk is retired (see repo-root CLAUDE.md) - it was folded into
+   * the Coin Kiosk and its claim route no longer exists. `null` means
+   * "never claimed", which is true for everyone and always will be. The
+   * stale client only stores this value; it calls no ad-reward endpoint
+   * (verified against the deployed bundle), so nothing downstream of it can
+   * misbehave.
+   *
+   * ## Removing this
+   *
+   * Once Netlify has published a build at or after `eced44f`, no client
+   * reads this any more and it can go. Check by loading the live site and
+   * confirming its bundle no longer contains `adReward` - do NOT just
+   * assume a redeploy happened.
+   */
+  adReward: { lastClaimedAt: string | null };
+  /**
    * The user's currently-active stateful-game round (Mines/Dragon Tower/
    * Hi-Lo/Blackjack/Video Poker), or null if none. Added alongside #42
    * (POST /games/abandon) so a client that lost its local roundId - reload,
@@ -270,6 +316,9 @@ export async function serializeMe(tx: TxClient, userId: string, username: string
     attendantClaim: {
       lastClaimedAt: attendantClaim?.lastClaimedAt ? attendantClaim.lastClaimedAt.toISOString() : null
     },
+    // Constant, not read from anywhere - see the field's doc comment above
+    // for why this is being sent at all and when it can be deleted.
+    adReward: { lastClaimedAt: null },
     activeRound: activeRound ? { game: activeRound.game, roundId: activeRound.id } : null,
     progression
   };

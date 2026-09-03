@@ -97,6 +97,32 @@ describe("POST /auth/login", () => {
 });
 
 describe("GET /me", () => {
+  /**
+   * Regression guard for the 2026-09-03 production login outage.
+   *
+   * `eced44f` dropped `adReward` from this payload and, in the same commit,
+   * dropped the client code reading it. That is only safe if both halves
+   * deploy - and they didn't: Netlify production deploys were being skipped
+   * for exceeded credits, so a pre-`eced44f` client ran against a
+   * post-`eced44f` server. Its unguarded `me.adReward.lastClaimedAt` threw
+   * on every single login, and the login screen swallowed the error into a
+   * generic "something went wrong". Every player was locked out.
+   *
+   * This asserts the compatibility shim is still being sent. Do NOT delete
+   * this test (or the field) until the deployed client is confirmed to be
+   * at or after `eced44f` - see the field's doc comment in serializers.ts
+   * for how to check that properly rather than assuming.
+   */
+  it("still sends the adReward compatibility shim the stale deployed client needs", async () => {
+    const user = await signupUser();
+    const res = await request(app).get("/me").set(authed(user.token));
+
+    expect(res.status).toBe(200);
+    // The exact shape the old client dereferences. A missing `adReward`
+    // here is a total login outage in production, not a cosmetic gap.
+    expect(res.body.adReward).toEqual({ lastClaimedAt: null });
+  });
+
   it("requires a valid JWT", async () => {
     const noAuth = await request(app).get("/me");
     expect(noAuth.status).toBe(401);
