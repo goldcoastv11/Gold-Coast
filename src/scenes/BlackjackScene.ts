@@ -155,6 +155,34 @@ export class BlackjackScene extends Phaser.Scene {
     // defined by where the surface ends (direction note 3).
     drawCabinetFrame(this, DX, DY, BOARD_W, BOARD_H);
 
+    // The way through to the shared table (LiveBlackjackScene) - same rules
+    // and the same paytable, but up to five players taking turns against
+    // one dealer, on the server's clock. A plain surface button rather than
+    // an accent one: the solo game stays the default, and this screen's
+    // real actions are HIT/STAND.
+    makeButton(
+      this,
+      BOARD_RIGHT - 52,
+      DY - BOARD_H / 2 + 14,
+      104,
+      26,
+      "LIVE TABLE",
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => {
+        // Mid-hand there is a real round open server-side; leaving would
+        // abandon it (see the shell's Walk Away path, which forfeits
+        // deliberately). Making the player finish is the honest option.
+        if (this.active) {
+          this.messageText.setText("Finish this hand first.").setColor(Tokens.text.muted);
+          return;
+        }
+        fadeToScene(this, "LiveBlackjackScene");
+      },
+      undefined,
+      Tokens.radius.sm
+    );
+
     // Real felt art as backdrop, over the token surface and under everything
     // else. It's fixed art and can't be re-toned from tokens, so it runs
     // quiet enough to read as texture rather than as its own warm colour.

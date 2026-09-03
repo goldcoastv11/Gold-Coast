@@ -131,14 +131,14 @@ describe("handshake", () => {
 describe("room membership", () => {
   it("announces the room once connected", () => {
     const { client, socket } = connected();
-    client.setRoom("overworld");
-    expect(socket.frames).toContainEqual({ t: "room", room: "overworld" });
+    client.setRoom("overworld", "boardwalk");
+    expect(socket.frames).toContainEqual({ t: "room", room: "overworld", serverId: "boardwalk" });
   });
 
   it("re-announces the room after a reconnect, with no scene involvement", () => {
     vi.useFakeTimers();
     const { client, socket } = connected();
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
 
     socket.serverClose(1006); // abnormal closure - a dropped connection
     vi.advanceTimersByTime(2000);
@@ -152,7 +152,9 @@ describe("room membership", () => {
     // "overworld" once, before the drop, and never hears about the
     // reconnect. Without this the player silently becomes invisible to
     // everyone for the rest of the session.
-    expect(reconnected.frames).toContainEqual({ t: "room", room: "overworld" });
+    // A room only exists inside a server, so a reconnect that re-announced
+    // the room alone would be refused - both have to come back together.
+    expect(reconnected.frames).toContainEqual({ t: "room", room: "overworld", serverId: "boardwalk" });
   });
 
   it("remembers a room entered while offline and announces it on connect", () => {
@@ -162,18 +164,18 @@ describe("room membership", () => {
     const socket = FakeSocket.instances[0];
 
     // The player walked onto the floor while the socket was still opening.
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
     socket.open();
     socket.deliver({ t: "welcome", selfId: "me", tickMs: 100, heartbeatMs: 20_000 });
 
-    expect(socket.frames).toContainEqual({ t: "room", room: "overworld" });
+    expect(socket.frames).toContainEqual({ t: "room", room: "overworld", serverId: "boardwalk" });
   });
 });
 
 describe("movement reporting", () => {
   it("throttles to one move per send window", () => {
     const { client, socket } = connected();
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
 
     const start = 1_000_000;
     client.sendMove(10, 10, "down", true, start);
@@ -189,7 +191,7 @@ describe("movement reporting", () => {
 
   it("sends nothing at all while a player stands still", () => {
     const { client, socket } = connected();
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
 
     const start = 1_000_000;
     client.sendMove(10, 10, "down", false, start);
@@ -204,7 +206,7 @@ describe("movement reporting", () => {
 
   it("sends a turn on the spot, and a stop", () => {
     const { client, socket } = connected();
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
     const start = 1_000_000;
 
     client.sendMove(10, 10, "down", true, start);
@@ -220,12 +222,12 @@ describe("movement reporting", () => {
 
   it("re-sends position after re-entering a room even if the player never moved", () => {
     const { client, socket } = connected();
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
     const start = 1_000_000;
     client.sendMove(10, 10, "down", false, start);
 
     client.setRoom(null);
-    client.setRoom("overworld");
+    client.setRoom("overworld", "boardwalk");
 
     // A fresh room means the server has no idea where this player is - the
     // dedupe must not swallow the first report and leave them stuck at the
@@ -246,7 +248,7 @@ describe("degrading offline", () => {
       client.sendMove(1, 2, "down", true, 5_000_000);
       client.sendEmote("wave");
       client.announceAppearance();
-      client.setRoom("overworld");
+      client.setRoom("overworld", "boardwalk");
     }).not.toThrow();
   });
 
@@ -391,6 +393,53 @@ describe("event fan-out", () => {
     expect(snapshots).toEqual(["betting"]);
     expect(bets).toEqual(["bob"]);
     expect(results).toEqual([7]);
+  });
+
+  it("delivers the live Blackjack table's snapshots", () => {
+    const { client, socket } = connected();
+    client.setRoom("blackjack", "boardwalk");
+
+    const phases: string[] = [];
+    client.on("blackjack", (snapshot) => phases.push(snapshot.phase));
+
+    socket.deliver({
+      t: "blackjack",
+      snapshot: {
+        roundId: "h1",
+        phase: "acting",
+        msRemaining: 12_000,
+        seats: [
+          {
+            userId: "u2",
+            username: "bob",
+            bet: 25,
+            hand: [10, 7],
+            total: 17,
+            status: "playing",
+            outcome: null,
+            payout: 0
+          }
+        ],
+        activeUserId: "u2",
+        dealerUpCard: 9,
+        dealerHand: null,
+        dealerTotal: null
+      }
+    });
+
+    expect(phases).toEqual(["acting"]);
+  });
+
+  it("remembers the server so scenes don't have to re-supply it", () => {
+    const { client, socket } = connected();
+    client.setRoom("overworld", "boardwalk");
+
+    // Walking into a table shouldn't need the scene to know the server id -
+    // it is the same server, and forgetting it would be a refused join.
+    client.setRoom("blackjack");
+
+    expect(client.serverId).toBe("boardwalk");
+    expect(socket.frames).toContainEqual({ t: "room", room: "blackjack", serverId: "boardwalk" });
   });
 
   it("passes a non-fatal server error on as a notice, and keeps the socket open", () => {

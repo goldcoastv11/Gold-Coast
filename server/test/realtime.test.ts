@@ -17,7 +17,19 @@ import { app } from "../src/app";
 import { attachRealtime, REALTIME_PATH, RealtimeHandle } from "../src/realtime/server";
 import { ClientMessage, ServerMessage } from "../src/realtime/protocol";
 import { resetDb, signupUser, authed } from "./helpers";
+import { gameServers } from "../src/realtime/gameServers";
+import { presenceHub } from "../src/realtime/presence";
 import request from "supertest";
+
+/**
+ * One of the seeded public servers (see realtime/gameServers.ts).
+ *
+ * Every room join names a server now: a room only exists inside one, and
+ * the server deliberately refuses to guess. Two players on different
+ * servers are two separate games, which a couple of the tests below rely
+ * on.
+ */
+const SERVER_ID = "boardwalk";
 
 let server: Server;
 let realtime: RealtimeHandle;
@@ -36,7 +48,13 @@ afterAll(async () => {
   await new Promise<void>((resolve) => server.close(() => resolve()));
 });
 
-beforeEach(resetDb);
+beforeEach(async () => {
+  await resetDb();
+  // Servers and presence are process-global in-memory state - each test
+  // starts from a clean slate rather than inheriting the last one's rooms.
+  gameServers.reset();
+  presenceHub.clear();
+});
 
 /**
  * A test client that records every frame it receives, so an assertion can
@@ -115,7 +133,7 @@ async function connectOnFloor(token: string): Promise<TestClient> {
   const client = await TestClient.open();
   client.send({ t: "hello", token });
   await client.next("welcome");
-  client.send({ t: "room", room: "overworld" });
+  client.send({ t: "room", room: "overworld", serverId: SERVER_ID });
   await client.next("roster");
   return client;
 }
@@ -147,7 +165,7 @@ describe("realtime handshake", () => {
 
     // The trust boundary: an unauthenticated socket has exactly one
     // capability, and it is `hello`. Entering a room is not it.
-    client.send({ t: "room", room: "overworld" });
+    client.send({ t: "room", room: "overworld", serverId: SERVER_ID });
 
     const error = await client.next("error");
     expect(error.code).toBe("UNAUTHORIZED");
@@ -209,7 +227,7 @@ describe("realtime presence on the casino floor", () => {
     const bobClient = await TestClient.open();
     bobClient.send({ t: "hello", token: bob.token });
     await bobClient.next("welcome");
-    bobClient.send({ t: "room", room: "overworld" });
+    bobClient.send({ t: "room", room: "overworld", serverId: SERVER_ID });
 
     // Bob sees Alice already standing there...
     const roster = await bobClient.next("roster");
@@ -229,7 +247,7 @@ describe("realtime presence on the casino floor", () => {
     const otherClient = await TestClient.open();
     otherClient.send({ t: "hello", token: other.token });
     await otherClient.next("welcome");
-    otherClient.send({ t: "room", room: "overworld" });
+    otherClient.send({ t: "room", room: "overworld", serverId: SERVER_ID });
 
     const roster = await otherClient.next("roster");
     // Every account owns and wears the free default body, so a brand-new
@@ -292,7 +310,7 @@ describe("realtime presence on the casino floor", () => {
     expect(bobClient.socket.readyState).toBe(WebSocket.OPEN);
 
     aliceClient.received.length = 0;
-    bobClient.send({ t: "room", room: "overworld" });
+    bobClient.send({ t: "room", room: "overworld", serverId: SERVER_ID });
     const rejoin = await aliceClient.next("join");
     expect(rejoin.player.id).toBe(bobId);
 
@@ -341,7 +359,7 @@ describe("the live Roulette table over the socket", () => {
     const client = await TestClient.open();
     client.send({ t: "hello", token });
     await client.next("welcome");
-    client.send({ t: "room", room: "roulette" });
+    client.send({ t: "room", room: "roulette", serverId: SERVER_ID });
     await client.next("table");
     return client;
   }

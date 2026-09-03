@@ -192,6 +192,11 @@ import type {
   RoulettePlayResponse,
   RouletteTableBetResponse,
   RouletteTableResponse,
+  ServerListResponse,
+  CreateServerResponse,
+  JoinServerResponse,
+  BlackjackTableResponse,
+  BlackjackTableStateResponse,
   LimboPlayResponse,
   PlinkoPlayResponse,
   SlotsPlayResponse,
@@ -360,6 +365,51 @@ export function placeRouletteTableBet(
 /** The live table's current state. The socket is the normal path; this is the fallback when presence is down. */
 export function getRouletteTable(): Promise<RouletteTableResponse> {
   return request<RouletteTableResponse>("/games/roulette/table");
+}
+
+// ---- Servers ----
+//
+// A "server" is one instance of the arcade - its own casino floor, wheel and
+// Blackjack table. Over HTTP rather than the socket because none of this is
+// realtime: the browser screen wants a list when it opens, and a player
+// should be able to see what's available before their socket has connected.
+
+/** The public servers, with live player counts. Private ones are never listed. */
+export function listServers(): Promise<ServerListResponse> {
+  return request<ServerListResponse>("/servers");
+}
+
+/** Creates a private server. The join code comes back in this response and nowhere else. */
+export function createServer(name?: string): Promise<CreateServerResponse> {
+  return request<CreateServerResponse>("/servers", { method: "POST", body: name ? { name } : {} });
+}
+
+/** Resolves a join code to a server. Resolving isn't joining - the socket does that, the same way it does for a listed server. */
+export function joinServerByCode(code: string): Promise<JoinServerResponse> {
+  return request<JoinServerResponse>("/servers/join", { method: "POST", body: { code } });
+}
+
+// ---- Live Blackjack table ----
+
+/** Takes a seat in the current hand. Over HTTP like every other wager - the socket only reports the table. */
+export function placeBlackjackTableBet(betAmount: number): Promise<BlackjackTableResponse> {
+  return request<BlackjackTableResponse>("/games/blackjack/table/bet", {
+    method: "POST",
+    body: { betAmount }
+  });
+}
+
+/** Hit or stand. The server enforces that it is actually this player's turn. */
+export function actBlackjackTable(action: "hit" | "stand"): Promise<BlackjackTableResponse> {
+  return request<BlackjackTableResponse>("/games/blackjack/table/action", {
+    method: "POST",
+    body: { action }
+  });
+}
+
+/** The live Blackjack table's current state - the fallback when the socket is down. */
+export function getBlackjackTable(): Promise<BlackjackTableStateResponse> {
+  return request<BlackjackTableStateResponse>("/games/blackjack/table");
 }
 
 export function playLimbo(betAmount: number, currency: Currency, target: number): Promise<LimboPlayResponse> {

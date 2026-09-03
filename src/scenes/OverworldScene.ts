@@ -2006,7 +2006,11 @@ export class OverworldScene extends Phaser.Scene {
     // no-op, and this scene is created afresh every time the player comes
     // back to the floor.
     realtime.start();
-    realtime.setRoom(ROOM_OVERWORLD);
+    // The server the player picked in the browser, passed explicitly on
+    // every entry: this scene is recreated on each visit, and a room only
+    // exists inside a server. The connection re-announces both together
+    // after a reconnect (see api/realtime.ts's desiredServerId).
+    realtime.setRoom(ROOM_OVERWORLD, gameState.activeServerId);
   }
 
   /**

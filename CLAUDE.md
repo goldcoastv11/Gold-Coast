@@ -113,7 +113,9 @@ phones.
 | Game payout logic | `server/src/games/`, settle helpers in `shared.ts` |
 | Challenges / XP / levels | `server/src/progression/` |
 | Multiplayer presence | `server/src/realtime/` (protocol → presence → server), `src/api/realtime.ts`, `src/scenes/overworld/` |
+| Servers (public/private) | `server/src/realtime/gameServers.ts` + `routes/servers.ts`, `src/scenes/ServerBrowserScene.ts` |
 | Live Roulette table | `server/src/realtime/rouletteTable.ts` (round loop) + `tableSettlement.ts` (the ledger), `src/scenes/LiveRouletteScene.ts` |
+| Live Blackjack table | `server/src/realtime/blackjackTable.ts` (round loop) + `blackjackSettlement.ts` (the ledger), `src/scenes/LiveBlackjackScene.ts` |
 
 **Catalogs are duplicated client-side and server-side, not shared** (`wardrobeCatalog`,
 `furnitureCatalog`, `roomCatalog`, `itemCatalog`) - the server's Docker build context is scoped to
@@ -152,18 +154,46 @@ second Railway instance is ever added, players on one would not see players on t
 live Roulette table would run two independent wheels. That is the day this needs a shared backplane,
 and nothing before it does.
 
-## The live Roulette table's money rules
+## Servers
 
-- **Bets arrive over HTTP** (`POST /games/roulette/table/bet`), never over the socket. There is no
-  bet message in the protocol, and a test asserts that sending one is rejected. Do not add one.
-- **A round settles in one transaction per player, at spin time** — never a debit at bet time (a
-  restart between the legs would strand the stake) and never one transaction for the whole table
-  (one player who cannot cover their bet would roll back everyone else's winnings). Both of those
-  are load-bearing; `rouletteTable.ts` and `tableSettlement.ts` explain each in place.
+The arcade is instanced. A **server** owns its own casino floor, Roulette wheel and Blackjack
+table (`realtime/gameServers.ts`); players on different servers never see each other. Three public
+servers are seeded at boot; private ones are created on demand and reachable only by a join code.
+
+Two rules that are easy to break:
+
+- **Rooms are keyed `serverId:room`.** Use `roomKey()`/`parseRoomKey()` — never build or parse that
+  string by hand. A room join with no server is refused rather than defaulted; silently dropping
+  someone onto an arbitrary server is worse than telling them to pick one.
+- **Which server a player is on comes from PRESENCE, never from the request body.** The live-table
+  routes resolve it with `presenceHub.locate()`. A client that could name its own server could bet
+  on a table it isn't sitting at, on someone else's server — and that moves real Gold Coins.
+
+Private servers are never listed, and a join code is returned exactly once, in the create response.
+Anything that touches every table (a broadcaster, a sweep) registers with the **registry**, not with
+each table: subscribing once at startup silently misses every server created later, which is how
+private servers end up mysteriously not broadcasting.
+
+## The live tables' money rules
+
+These apply identically to both live tables (Roulette and Blackjack).
+
+- **Bets and actions arrive over HTTP** (`/games/{roulette,blackjack}/table/...`), never over the
+  socket. There is no bet or hit/stand message in the protocol at all, and a test asserts that
+  sending one is rejected. Do not add one.
+- **A round settles in one transaction per player, when the round ends** — never a debit at bet time
+  (a restart between the legs would strand the stake) and never one transaction for the whole table
+  (one player who cannot cover their bet would roll back everyone else's winnings). Both are
+  load-bearing; the two `*Table.ts` and `*Settlement.ts` files explain each in place.
+- **Turn ownership is enforced inside the table**, not at the route (Blackjack). Acting on someone
+  else's hand is cheating that costs *them* Gold Coins, so the check lives with the state it checks.
 - **Settlement goes through `settleSingleShotBet`**, same as all 14 solo games, under the same
-  `roulette` game name. That is what keeps the ledger comparable and makes live rounds count toward
-  challenges and XP. Do not add bespoke currency wiring here — `games/shared.ts` is the whole
-  currency surface.
+  `roulette`/`blackjack` game name. That is what keeps the ledger comparable and makes live rounds
+  count toward challenges and XP. Do not add bespoke currency wiring — `games/shared.ts` is the
+  whole currency surface.
+- **The dealer's hole card must never be in a payload before the dealer draws.** The Blackjack
+  snapshot keys that off the dealer having actually drawn, not off the phase name — the last player
+  standing flips the phase before the draw, and a phase-based check leaks into that gap.
 - **A bet that cannot be settled is voided, not paid.** Nothing debited, nothing credited, the
   player is told, and the broadcast result says so. Never report a win that was not paid.
 

@@ -39,6 +39,7 @@ import {
   TableColor,
   TableResult,
   TableSnapshot,
+  BlackjackSnapshot,
   realtimeUrlFor
 } from "./realtimeProtocol";
 
@@ -88,6 +89,14 @@ export interface RealtimeEvents {
    */
   tableResult: (roundId: string, number: number, color: TableColor, results: TableResult[]) => void;
   /**
+   * The live Blackjack table's state: on sitting down, on every phase
+   * change, and after every player's action. Unlike Roulette there is no
+   * separate results message - the snapshot carries each seat's outcome,
+   * and the one sent during `payout` is broadcast only after the ledger has
+   * been written.
+   */
+  blackjack: (snapshot: BlackjackSnapshot) => void;
+  /**
    * A non-fatal server message aimed at this player - today only
    * `BET_VOIDED`. Separate from the internal handling of `UNAUTHORIZED`,
    * which this module deals with itself.
@@ -111,6 +120,12 @@ export class RealtimeClient {
    * without any scene having to notice a reconnect happened.
    */
   private desiredRoom: RoomName | null = null;
+  /**
+   * Which server the player picked. Held alongside desiredRoom and
+   * re-announced together on every handshake: a room only exists inside a
+   * server, so a reconnect that named the room alone would be refused.
+   */
+  private desiredServerId: string | null = null;
 
   private reconnectAttempts = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -133,6 +148,7 @@ export class RealtimeClient {
     table: new Set(),
     tableBet: new Set(),
     tableResult: new Set(),
+    blackjack: new Set(),
     notice: new Set()
   };
 
@@ -172,6 +188,7 @@ export class RealtimeClient {
   stop(): void {
     this.stopped = true;
     this.desiredRoom = null;
+    this.desiredServerId = null;
     this.clearTimers();
     const socket = this.socket;
     this.socket = null;
@@ -198,14 +215,20 @@ export class RealtimeClient {
    * Remembered even when the socket is down, so entering the floor during a
    * reconnect does the right thing once the connection comes back.
    */
-  setRoom(room: RoomName | null): void {
+  setRoom(room: RoomName | null, serverId: string | null = this.desiredServerId): void {
     this.desiredRoom = room;
+    this.desiredServerId = serverId;
     // A fresh room means the movement dedupe below has nothing valid to
     // compare against - without this the first move after re-entering a
     // room can be swallowed as "unchanged", leaving the avatar at its
     // spawn point until the player next turns.
     this.lastSent = null;
-    this.send({ t: "room", room });
+    this.send({ t: "room", room, serverId });
+  }
+
+  /** Which server this client is on, if any. Read by scenes that need to show or re-enter it. */
+  get serverId(): string | null {
+    return this.desiredServerId;
   }
 
   /**
@@ -332,7 +355,7 @@ export class RealtimeClient {
         // Re-announce the room on every handshake, including a reconnect's
         // - see `desiredRoom`.
         if (this.desiredRoom !== null) {
-          this.send({ t: "room", room: this.desiredRoom });
+          this.send({ t: "room", room: this.desiredRoom, serverId: this.desiredServerId });
         }
         return;
 
@@ -366,6 +389,10 @@ export class RealtimeClient {
 
       case "tablebet":
         this.emit("tableBet", message.roundId, message.bet);
+        return;
+
+      case "blackjack":
+        this.emit("blackjack", message.snapshot);
         return;
 
       case "tableresult":

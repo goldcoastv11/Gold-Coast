@@ -325,13 +325,12 @@ export class RouletteTable {
 }
 
 /**
- * The one table.
+ * There is deliberately NO module-level singleton here any more.
  *
- * A module-level singleton because there IS one wheel - the HTTP bet route
- * and the realtime tick both need the same object, and threading it through
- * Express's app wiring to reach one route would be more machinery than the
- * single instance is worth. `running` is false until the realtime channel
- * attaches and calls start(), which is what keeps the bet route honest if
- * that attach ever fails.
+ * There used to be one - one wheel for the whole product. Once servers
+ * exist (see gameServers.ts) that is actively wrong: each server owns its
+ * own table, and a shared instance would mean players on server A betting
+ * on server B's spin. Every caller now gets its table from the registry,
+ * resolved from where the player is actually sitting (see presence.ts's
+ * `locate` and the live-table section of routes/games.ts).
  */
-export const rouletteTable = new RouletteTable();

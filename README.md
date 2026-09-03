@@ -131,6 +131,39 @@ Emotes are a closed vocabulary and there is deliberately no chat — see
 `src/ui/EmotePanel.ts` for why that is a product decision rather than an
 unfinished feature.
 
+### Choosing a server
+
+The arcade is instanced. "ENTER ARCADE" now opens a **server browser** instead of dropping you
+straight onto one shared floor:
+
+- **Public servers** — three of them, listed with live player counts. Join and you share that
+  floor and its tables with whoever else is on it.
+- **Private server** — creates a table of your own and gives you a **join code**. It is never
+  listed, so only people you give the code to can get in. The code is shown once, on creation, and
+  no route hands it out again.
+- **Enter code** — type a code somebody gave you.
+
+Each server owns its own floor, its own Roulette wheel and its own Blackjack table
+(`server/src/realtime/gameServers.ts`). Players on different servers never see each other and never
+sit at the same table. Servers live in memory, so private ones don't survive a backend restart;
+public ones are re-created identically. An empty private server is dropped after 15 minutes.
+
+### Live Blackjack
+
+Up to five players and a dealer, taking turns. Reach it from the **LIVE TABLE** button on the solo
+Blackjack screen; **SOLO TABLE** goes back. The solo game is unchanged.
+
+A hand runs betting (15s) → dealing → each seated player acting in turn (12s each) → the dealer →
+results (6s), continuously, on the server's clock. Run out of time on your turn and the table
+stands for you — which never busts a hand you might have won with, and keeps everyone else moving.
+
+Same paytable as the solo game: win 2x, push returns your stake, lose nothing back. (A natural pays
+the same 2x rather than the traditional 3:2, because that is what the solo game pays and the same
+hand paying differently on two screens would be worse than the missing bonus.)
+
+Two things the server, not the client, decides: **whose turn it is**, and **when the dealer's hole
+card is revealed**. Neither is ever in a payload early.
+
 ### Live Roulette
 
 The second multiplayer piece: one wheel, everybody at the table betting on

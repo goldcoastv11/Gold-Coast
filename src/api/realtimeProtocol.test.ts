@@ -7,7 +7,10 @@ import {
   MAP_ROWS,
   ROOM_OVERWORLD,
   ROOM_ROULETTE,
+  ROOM_BLACKJACK,
   ROOMS,
+  JOIN_CODE_LENGTH,
+  SERVER_CAPACITY,
   TICK_MS,
   TILE,
   WORLD_HEIGHT,
@@ -23,7 +26,10 @@ import {
   REALTIME_PATH as SERVER_REALTIME_PATH,
   ROOM_OVERWORLD as SERVER_ROOM_OVERWORLD,
   ROOM_ROULETTE as SERVER_ROOM_ROULETTE,
+  ROOM_BLACKJACK as SERVER_ROOM_BLACKJACK,
   ROOMS as SERVER_ROOMS,
+  JOIN_CODE_LENGTH as SERVER_JOIN_CODE_LENGTH,
+  SERVER_CAPACITY as SERVER_SERVER_CAPACITY,
   TICK_MS as SERVER_TICK_MS,
   TILE as SERVER_TILE,
   WORLD_HEIGHT as SERVER_WORLD_HEIGHT,
@@ -61,6 +67,7 @@ describe("client/server realtime protocol agreement", () => {
   it("agrees on the room names", () => {
     expect(ROOM_OVERWORLD).toBe(SERVER_ROOM_OVERWORLD);
     expect(ROOM_ROULETTE).toBe(SERVER_ROOM_ROULETTE);
+    expect(ROOM_BLACKJACK).toBe(SERVER_ROOM_BLACKJACK);
     // The server validates `room` against this exact list, so a name only
     // one side knows is a room a client can never enter.
     expect([...ROOMS]).toEqual([...SERVER_ROOMS]);
@@ -81,6 +88,16 @@ describe("client/server realtime protocol agreement", () => {
   it("agrees on the tick and heartbeat timings the two sides pace themselves by", () => {
     expect(TICK_MS).toBe(SERVER_TICK_MS);
     expect(HEARTBEAT_MS).toBe(SERVER_HEARTBEAT_MS);
+  });
+});
+
+describe("server constants", () => {
+  it("agrees on the join-code length and server capacity", () => {
+    // A client that pads or validates a code to a different length simply
+    // cannot join, and a mismatched capacity makes the browser lie about
+    // which servers are full.
+    expect(JOIN_CODE_LENGTH).toBe(SERVER_JOIN_CODE_LENGTH);
+    expect(SERVER_CAPACITY).toBe(SERVER_SERVER_CAPACITY);
   });
 });
 

@@ -318,6 +318,51 @@ players.
 - [ ] Sign out from one browser: that player disappears from the other's
       floor and does not come back until they sign in again.
 
+## Server browser (`ServerBrowserScene`, `server/src/realtime/gameServers.ts`)
+
+> **Verified live on 2026-09-03** with three real accounts and real sockets: public listing, private
+> creation, code resolution (including lower-case), an unknown code refused, cross-server isolation,
+> and per-server player counts. 24/24 including the Blackjack section below. What is unverified is
+> everything visual — layout, the code display, how it reads on a phone.
+
+- [ ] "ENTER ARCADE" opens the browser, listing three public servers with player counts.
+- [ ] Joining a public server drops you onto its floor.
+- [ ] **Two browsers, same public server** → you see each other. **Two browsers, different public
+      servers** → you do NOT. This is the whole point of servers; if it fails, stop.
+- [ ] "🔒 PRIVATE" creates a table and shows a join code. It stays on that screen rather than
+      entering — the code is shown once and is the only way in.
+- [ ] "ENTER CODE" → typing that code in the second browser puts both players on the same private
+      floor. Lower-case should work.
+- [ ] A wrong code says "No table with that code" and doesn't hang.
+- [ ] The private server never appears in the public list.
+- [ ] Back returns to the start menu.
+
+## Live Blackjack table (`LiveBlackjackScene`, `server/src/realtime/blackjackTable.ts`)
+
+**Two browsers, two accounts, both on the SAME server.** Walk into Blackjack, click **LIVE TABLE**.
+
+**This is a money path — write balances down and check them by hand.**
+
+- [ ] Both screens show the same countdown and the same hand.
+- [ ] Player A takes a seat → A appears in "AT THE TABLE" on B's screen with their stake.
+- [ ] A tries to take a second seat in the same hand → refused.
+- [ ] Betting closes → cards are dealt on both screens, and the dealer shows **one** card plus
+      "??". The hole card must not be visible until the dealer plays.
+- [ ] The "▶" marker and the HIT/STAND buttons light up for **exactly one player at a time**, and
+      only for the player whose turn it actually is.
+- [ ] The waiting player's HIT/STAND stay disabled. (They cannot act on the other's hand — the
+      server refuses it too.)
+- [ ] Do nothing on your turn → after ~12s the table stands for you and moves on. It must not hang.
+- [ ] Hitting past 21 busts you, ends your turn, and pays nothing.
+- [ ] At payout, the dealer's full hand and total are shown, and every seat's outcome is listed.
+- [ ] **Balances:** a win leaves you up exactly your stake, a loss down exactly your stake, a push
+      unchanged. Anything else is a payout bug.
+- [ ] Taking a seat does NOT change your balance until the hand ends — that is deliberate.
+- [ ] A new hand opens afterwards and you can play again.
+- [ ] "SOLO TABLE" returns to the single-player game, which must behave exactly as before.
+- [ ] Stop the server mid-hand: the screen says "NOT CONNECTED", buttons disable, **and no Gold
+      Coins have moved** for the interrupted hand.
+
 ## Live Roulette table (`LiveRouletteScene`, `server/src/realtime/rouletteTable.ts`)
 
 **Two browsers again**, both signed in as different players. Walk into

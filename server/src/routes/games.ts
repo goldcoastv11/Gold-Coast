@@ -24,10 +24,13 @@ import { applyTransaction, canAfford } from "../economy/ledger";
 import { DICE_TARGET_MIN, DICE_TARGET_MAX, playDice } from "../games/dice";
 import { playCoinFlip } from "../games/coinflip";
 import { playRoulette } from "../games/roulette";
-// The live table's round state. Imported for its `placeBet`/`snapshot`
-// only - this route never touches the socket layer (see the live-table
-// section below).
-import { rouletteTable } from "../realtime/rouletteTable";
+// The live tables' round state, and the presence hub that says which
+// server's table a given player is sitting at. Imported for their state
+// only - these routes never touch the socket layer (see the live-table
+// sections below).
+import { gameServers } from "../realtime/gameServers";
+import { presenceHub } from "../realtime/presence";
+import { ROOM_BLACKJACK, ROOM_ROULETTE } from "../realtime/protocol";
 import { LIMBO_TARGET_MIN, LIMBO_TARGET_MAX, playLimbo } from "../games/limbo";
 import { playPlinko } from "../games/plinko";
 import { playSlots } from "../games/slots";
@@ -378,8 +381,34 @@ const TABLE_BET_ERRORS: Record<string, { status: number; message: string }> = {
   TABLE_CLOSED: { status: 503, message: "The live table isn't running right now" },
   BETTING_CLOSED: { status: 409, message: "Betting has closed for this round" },
   ALREADY_BET: { status: 409, message: "You already have a bet on this round" },
-  INVALID_AMOUNT: { status: 400, message: "That bet amount isn't allowed" }
+  ALREADY_SEATED: { status: 409, message: "You're already in this hand" },
+  TABLE_FULL: { status: 409, message: "Every seat is taken - wait for the next hand" },
+  INVALID_AMOUNT: { status: 400, message: "That bet amount isn't allowed" },
+  NOT_ACTING: { status: 409, message: "It isn't time to act" },
+  NOT_YOUR_TURN: { status: 409, message: "It isn't your turn" },
+  HAND_FINISHED: { status: 409, message: "Your hand is already finished" }
 };
+
+/**
+ * Finds the live table the caller is actually sitting at.
+ *
+ * The server they're on comes from PRESENCE, never from the request body.
+ * That is the whole trust boundary for these routes: a client that could
+ * name its own server could bet on a table it isn't seated at, on someone
+ * else's server, and that moves real Gold Coins. Where a player is sitting
+ * is established by their socket and only by their socket (see
+ * realtime/presence.ts's `locate`).
+ *
+ * Returns null when they aren't seated at a table of this kind, which the
+ * caller turns into a 409 - "you aren't at that table" is a legitimate,
+ * expected answer, not a fault.
+ */
+function seatedAt(userId: string, room: typeof ROOM_ROULETTE | typeof ROOM_BLACKJACK) {
+  const at = presenceHub.locate(userId);
+  if (!at || at.room !== room) return null;
+  const server = gameServers.get(at.serverId);
+  return server ? { server, serverId: at.serverId } : null;
+}
 
 router.post(
   "/games/roulette/table/bet",
@@ -392,13 +421,20 @@ router.post(
     }
     const { betAmount, bet } = parsed.data;
 
+    const seat = seatedAt(userId, ROOM_ROULETTE);
+    if (!seat) {
+      return res
+        .status(409)
+        .json({ error: "You aren't sitting at a live Roulette table", code: "NOT_AT_TABLE" });
+    }
+
     if (!(await canAfford(prisma, userId, "GC", betAmount))) {
       return res
         .status(400)
         .json({ error: "Not enough Gold Coins for that bet", code: "INSUFFICIENT_BALANCE" });
     }
 
-    const outcome = rouletteTable.placeBet(userId, username, bet, betAmount);
+    const outcome = seat.server.roulette.placeBet(userId, username, bet, betAmount);
     if (!outcome.ok) {
       const mapped = TABLE_BET_ERRORS[outcome.reason];
       return res.status(mapped.status).json({ error: mapped.message, code: outcome.reason });
@@ -418,8 +454,106 @@ router.post(
 router.get(
   "/games/roulette/table",
   requireAuth,
-  asyncHandler(async (_req, res) => {
-    return res.json({ running: rouletteTable.running, table: rouletteTable.snapshot() });
+  asyncHandler(async (req, res) => {
+    const { userId } = req as AuthedRequest;
+    const seat = seatedAt(userId, ROOM_ROULETTE);
+    if (!seat) return res.json({ running: false, table: null });
+    return res.json({ running: seat.server.roulette.running, table: seat.server.roulette.snapshot() });
+  })
+);
+
+// ---------------------------------------------------------------------
+// Blackjack - the live table (multiplayer)
+//
+// Several players, one dealer, taking turns. The round loop lives in
+// realtime/blackjackTable.ts and is settled from the realtime tick; these
+// two routes are the only way a player affects it.
+//
+// Both are money/authority actions, so both come in over authenticated
+// HTTP, exactly like the solo game and like the live Roulette table. The
+// WebSocket carries the table's state outward and nothing inward - there is
+// no bet or hit/stand message in the protocol at all.
+//
+// Turn ownership is enforced inside the table (see its `act`), not here:
+// acting on someone else's hand would be cheating that costs another player
+// real Gold Coins, so the check lives with the state it is checking.
+// ---------------------------------------------------------------------
+
+const BlackjackTableBetSchema = z.object({ betAmount: BetAmountSchema });
+const BlackjackTableActionSchema = z.object({ action: z.enum(["hit", "stand"]) });
+
+router.post(
+  "/games/blackjack/table/bet",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { userId, username } = req as AuthedRequest;
+    const parsed = BlackjackTableBetSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid table bet payload", code: "INVALID_INPUT" });
+    }
+    const { betAmount } = parsed.data;
+
+    const seat = seatedAt(userId, ROOM_BLACKJACK);
+    if (!seat) {
+      return res
+        .status(409)
+        .json({ error: "You aren't sitting at a live Blackjack table", code: "NOT_AT_TABLE" });
+    }
+
+    // A courtesy check so a player finds out now rather than when the hand
+    // ends - it is not what protects the ledger, which refuses an
+    // unaffordable wager on its own at settlement.
+    if (!(await canAfford(prisma, userId, "GC", betAmount))) {
+      return res
+        .status(400)
+        .json({ error: "Not enough Gold Coins for that bet", code: "INSUFFICIENT_BALANCE" });
+    }
+
+    const outcome = seat.server.blackjack.placeBet(userId, username, betAmount);
+    if (!outcome.ok) {
+      const mapped = TABLE_BET_ERRORS[outcome.reason];
+      return res.status(mapped.status).json({ error: mapped.message, code: outcome.reason });
+    }
+
+    return res.json({ table: outcome.snapshot });
+  })
+);
+
+router.post(
+  "/games/blackjack/table/action",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { userId } = req as AuthedRequest;
+    const parsed = BlackjackTableActionSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Invalid table action payload", code: "INVALID_INPUT" });
+    }
+
+    const seat = seatedAt(userId, ROOM_BLACKJACK);
+    if (!seat) {
+      return res
+        .status(409)
+        .json({ error: "You aren't sitting at a live Blackjack table", code: "NOT_AT_TABLE" });
+    }
+
+    const outcome = seat.server.blackjack.act(userId, parsed.data.action);
+    if (!outcome.ok) {
+      const mapped = TABLE_BET_ERRORS[outcome.reason];
+      return res.status(mapped.status).json({ error: mapped.message, code: outcome.reason });
+    }
+
+    return res.json({ table: outcome.snapshot });
+  })
+);
+
+router.get(
+  "/games/blackjack/table",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const { userId } = req as AuthedRequest;
+    const seat = seatedAt(userId, ROOM_BLACKJACK);
+    if (!seat) return res.json({ running: false, table: null });
+    return res.json({ running: seat.server.blackjack.running, table: seat.server.blackjack.snapshot() });
   })
 );
 

@@ -46,8 +46,66 @@ export const ROOM_OVERWORLD = "overworld";
  */
 export const ROOM_ROULETTE = "roulette";
 
-export const ROOMS = [ROOM_OVERWORLD, ROOM_ROULETTE] as const;
+/** The live Blackjack table. Turn-based, unlike Roulette - see the server's blackjackTable.ts. */
+export const ROOM_BLACKJACK = "blackjack";
+
+export const ROOMS = [ROOM_OVERWORLD, ROOM_ROULETTE, ROOM_BLACKJACK] as const;
 export type RoomName = (typeof ROOMS)[number];
+
+// --- Servers -------------------------------------------------------------
+//
+// A "server" is one instance of the arcade: its own casino floor, its own
+// wheel, its own Blackjack table. Players on different servers never see
+// each other. Every room join names one.
+
+export const JOIN_CODE_LENGTH = 6;
+export const SERVER_CAPACITY = 20;
+
+export type ServerVisibility = "public" | "private";
+
+export interface GameServerSummary {
+  id: string;
+  name: string;
+  visibility: ServerVisibility;
+  players: number;
+  capacity: number;
+  /** Only ever present for a private server you just created. */
+  joinCode?: string;
+}
+
+// --- The live Blackjack table's wire shapes ------------------------------
+
+export type BlackjackPhase = "betting" | "dealing" | "acting" | "dealer" | "payout";
+export type BlackjackSeatStatus = "playing" | "stood" | "busted" | "blackjack";
+export type BlackjackOutcomeName = "win" | "push" | "lose";
+
+export interface BlackjackSeat {
+  userId: string;
+  username: string;
+  bet: number;
+  /** Card RANKS only (1=A, 2-10, 11=J, 12=Q, 13=K). The client picks a suit purely for display. */
+  hand: number[];
+  total: number;
+  status: BlackjackSeatStatus;
+  outcome: BlackjackOutcomeName | null;
+  payout: number;
+  /** True when the server couldn't settle this seat - nothing debited, nothing paid. */
+  voided?: boolean;
+}
+
+export interface BlackjackSnapshot {
+  roundId: string;
+  phase: BlackjackPhase;
+  /** Milliseconds left in this phase. A DURATION, so a wrong local clock doesn't matter. */
+  msRemaining: number;
+  seats: BlackjackSeat[];
+  /** Whose turn it is during `acting`; null otherwise. */
+  activeUserId: string | null;
+  dealerUpCard: number | null;
+  /** The dealer's full hand, only once the dealer has actually drawn. */
+  dealerHand: number[] | null;
+  dealerTotal: number | null;
+}
 
 // --- The live Roulette table's wire shapes (mirrors the server's) ---------
 
@@ -106,7 +164,7 @@ export type ClientMessage =
   | { t: "hello"; token: string }
   | { t: "move"; x: number; y: number; dir: Direction; moving: boolean }
   | { t: "emote"; e: Emote }
-  | { t: "room"; room: RoomName | null }
+  | { t: "room"; room: RoomName | null; serverId?: string | null }
   | { t: "ping" }
   | { t: "appearance" };
 
@@ -122,6 +180,7 @@ export type ServerMessage =
   | { t: "table"; snapshot: TableSnapshot }
   | { t: "tablebet"; roundId: string; bet: TableBet }
   | { t: "tableresult"; roundId: string; number: number; color: TableColor; results: TableResult[] }
+  | { t: "blackjack"; snapshot: BlackjackSnapshot }
   | { t: "error"; code: string; message: string };
 
 /**

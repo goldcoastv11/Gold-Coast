@@ -37,8 +37,10 @@ import {
   MAX_ROOM_OCCUPANTS,
   PresenceDelta,
   PresencePlayer,
+  RoomName,
   WORLD_HEIGHT,
-  WORLD_WIDTH
+  WORLD_WIDTH,
+  parseRoomKey
 } from "./protocol";
 
 /**
@@ -249,7 +251,52 @@ export class PresenceHub {
     }
     return active;
   }
+
+  /**
+   * Which server and room a player is in, or null if they're nowhere
+   * shared.
+   *
+   * This is the authority the HTTP routes use to decide which server's
+   * table a bet belongs to. Deliberately NOT taken from the request body:
+   * a client that could name its own server could bet on a table it isn't
+   * sitting at, and on this product that moves real Gold Coins. Where a
+   * player is standing is established by their socket, and only their
+   * socket.
+   */
+  locate(playerId: string): { serverId: string; room: RoomName } | null {
+    const key = this.roomByPlayer.get(playerId);
+    return key ? parseRoomKey(key) : null;
+  }
+
+  /**
+   * How many players are anywhere inside `serverId` - the casino floor plus
+   * every table. A player occupies exactly one room at a time, so this is a
+   * head count rather than a sum with double-counting.
+   */
+  occupancy(serverId: string): number {
+    let count = 0;
+    for (const key of this.roomByPlayer.values()) {
+      if (parseRoomKey(key)?.serverId === serverId) count += 1;
+    }
+    return count;
+  }
+
+  /** Drops every room and every player. Tests only - a live hub is emptied by players leaving. */
+  clear(): void {
+    this.rooms.clear();
+    this.roomByPlayer.clear();
+  }
 }
+
+/**
+ * The one hub.
+ *
+ * Module-level because two very different callers need the same object: the
+ * socket adapter, which writes it, and the HTTP game routes, which read it
+ * to answer "which server's table is this player actually sitting at". See
+ * locate() above for why that question must not be answered by the client.
+ */
+export const presenceHub = new PresenceHub();
 
 function toWire(occupant: PresenceOccupant): PresencePlayer {
   return {

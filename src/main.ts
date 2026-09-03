@@ -9,6 +9,8 @@ import { SlotsScene } from "./scenes/SlotsScene";
 import { BlackjackScene } from "./scenes/BlackjackScene";
 import { RouletteScene } from "./scenes/RouletteScene";
 import { LiveRouletteScene } from "./scenes/LiveRouletteScene";
+import { ServerBrowserScene } from "./scenes/ServerBrowserScene";
+import { LiveBlackjackScene } from "./scenes/LiveBlackjackScene";
 import { CoinFlipScene } from "./scenes/CoinFlipScene";
 import { DragonTowerScene } from "./scenes/DragonTowerScene";
 import { MinesScene } from "./scenes/MinesScene";
@@ -178,6 +180,8 @@ const config: Phaser.Types.Core.GameConfig = {
     BlackjackScene,
     RouletteScene,
     LiveRouletteScene,
+    ServerBrowserScene,
+    LiveBlackjackScene,
     CoinFlipScene,
     DragonTowerScene,
     MinesScene,

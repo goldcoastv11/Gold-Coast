@@ -24,9 +24,12 @@ import { verifyToken } from "../auth/jwt";
 import { env } from "../env";
 import { prisma } from "../db";
 import { getEquippedWardrobe } from "../economy/wardrobe";
-import { PresenceHub } from "./presence";
-import { TableEvent, rouletteTable } from "./rouletteTable";
+import { PresenceHub, presenceHub } from "./presence";
+import { TableEvent } from "./rouletteTable";
+import { BlackjackEvent } from "./blackjackTable";
+import { GameServer, gameServers } from "./gameServers";
 import { settleTableRound } from "./tableSettlement";
+import { settleBlackjackRound } from "./blackjackSettlement";
 import {
   EMOTE_RATE_LIMIT_MAX,
   EMOTE_RATE_LIMIT_WINDOW_MS,
@@ -37,13 +40,17 @@ import {
   RATE_LIMIT_MAX_MESSAGES,
   RATE_LIMIT_WINDOW_MS,
   REALTIME_PATH,
+  ROOM_BLACKJACK,
   ROOM_OVERWORLD,
   ROOM_ROULETTE,
   RoomName,
+  SERVER_CAPACITY,
   ServerMessage,
   TICK_MS,
   decodeClientMessage,
-  encode
+  encode,
+  parseRoomKey,
+  roomKey
 } from "./protocol";
 
 // Defined in protocol.ts (see its comment on why) and re-exported here,
@@ -89,7 +96,11 @@ export interface RealtimeHandle {
  * public route and its own certificate story for no benefit.
  */
 export function attachRealtime(server: HttpServer): RealtimeHandle {
-  const hub = new PresenceHub();
+  // The module-level hub, not a fresh one: the HTTP game routes read it to
+  // work out which server's table a player is sitting at (see
+  // presence.ts's locate()).
+  const hub = presenceHub;
+  hub.clear();
   const connections = new Map<WebSocket, Connection>();
   /** Reverse index so a broadcast can find a player's socket, and so a second tab can displace the first. */
   const byUserId = new Map<string, WebSocket>();
@@ -197,7 +208,7 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
         return;
 
       case "room":
-        await handleRoom(conn, message.room);
+        await handleRoom(conn, message.room, message.serverId ?? null);
         return;
 
       case "move": {
@@ -278,24 +289,58 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
     send(conn.socket, { t: "welcome", selfId: userId, tickMs: TICK_MS, heartbeatMs: HEARTBEAT_MS });
   }
 
-  async function handleRoom(conn: Connection, room: RoomName | null) {
+  async function handleRoom(conn: Connection, room: RoomName | null, serverId: string | null) {
     const userId = conn.userId;
     if (!userId) return;
 
-    const previous = hub.exit(userId);
+    const previousKey = hub.exit(userId);
+    const previous = previousKey ? parseRoomKey(previousKey) : null;
     // Only the casino floor draws avatars, so only the casino floor needs to
     // be told someone stopped standing in it.
-    if (previous === ROOM_OVERWORLD) broadcast(previous, { t: "leave", id: userId }, userId);
+    if (previousKey && previous?.room === ROOM_OVERWORLD) {
+      broadcast(previousKey, { t: "leave", id: userId }, userId);
+    }
 
-    if (room === null) return; // Left for a game screen or their own room.
+    if (room === null) return; // Left for a solo game screen, their own room, or the server browser.
 
-    if (room === ROOM_ROULETTE) {
-      // Sitting down at the live table. No avatar, no roster, no positions -
-      // this room exists only so "tell everyone at this table" reuses the
-      // same fan-out as "tell everyone on this floor" (see protocol.ts's
-      // ROOM_ROULETTE). Who is at the table is conveyed by the bets on it.
-      hub.enter(ROOM_ROULETTE, seatedPlaceholder(userId, conn.username));
-      send(conn.socket, { t: "table", snapshot: rouletteTable.snapshot() });
+    // A room only exists inside a server. Rejecting rather than defaulting:
+    // silently dropping a player onto some arbitrary server is far more
+    // confusing than being told to pick one.
+    if (!serverId) {
+      send(conn.socket, { t: "error", code: "NO_SERVER", message: "Pick a server first" });
+      return;
+    }
+
+    const server = gameServers.get(serverId);
+    if (!server) {
+      // A private server that was reaped, or a stale id from an old tab.
+      send(conn.socket, { t: "error", code: "SERVER_GONE", message: "That server no longer exists" });
+      return;
+    }
+
+    if (hub.occupancy(serverId) >= SERVER_CAPACITY) {
+      send(conn.socket, { t: "error", code: "SERVER_FULL", message: "That server is full - try another" });
+      return;
+    }
+
+    // Tables only run while somebody is here (see the registry's
+    // ensureTablesRunning) - this is where "somebody" starts being true.
+    gameServers.ensureTablesRunning(server);
+
+    const key = roomKey(serverId, room);
+
+    if (room === ROOM_ROULETTE || room === ROOM_BLACKJACK) {
+      // Sitting down at a table. No avatar, no roster, no positions - these
+      // rooms exist only so "tell everyone at this table" reuses the same
+      // fan-out as "tell everyone on this floor" (see protocol.ts). Who is
+      // at the table is conveyed by the bets and seats on it.
+      hub.enter(key, seatedPlaceholder(userId, conn.username));
+      send(
+        conn.socket,
+        room === ROOM_ROULETTE
+          ? { t: "table", snapshot: server.roulette.snapshot() }
+          : { t: "blackjack", snapshot: server.blackjack.snapshot() }
+      );
       return;
     }
 
@@ -319,14 +364,14 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
       wardrobe
     };
 
-    const result = hub.enter(ROOM_OVERWORLD, player);
+    const result = hub.enter(key, player);
     if (!result.ok) {
       send(conn.socket, { t: "error", code: "ROOM_FULL", message: "The floor is full - try again shortly" });
       return;
     }
 
-    send(conn.socket, { t: "roster", players: hub.room(ROOM_OVERWORLD).roster(userId) });
-    broadcast(ROOM_OVERWORLD, { t: "join", player }, userId);
+    send(conn.socket, { t: "roster", players: hub.room(key).roster(userId) });
+    broadcast(key, { t: "join", player }, userId);
   }
 
   /**
@@ -367,10 +412,11 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
    */
   const tickTimer = setInterval(() => {
     for (const { name, room } of hub.activeRooms()) {
-      // The table room has no avatars in it, so it never has movement to
-      // send - skipped explicitly rather than relying on it happening to be
+      // Table rooms hold no avatars, so they never have movement to send -
+      // skipped explicitly rather than relying on them happening to be
       // empty.
-      if (name === ROOM_ROULETTE) continue;
+      const parsed = parseRoomKey(name);
+      if (!parsed || parsed.room !== ROOM_OVERWORLD) continue;
       const players = room.drainDeltas();
       if (players.length === 0) continue;
       // Sent to everyone including the players in it: the client filters
@@ -380,9 +426,19 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
       broadcast(name, { t: "state", players });
     }
 
-    for (const event of rouletteTable.advance()) {
-      void handleTableEvent(event);
+    // Every server runs its own wheel and its own table. A server nobody is
+    // in has both stopped (see the registry's sweep), so `advance()` on it
+    // is a no-op rather than a round dealt to an empty room.
+    for (const server of gameServers.all()) {
+      for (const event of server.roulette.advance()) {
+        void handleTableEvent(server, event);
+      }
+      for (const event of server.blackjack.advance()) {
+        void handleBlackjackEvent(server, event);
+      }
     }
+
+    gameServers.sweep((id) => hub.occupancy(id));
   }, TICK_MS);
 
   /**
@@ -395,9 +451,11 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
    * as the same shape as a solo one and counts toward challenges and XP
    * identically. Nothing bespoke about the currency wiring exists here.
    */
-  async function handleTableEvent(event: TableEvent): Promise<void> {
+  async function handleTableEvent(server: GameServer, event: TableEvent): Promise<void> {
+    const key = roomKey(server.id, ROOM_ROULETTE);
+
     if (event.kind === "phase") {
-      broadcast(ROOM_ROULETTE, { t: "table", snapshot: event.snapshot });
+      broadcast(key, { t: "table", snapshot: event.snapshot });
       return;
     }
 
@@ -408,30 +466,53 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
     );
 
     if (voidedUserIds.length > 0) {
-      rouletteTable.markVoided(event.roundId, voidedUserIds);
-      for (const userId of voidedUserIds) {
-        const socket = byUserId.get(userId);
-        // Told individually, not broadcast: why one player's bet did not
-        // stand is between them and the table.
-        if (socket) {
-          send(socket, {
-            t: "error",
-            code: "BET_VOIDED",
-            message: "Your bet was voided - it couldn't be settled when the wheel stopped"
-          });
-        }
-      }
+      server.roulette.markVoided(event.roundId, voidedUserIds);
+      notifyVoided(voidedUserIds, "Your bet was voided - it couldn't be settled when the wheel stopped");
     }
 
     // Broadcast AFTER settling, so the numbers a player reads here are the
     // ones their balance actually moved by.
-    broadcast(ROOM_ROULETTE, {
+    broadcast(key, {
       t: "tableresult",
       roundId: event.roundId,
       number: event.number,
       color: event.color,
       results: settled
     });
+  }
+
+  /**
+   * The Blackjack equivalent. Simpler on the wire than Roulette's because
+   * the snapshot already carries every seat's outcome - there is no separate
+   * "results" message, just a snapshot broadcast after the ledger is
+   * written.
+   */
+  async function handleBlackjackEvent(server: GameServer, event: BlackjackEvent): Promise<void> {
+    const key = roomKey(server.id, ROOM_BLACKJACK);
+
+    if (event.kind === "phase") {
+      broadcast(key, { t: "blackjack", snapshot: event.snapshot });
+      return;
+    }
+
+    const { voidedUserIds } = await settleBlackjackRound(event.roundId, event.seats);
+
+    if (voidedUserIds.length > 0) {
+      server.blackjack.markVoided(event.roundId, voidedUserIds);
+      notifyVoided(voidedUserIds, "Your hand was voided - it couldn't be settled when the round ended");
+    }
+
+    // Re-snapshot AFTER settling (and after any voiding), so what a player
+    // reads is what their balance actually did.
+    broadcast(key, { t: "blackjack", snapshot: server.blackjack.snapshot() });
+  }
+
+  /** Tells individual players their bet didn't stand. Not broadcast - that is between them and the table. */
+  function notifyVoided(userIds: string[], message: string): void {
+    for (const userId of userIds) {
+      const socket = byUserId.get(userId);
+      if (socket) send(socket, { t: "error", code: "BET_VOIDED", message });
+    }
   }
 
   /**
@@ -469,13 +550,31 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
     }
   }
 
-  // The table only runs while the realtime channel is up. If this attach
-  // ever fails, `rouletteTable.running` stays false and the HTTP bet route
-  // refuses cleanly - rather than taking stakes for a wheel that will never
-  // spin.
-  rouletteTable.start();
-  const unsubscribeTableBets = rouletteTable.onBet((roundId, bet) => {
-    broadcast(ROOM_ROULETTE, { t: "tablebet", roundId, bet });
+  // Tables only run while the realtime channel is up AND somebody is on
+  // that server (see the registry's ensureTablesRunning/sweep). If this
+  // attach ever fails, every table's `running` stays false and the HTTP bet
+  // routes refuse cleanly - rather than taking stakes for a wheel that will
+  // never spin.
+  //
+  // Registered with the REGISTRY rather than with each table, so servers
+  // created later - every private one - are wired up as they are born. See
+  // gameServers.ts's TableBroadcaster for why subscribing once at startup
+  // is a trap.
+  gameServers.setBroadcaster({
+    bet(serverId, roundId, bet) {
+      broadcast(roomKey(serverId, ROOM_ROULETTE), { t: "tablebet", roundId, bet });
+    },
+    seat(serverId) {
+      // The whole snapshot rather than just the new seat: a blackjack seat
+      // is only meaningful next to the rest of the table (who else is in,
+      // whose turn it will be), and the payload is small.
+      const server = gameServers.get(serverId);
+      if (!server) return;
+      broadcast(roomKey(serverId, ROOM_BLACKJACK), {
+        t: "blackjack",
+        snapshot: server.blackjack.snapshot()
+      });
+    }
   });
 
   return {
@@ -484,8 +583,12 @@ export function attachRealtime(server: HttpServer): RealtimeHandle {
     close() {
       clearInterval(tickTimer);
       clearInterval(sweepTimer);
-      unsubscribeTableBets();
-      rouletteTable.stop();
+      gameServers.setBroadcaster(null);
+      for (const server of gameServers.all()) {
+        server.roulette.stop();
+        server.blackjack.stop();
+      }
+      hub.clear();
       for (const conn of connections.values()) {
         if (conn.helloTimer) clearTimeout(conn.helloTimer);
         conn.socket.terminate();

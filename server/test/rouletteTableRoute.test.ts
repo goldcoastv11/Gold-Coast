@@ -6,43 +6,77 @@
  * (rouletteTable.test.ts, which uses a fake clock and no database):
  *
  * - `POST /games/roulette/table/bet` — the only door a bet comes in
- *   through, and therefore the place every "can this player do this?"
- *   question has to be answered.
- * - `settleTableRound` — the only code in the realtime feature that moves a
- *   balance. Driven directly rather than through a WebSocket and a
- *   12-second betting window, which is exactly why it was split out of the
- *   socket adapter.
+ *   through, and therefore where every "can this player do this?" question
+ *   is answered. Since servers landed, that includes "are they even sitting
+ *   at this table?", which is answered from presence rather than from the
+ *   request body.
+ * - `settleTableRound` — the only Roulette code that moves a balance.
+ *   Driven directly rather than through a WebSocket and a 12-second betting
+ *   window, which is exactly why it was split out of the socket adapter.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/app";
 import { prisma } from "../src/db";
-import { rouletteTable } from "../src/realtime/rouletteTable";
+import { RouletteTable } from "../src/realtime/rouletteTable";
+import { gameServers } from "../src/realtime/gameServers";
+import { presenceHub } from "../src/realtime/presence";
+import { ROOM_ROULETTE, TableResult, roomKey } from "../src/realtime/protocol";
 import { settleTableRound } from "../src/realtime/tableSettlement";
-import { TableResult } from "../src/realtime/protocol";
 import { getBalance } from "../src/economy/ledger";
 import { BET_MAX, BET_MIN } from "../src/games/shared";
 import { resetDb, signupUser, authed } from "./helpers";
 
+/** One of the seeded public servers - see realtime/gameServers.ts. */
+const SERVER_ID = "boardwalk";
+
+let table: RouletteTable;
+
 beforeEach(async () => {
   await resetDb();
-  // The table is a module-level singleton started by the realtime attach,
-  // which these tests don't run - so each test opens a fresh round itself.
-  rouletteTable.start();
+  // Servers and presence are process-global in-memory state, so each test
+  // starts from a clean slate rather than inheriting the last one's seats.
+  gameServers.reset();
+  presenceHub.clear();
+  table = gameServers.get(SERVER_ID)!.roulette;
+  table.start();
 });
 
 afterEach(() => {
-  rouletteTable.stop();
+  table.stop();
+  presenceHub.clear();
 });
+
+/**
+ * Signs up a player and sits them at the server's Roulette table, which is
+ * what the socket would normally do on `{t:"room", room:"roulette"}`. The
+ * bet route reads presence to decide which server's wheel a bet belongs to,
+ * so without this a bet is correctly refused.
+ */
+async function seatedPlayer(username?: string) {
+  const user = await signupUser(username ? { username } : undefined);
+  const row = await prisma.user.findUnique({ where: { username: user.username } });
+  const userId = row!.id;
+  presenceHub.enter(roomKey(SERVER_ID, ROOM_ROULETTE), {
+    id: userId,
+    username: user.username,
+    x: 0,
+    y: 0,
+    dir: "down",
+    moving: false,
+    wardrobe: {}
+  });
+  return { ...user, userId };
+}
 
 function bet(token: string, body: object) {
   return request(app).post("/games/roulette/table/bet").set(authed(token)).send(body);
 }
 
 describe("POST /games/roulette/table/bet", () => {
-  it("accepts a bet and returns the table with it on", async () => {
-    const user = await signupUser({ username: "alice_table" });
+  it("accepts a bet from a seated player and returns the table with it on", async () => {
+    const user = await seatedPlayer("alice_table");
 
     const res = await bet(user.token, { betAmount: 25, bet: "red" });
 
@@ -52,17 +86,53 @@ describe("POST /games/roulette/table/bet", () => {
     expect(res.body.table.bets).toHaveLength(1);
   });
 
-  it("does NOT debit the balance when the bet is placed", async () => {
+  it("refuses a bet from someone who isn't sitting at the table", async () => {
+    // The trust boundary: which server's wheel a bet lands on comes from
+    // presence, never from the caller. A player who isn't seated has no
+    // table to bet on, and cannot name one.
     const user = await signupUser();
-    const before = await getBalance(prisma, (await currentUserId(user.username)), "GC");
+
+    const res = await bet(user.token, { betAmount: 25, bet: "red" });
+
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("NOT_AT_TABLE");
+    expect(table.snapshot().bets).toEqual([]);
+  });
+
+  it("puts the bet on the table of the server the player is actually on", async () => {
+    const user = await signupUser();
+    const row = await prisma.user.findUnique({ where: { username: user.username } });
+    const other = gameServers.get("sunset")!;
+    other.roulette.start();
+    presenceHub.enter(roomKey("sunset", ROOM_ROULETTE), {
+      id: row!.id,
+      username: user.username,
+      x: 0,
+      y: 0,
+      dir: "down",
+      moving: false,
+      wardrobe: {}
+    });
+
+    await bet(user.token, { betAmount: 25, bet: "red" });
+
+    // Their bet belongs to Sunset's wheel and must not appear on the
+    // Boardwalk one - two servers are two independent games.
+    expect(other.roulette.snapshot().bets).toHaveLength(1);
+    expect(table.snapshot().bets).toEqual([]);
+    other.roulette.stop();
+  });
+
+  it("does NOT debit the balance when the bet is placed", async () => {
+    const user = await seatedPlayer();
+    const before = await getBalance(prisma, user.userId, "GC");
 
     await bet(user.token, { betAmount: 25, bet: "red" });
 
     // The whole round settles atomically at spin time - see
     // realtime/rouletteTable.ts's header. A debit here would be a stake
     // that a process restart could strand.
-    const after = await getBalance(prisma, await currentUserId(user.username), "GC");
-    expect(after).toBe(before);
+    expect(await getBalance(prisma, user.userId, "GC")).toBe(before);
   });
 
   it("requires authentication", async () => {
@@ -73,52 +143,47 @@ describe("POST /games/roulette/table/bet", () => {
   });
 
   it("rejects a bet the player can't afford", async () => {
-    const user = await signupUser();
-    const userId = await currentUserId(user.username);
-    // Drain the account down below the minimum bet.
-    const balance = await getBalance(prisma, userId, "GC");
-    await prisma.balance.update({ where: { userId }, data: { goldCoins: 0 } });
-    expect(balance).toBeGreaterThan(0);
+    const user = await seatedPlayer();
+    await prisma.balance.update({ where: { userId: user.userId }, data: { goldCoins: 0 } });
 
     const res = await bet(user.token, { betAmount: BET_MIN, bet: "red" });
 
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("INSUFFICIENT_BALANCE");
-    expect(rouletteTable.snapshot().bets).toEqual([]);
+    expect(table.snapshot().bets).toEqual([]);
   });
 
   it("rejects a second bet on the same round", async () => {
-    const user = await signupUser();
+    const user = await seatedPlayer();
     await bet(user.token, { betAmount: 25, bet: "red" });
 
     const res = await bet(user.token, { betAmount: 25, bet: "black" });
 
     expect(res.status).toBe(409);
     expect(res.body.code).toBe("ALREADY_BET");
-    expect(rouletteTable.snapshot().bets).toHaveLength(1);
+    expect(table.snapshot().bets).toHaveLength(1);
   });
 
   it("rejects an out-of-range or non-integer stake", async () => {
-    const user = await signupUser();
+    const user = await seatedPlayer();
 
     expect((await bet(user.token, { betAmount: BET_MIN - 1, bet: "red" })).status).toBe(400);
     expect((await bet(user.token, { betAmount: BET_MAX + 1, bet: "red" })).status).toBe(400);
     expect((await bet(user.token, { betAmount: 12.5, bet: "red" })).status).toBe(400);
-    expect(rouletteTable.snapshot().bets).toEqual([]);
+    expect(table.snapshot().bets).toEqual([]);
   });
 
   it("rejects a colour that isn't on the wheel", async () => {
-    const user = await signupUser();
+    const user = await seatedPlayer();
     const res = await bet(user.token, { betAmount: 25, bet: "purple" });
     expect(res.status).toBe(400);
     expect(res.body.code).toBe("INVALID_INPUT");
   });
 
   it("refuses bets when the table isn't running", async () => {
-    const user = await signupUser();
-    // Simulates the realtime channel having failed to attach: the wheel
-    // will never spin, so taking a stake for it must be impossible.
-    rouletteTable.stop();
+    const user = await seatedPlayer();
+    // Simulates a server whose tables were stopped because it emptied out.
+    table.stop();
 
     const res = await bet(user.token, { betAmount: 25, bet: "red" });
 
@@ -127,26 +192,36 @@ describe("POST /games/roulette/table/bet", () => {
   });
 
   it("keeps several players' bets on the same round", async () => {
-    const alice = await signupUser({ username: "alice_multi" });
-    const bob = await signupUser({ username: "bob_multi" });
+    const alice = await seatedPlayer("alice_multi");
+    const bob = await seatedPlayer("bob_multi");
 
     await bet(alice.token, { betAmount: 25, bet: "red" });
     await bet(bob.token, { betAmount: 50, bet: "black" });
 
-    const table = rouletteTable.snapshot();
-    expect(table.bets.map((b) => b.username).sort()).toEqual(["alice_multi", "bob_multi"]);
+    expect(table.snapshot().bets.map((b) => b.username).sort()).toEqual([
+      "alice_multi",
+      "bob_multi"
+    ]);
   });
 });
 
 describe("GET /games/roulette/table", () => {
-  it("returns the current table so a client without a socket can still watch", async () => {
-    const user = await signupUser();
+  it("returns the table of the server the player is on", async () => {
+    const user = await seatedPlayer();
     const res = await request(app).get("/games/roulette/table").set(authed(user.token));
 
     expect(res.status).toBe(200);
     expect(res.body.running).toBe(true);
     expect(res.body.table.phase).toBe("betting");
     expect(res.body.table.msRemaining).toBeGreaterThan(0);
+  });
+
+  it("reports no table for a player who isn't sitting at one", async () => {
+    const user = await signupUser();
+    const res = await request(app).get("/games/roulette/table").set(authed(user.token));
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ running: false, table: null });
   });
 
   it("requires authentication", async () => {
@@ -156,67 +231,59 @@ describe("GET /games/roulette/table", () => {
 
 describe("settleTableRound", () => {
   it("debits the stake and credits the win, in the same shape as a solo round", async () => {
-    const user = await signupUser();
-    const userId = await currentUserId(user.username);
-    const before = await getBalance(prisma, userId, "GC");
+    const user = await seatedPlayer();
+    const before = await getBalance(prisma, user.userId, "GC");
 
-    await settleTableRound("round-1", 7, [
-      result(userId, user.username, "red", 20, true, 40)
-    ]);
+    await settleTableRound("round-1", 7, [result(user.userId, user.username, "red", 20, true, 40)]);
 
     // Wagered 20, won 40 back: net +20.
-    expect(await getBalance(prisma, userId, "GC")).toBe(before + 20);
+    expect(await getBalance(prisma, user.userId, "GC")).toBe(before + 20);
 
-    const transactions = await prisma.transaction.findMany({ where: { userId }, orderBy: { createdAt: "asc" } });
-    const types = transactions.map((t) => t.type);
+    const types = (
+      await prisma.transaction.findMany({ where: { userId: user.userId } })
+    ).map((t) => t.type);
     expect(types).toContain("WAGER_GC");
     expect(types).toContain("GAME_WIN_GC");
   });
 
   it("debits the stake and pays nothing on a loss", async () => {
-    const user = await signupUser();
-    const userId = await currentUserId(user.username);
-    const before = await getBalance(prisma, userId, "GC");
+    const user = await seatedPlayer();
+    const before = await getBalance(prisma, user.userId, "GC");
 
-    await settleTableRound("round-2", 8, [
-      result(userId, user.username, "red", 20, false, 0)
-    ]);
+    await settleTableRound("round-2", 8, [result(user.userId, user.username, "red", 20, false, 0)]);
 
-    expect(await getBalance(prisma, userId, "GC")).toBe(before - 20);
+    expect(await getBalance(prisma, user.userId, "GC")).toBe(before - 20);
   });
 
   it("settles every player independently - one bad bet doesn't roll back the others", async () => {
-    const alice = await signupUser({ username: "alice_settle" });
-    const bob = await signupUser({ username: "bob_settle" });
-    const aliceId = await currentUserId(alice.username);
-    const bobId = await currentUserId(bob.username);
-    const aliceBefore = await getBalance(prisma, aliceId, "GC");
+    const alice = await seatedPlayer("alice_settle");
+    const bob = await seatedPlayer("bob_settle");
+    const aliceBefore = await getBalance(prisma, alice.userId, "GC");
 
     // Bob spent his Gold Coins elsewhere between betting and the spin.
-    await prisma.balance.update({ where: { userId: bobId }, data: { goldCoins: 0 } });
+    await prisma.balance.update({ where: { userId: bob.userId }, data: { goldCoins: 0 } });
 
     const outcome = await settleTableRound("round-3", 7, [
-      result(aliceId, alice.username, "red", 20, true, 40),
-      result(bobId, bob.username, "red", 20, true, 40)
+      result(alice.userId, alice.username, "red", 20, true, 40),
+      result(bob.userId, bob.username, "red", 20, true, 40)
     ]);
 
     // Alice is paid in full. This is the property a single table-wide
     // transaction would break.
-    expect(await getBalance(prisma, aliceId, "GC")).toBe(aliceBefore + 20);
-    expect(outcome.voidedUserIds).toEqual([bobId]);
+    expect(await getBalance(prisma, alice.userId, "GC")).toBe(aliceBefore + 20);
+    expect(outcome.voidedUserIds).toEqual([bob.userId]);
 
     // Bob's round did not happen: nothing debited, nothing paid.
-    expect(await getBalance(prisma, bobId, "GC")).toBe(0);
-    expect(await prisma.transaction.count({ where: { userId: bobId, type: "WAGER_GC" } })).toBe(0);
+    expect(await getBalance(prisma, bob.userId, "GC")).toBe(0);
+    expect(await prisma.transaction.count({ where: { userId: bob.userId, type: "WAGER_GC" } })).toBe(0);
   });
 
   it("reports a voided bet as a loss in the results it hands back for broadcast", async () => {
-    const user = await signupUser();
-    const userId = await currentUserId(user.username);
-    await prisma.balance.update({ where: { userId }, data: { goldCoins: 0 } });
+    const user = await seatedPlayer();
+    await prisma.balance.update({ where: { userId: user.userId }, data: { goldCoins: 0 } });
 
     const outcome = await settleTableRound("round-4", 7, [
-      result(userId, user.username, "red", 20, true, 40)
+      result(user.userId, user.username, "red", 20, true, 40)
     ]);
 
     // A player must never read "you won 40" for a round they were not paid.
@@ -224,13 +291,12 @@ describe("settleTableRound", () => {
   });
 
   it("records the round as roulette activity, so the live table counts toward challenges", async () => {
-    const user = await signupUser();
-    const userId = await currentUserId(user.username);
+    const user = await seatedPlayer();
 
-    await settleTableRound("round-5", 7, [result(userId, user.username, "red", 20, true, 40)]);
+    await settleTableRound("round-5", 7, [result(user.userId, user.username, "red", 20, true, 40)]);
 
     const wager = await prisma.transaction.findFirst({
-      where: { userId, type: "WAGER_GC" },
+      where: { userId: user.userId, type: "WAGER_GC" },
       orderBy: { createdAt: "desc" }
     });
     // Same game name as the solo route, plus table metadata - the two modes
@@ -253,10 +319,4 @@ function result(
   payout: number
 ): TableResult {
   return { userId, username, choice, amount, won, payout };
-}
-
-async function currentUserId(username: string): Promise<string> {
-  const user = await prisma.user.findUnique({ where: { username } });
-  if (!user) throw new Error(`no user ${username}`);
-  return user.id;
 }

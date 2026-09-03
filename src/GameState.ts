@@ -264,6 +264,19 @@ class GameState {
    * calls GET /progression instead of deriving it from these two numbers -
    * the XP curve lives on the server and stays there.
    */
+  /**
+   * The multiplayer server the player picked in the server browser, or null
+   * if they haven't picked one this session.
+   *
+   * Session-only and deliberately NOT persisted: servers are in-memory on
+   * the backend and do not survive a restart (see
+   * server/src/realtime/gameServers.ts), so a remembered id from yesterday
+   * would be a private server that no longer exists. Held here rather than
+   * only on the realtime client because OverworldScene is recreated on
+   * every visit and needs to know which server to re-enter.
+   */
+  activeServerId: string | null = null;
+
   playerLevel = 1;
   playerXp = 0;
 
@@ -576,6 +589,9 @@ class GameState {
     this.activeUsername = null;
     this.lastPlayerPosition = null;
     clearToken();
+    // The chosen server goes with the session. Servers are in-memory on the
+    // backend, so a remembered id would be stale by the next sign-in anyway.
+    this.activeServerId = null;
     // Drop the multiplayer presence socket too. It authenticates with the
     // JWT just cleared, so leaving it up means a connection reconnecting
     // forever against a credential that no longer exists - and, until it

@@ -135,8 +135,67 @@ export const ROOM_OVERWORLD = "overworld";
 export const ROOM_ROULETTE = "roulette";
 
 /** Every shared room a client may ask to enter. */
-export const ROOMS = [ROOM_OVERWORLD, ROOM_ROULETTE] as const;
+/**
+ * The live Blackjack table. Unlike Roulette (everyone bets on one
+ * simultaneous spin), this one is TURN-BASED - the table works through
+ * seated players one at a time - which is why it has its own state machine
+ * rather than sharing Roulette's.
+ */
+export const ROOM_BLACKJACK = "blackjack";
+
+export const ROOMS = [ROOM_OVERWORLD, ROOM_ROULETTE, ROOM_BLACKJACK] as const;
 export type RoomName = (typeof ROOMS)[number];
+
+// ---------------------------------------------------------------------------
+// Servers
+//
+// A "server" is one instance of the arcade: its own casino floor, its own
+// Roulette wheel, its own Blackjack table. Players on different servers
+// never see each other.
+//
+// Rooms are therefore keyed by BOTH the server and the room - `s1:overworld`
+// rather than `overworld` - so one PresenceHub can hold every server's rooms
+// without them bleeding into each other. Those two helpers are the only
+// place that key format is known; nothing else should build or parse it by
+// hand.
+// ---------------------------------------------------------------------------
+
+/** Length of a private server's join code. Short enough to read out loud, long enough not to be guessed casually. */
+export const JOIN_CODE_LENGTH = 6;
+
+/**
+ * How many players one server's casino floor holds. Deliberately far below
+ * MAX_ROOM_OCCUPANTS: a "server" should feel populated but navigable, and a
+ * full one is the signal to spin up/join another rather than to raise this.
+ */
+export const SERVER_CAPACITY = 20;
+
+export type ServerVisibility = "public" | "private";
+
+/** One row in the server browser. */
+export interface GameServerSummary {
+  id: string;
+  name: string;
+  visibility: ServerVisibility;
+  /** Players currently on this server's casino floor plus its tables. */
+  players: number;
+  capacity: number;
+  /** Only ever sent to the player who created it - see routes/servers.ts. */
+  joinCode?: string;
+}
+
+export function roomKey(serverId: string, room: RoomName): string {
+  return `${serverId}:${room}`;
+}
+
+export function parseRoomKey(key: string): { serverId: string; room: RoomName } | null {
+  const at = key.indexOf(":");
+  if (at <= 0) return null;
+  const serverId = key.slice(0, at);
+  const room = key.slice(at + 1) as RoomName;
+  if (!ROOMS.includes(room)) return null;
+  return { serverId, room };
+}
 
 // ---------------------------------------------------------------------------
 // Client -> server
@@ -163,10 +222,19 @@ const EmoteSchema = z.object({
   e: z.enum(EMOTES)
 });
 
-/** Announces which shared room this socket is in; see ROOM_OVERWORLD/ROOM_ROULETTE. `null` means "not in a shared space". */
+/**
+ * Announces where this socket is: which server, and which room within it.
+ * `room: null` means "not in a shared space" (a solo game screen, the
+ * player's own room, or the server browser itself).
+ *
+ * `serverId` is required whenever `room` isn't null - a room only exists
+ * inside a server, and defaulting it would silently drop players onto
+ * whichever server happened to be first.
+ */
 const RoomSchema = z.object({
   t: z.literal("room"),
-  room: z.union([z.enum(ROOMS), z.null()])
+  room: z.union([z.enum(ROOMS), z.null()]),
+  serverId: z.string().trim().min(1).max(64).nullable().optional()
 });
 
 /** Heartbeat. Exists so standing still isn't indistinguishable from a dead socket - see IDLE_TIMEOUT_MS. */
@@ -248,6 +316,61 @@ export interface TableSnapshot {
   results: TableResult[] | null;
 }
 
+// ---------------------------------------------------------------------------
+// The live Blackjack table's wire shapes
+//
+// Roulette is simultaneous - everyone bets, one wheel resolves everyone at
+// once. Blackjack is TURN-BASED, so its snapshot has to carry two extra
+// things Roulette's doesn't: whose turn it is, and each seat's own hand and
+// per-seat outcome.
+// ---------------------------------------------------------------------------
+
+export type BlackjackPhase = "betting" | "dealing" | "acting" | "dealer" | "payout";
+
+/** What one seat's hand is doing. `blackjack` is a natural 21 on the opening two cards. */
+export type BlackjackSeatStatus = "playing" | "stood" | "busted" | "blackjack";
+
+export type BlackjackOutcomeName = "win" | "push" | "lose";
+
+export interface BlackjackSeat {
+  userId: string;
+  username: string;
+  bet: number;
+  /**
+   * Card RANKS only (1=A, 2-10, 11=J, 12=Q, 13=K) - no suits. Same choice
+   * the solo game makes (see games/blackjack.ts): suit has no effect on
+   * scoring, so the client picks one at random purely for display.
+   */
+  hand: number[];
+  total: number;
+  status: BlackjackSeatStatus;
+  /** Filled in at payout; null until the hand is resolved. */
+  outcome: BlackjackOutcomeName | null;
+  payout: number;
+  /** True when the ledger refused this seat's wager at settlement - nothing debited, nothing paid. */
+  voided?: boolean;
+}
+
+export interface BlackjackSnapshot {
+  roundId: string;
+  phase: BlackjackPhase;
+  /** Milliseconds left in this phase - a DURATION, so a wrong client clock doesn't matter. */
+  msRemaining: number;
+  seats: BlackjackSeat[];
+  /** Whose turn it is during `acting`. Null in every other phase. */
+  activeUserId: string | null;
+  /**
+   * The dealer's face-up card, known from the deal onwards. The HOLE card
+   * is deliberately absent until the dealer plays - it must not be sitting
+   * in a payload the client could read early, which is the whole reason the
+   * solo game needed a stateful endpoint too.
+   */
+  dealerUpCard: number | null;
+  /** The dealer's full hand, only from the `dealer` phase onwards. */
+  dealerHand: number[] | null;
+  dealerTotal: number | null;
+}
+
 /** A per-tick movement delta. Deliberately terser than PresencePlayer: this is the message that repeats 10x a second. */
 export interface PresenceDelta {
   id: string;
@@ -281,6 +404,16 @@ export type ServerMessage =
   | { t: "tablebet"; roundId: string; bet: TableBet }
   /** The round's settled outcomes, broadcast AFTER the ledger has been written - so what a player reads here is what actually happened to their balance. */
   | { t: "tableresult"; roundId: string; number: number; color: TableColor; results: TableResult[] }
+  /**
+   * The live Blackjack table's state. Sent on sitting down, on every phase
+   * change, and after every player action - a turn-based table has to
+   * repaint far more often than Roulette's, and the snapshot is small.
+   *
+   * In the `payout` phase this is broadcast only AFTER the ledger is
+   * written, so the outcomes a player reads are the ones their balance
+   * actually moved by.
+   */
+  | { t: "blackjack"; snapshot: BlackjackSnapshot }
   /** Terminal for `code === "UNAUTHORIZED"`/"ROOM_FULL" (the socket closes); advisory otherwise. */
   | { t: "error"; code: string; message: string };
 
