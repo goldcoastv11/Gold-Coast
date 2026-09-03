@@ -266,6 +266,43 @@ these manual entries are for whoever can test on a real device).
 - [ ] Walking into each game's entrance/kiosk transitions to the right scene.
 - [ ] Skin shop kiosk (if present) opens and reflects owned vs. lockable skins.
 
+## Multiplayer presence (`api/realtime.ts`, `scenes/overworld/RemotePlayers.ts`)
+
+**Needs two browsers.** Two accounts in the same browser will NOT work: the
+server keys presence by account, so a second connection from the same account
+deliberately displaces the first (see `server/src/realtime/presence.ts`). Use
+two profiles, or one normal window and one incognito, signed in as different
+players.
+
+- [ ] Both players on the casino floor: each sees the other's character
+      walking, with the other player's username above their head.
+- [ ] Movement is smooth, not steppy or teleporting. Turning on the spot
+      changes the remote character's facing; standing still stops their walk
+      animation rather than leaving them walking in place.
+- [ ] The `👥 N` count in the coin HUD matches how many OTHER players are on
+      the floor (it should read 1 with two players connected, and vanish
+      entirely if the connection drops).
+- [ ] Player A buys and equips a wardrobe piece → it appears on A's character
+      on B's screen without either of them reloading.
+- [ ] Player A walks into a game cabinet → A disappears from B's floor within
+      a moment. A walks back out → A reappears, at the right spot.
+- [ ] Player A closes their tab → A disappears from B's floor (no ghost left
+      standing there).
+- [ ] "😄 React" in the top button row opens the emote picker; picking one
+      pops that emote over your character on the OTHER player's screen, and
+      it fades after a couple of seconds.
+- [ ] Spamming emotes as fast as possible eventually shows "Slow down" and
+      does NOT disconnect you.
+- [ ] Stop the server while both are on the floor: the other player
+      disappears and the `👥` count goes away, but **the floor stays fully
+      playable** - walking, panels, and (once the server is back) games all
+      keep working. This is the degradation guarantee; if the game breaks
+      here, that is a bug regardless of the server being down.
+- [ ] Restart the server: within ~20s the players reappear on each other's
+      screens with no reload and no re-login.
+- [ ] Sign out from one browser: that player disappears from the other's
+      floor and does not come back until they sign in again.
+
 ## Quickplay (`ui/QuickplayPanel.ts`, roadmap/quickplay-grid)
 
 - [ ] The "🎮 Quickplay" corner button (stacked under Clothes/Challenges)

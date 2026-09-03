@@ -66,6 +66,7 @@ import {
 import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, EquippedRoom, RoomSlot } from "./roomCatalog";
 import { FurnitureSlotId, PlacedFurniture } from "./furnitureCatalog";
 import { clearToken } from "./api/client";
+import { realtime } from "./api/realtime";
 import type { MeResponse } from "./api/types";
 
 export type { Currency, GcMultiplier };
@@ -575,6 +576,12 @@ class GameState {
     this.activeUsername = null;
     this.lastPlayerPosition = null;
     clearToken();
+    // Drop the multiplayer presence socket too. It authenticates with the
+    // JWT just cleared, so leaving it up means a connection reconnecting
+    // forever against a credential that no longer exists - and, until it
+    // noticed, this account's avatar still standing on the casino floor
+    // after they signed out.
+    realtime.stop();
   }
 
   /** Persists the active profile's current state to localStorage. No-op if not logged in. */

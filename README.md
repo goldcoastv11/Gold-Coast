@@ -96,6 +96,40 @@ Output goes to `dist/`.
 
 - **Arrow keys / WASD** — move around
 - **E** — interact (talk to the chip attendant, sit at the table)
+- **😄 React** (top button row) — send an emote other players can see
+
+## Multiplayer
+
+The casino floor is shared. Other signed-in players walk around it in real
+time, wearing their own purchased wardrobe, with their username over their
+head, and can react to each other with a fixed set of emotes.
+
+**How it fits together**
+
+- One WebSocket per session, served by the same Express process at
+  `/realtime` (no second port — Railway exposes one).
+  `server/src/realtime/protocol.ts` is the wire format and the best place to
+  start reading; `presence.ts` is the room model; `server.ts` is the socket
+  adapter.
+- The browser end is `src/api/realtime.ts` (one long-lived connection owned
+  at module scope, not by a scene) and
+  `src/scenes/overworld/RemotePlayers.ts` (drawing, reusing the same
+  `LayeredCharacter` stack as the local player, so other people's outfits
+  are the real pieces).
+
+**Two properties worth knowing before changing anything here**
+
+1. **This channel carries presence only.** No bet, balance, item or round
+   goes over it — those all stay on the authenticated HTTP API, unchanged.
+   That is what makes it safe for position to be client-reported: a forged
+   position moves a cosmetic avatar and reaches nothing else.
+2. **Losing it degrades to single-player, never to a broken game.** Every
+   failure path ends with the floor still fully playable; nothing waits on
+   the socket, and no code path in `OverworldScene` depends on it existing.
+
+Emotes are a closed vocabulary and there is deliberately no chat — see
+`src/ui/EmotePanel.ts` for why that is a product decision rather than an
+unfinished feature.
 
 ## Art credits
 

@@ -112,6 +112,7 @@ phones.
 | Currency ledger | `server/src/economy/ledger.ts` |
 | Game payout logic | `server/src/games/`, settle helpers in `shared.ts` |
 | Challenges / XP / levels | `server/src/progression/` |
+| Multiplayer presence | `server/src/realtime/` (protocol → presence → server), `src/api/realtime.ts`, `src/scenes/overworld/` |
 
 **Catalogs are duplicated client-side and server-side, not shared** (`wardrobeCatalog`,
 `furnitureCatalog`, `roomCatalog`, `itemCatalog`) - the server's Docker build context is scoped to
@@ -121,6 +122,33 @@ before concluding that. All four currently agree (verified, not assumed) and are
 same-named "client and server catalogues agree" test in each of
 `src/{wardrobe,furniture,room,item}Catalog.test.ts`, which fails loudly if only one side is edited -
 run those (or the whole suite) after changing either one, and change both files together.
+
+The realtime protocol is duplicated the same way and for the same reason (`server/src/realtime/
+protocol.ts` ↔ `src/api/realtimeProtocol.ts`), guarded by `src/api/realtimeProtocol.test.ts`. Its
+failure mode is nastier than a catalog's: a drifted emote list or path produces a client that
+connects and handshakes fine and then has every message silently rejected, which looks exactly like
+"the server is down".
+
+# Multiplayer — the boundary that must not move
+
+The WebSocket channel at `/realtime` carries **presence only**: position, facing, and a closed set
+of emotes. Nothing on it moves money, grants an item, records progress, or settles a round — all of
+that stays on the authenticated HTTP API, server-authoritative, exactly as before.
+
+Two rules follow, and both are load-bearing:
+
+- **Position is client-reported, and that is fine** *only because* it is cosmetic. A forged position
+  moves an avatar and reaches nothing else. If a new message on this channel ever touches state that
+  matters, it must not inherit that trust — settle it over HTTP and let the socket only announce it.
+- **Emotes are a closed vocabulary, not a text field.** Founder decision 2026-09-02, when
+  multiplayer was scoped: nothing a player types reaches another player's screen. That is what buys
+  this product no profanity filter, no moderation queue, no report flow, and no user-generated-
+  content retention question while compliance work is paused. Adding free-text chat reverses that
+  decision — it needs the founder, not a follow-up PR.
+
+Presence is in-memory and single-process, like the rate-limit buckets in `routes/events.ts`. If a
+second Railway instance is ever added, players on one would not see players on the other — that is
+the day this needs a shared backplane, and nothing before it does.
 
 ---
 
