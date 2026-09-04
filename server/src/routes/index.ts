@@ -29,6 +29,7 @@ import "./me";
 import "./position";
 import "./progression";
 import "./room";
+import "./servers";
 import "./wardrobe";
 
 export { getRegisteredRoutes } from "./registry";

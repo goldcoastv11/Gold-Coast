@@ -45,9 +45,28 @@ async function main() {
   console.log("boot: app module loaded (stage 3 done)");
 
   console.log("boot: calling app.listen (stage 4)");
-  app.listen(env.PORT, "0.0.0.0", () => {
+  const server = app.listen(env.PORT, "0.0.0.0", () => {
     console.log(`casino-poc server listening on http://0.0.0.0:${env.PORT} (stage 4 done)`);
   });
+
+  // Stage 5: the realtime presence channel (see realtime/server.ts). It
+  // shares this HTTP server rather than binding a second port - Railway
+  // exposes exactly one, and an upgrade on the same origin inherits the
+  // TLS termination the API already has.
+  //
+  // Attached AFTER listen deliberately: `ws` only needs to register an
+  // "upgrade" listener, so ordering doesn't matter for correctness, but
+  // doing it here means a failure in this stage cannot stop the HTTP API
+  // from having come up - the game degrades to single-player rather than
+  // to nothing.
+  console.log("boot: importing ./realtime/server (stage 5)");
+  try {
+    const { attachRealtime, REALTIME_PATH } = await import("./realtime/server");
+    attachRealtime(server);
+    console.log(`boot: realtime channel attached at ${REALTIME_PATH} (stage 5 done)`);
+  } catch (err) {
+    console.error("boot: realtime channel FAILED to attach - continuing without multiplayer", err);
+  }
 }
 
 main().catch((err) => {

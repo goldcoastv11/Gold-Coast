@@ -66,6 +66,7 @@ import {
 import { DEFAULT_PIECE_ID as ROOM_DEFAULT_PIECE_ID, EquippedRoom, RoomSlot } from "./roomCatalog";
 import { FurnitureSlotId, PlacedFurniture } from "./furnitureCatalog";
 import { clearToken } from "./api/client";
+import { realtime } from "./api/realtime";
 import type { MeResponse } from "./api/types";
 
 export type { Currency, GcMultiplier };
@@ -263,6 +264,19 @@ class GameState {
    * calls GET /progression instead of deriving it from these two numbers -
    * the XP curve lives on the server and stays there.
    */
+  /**
+   * The multiplayer server the player picked in the server browser, or null
+   * if they haven't picked one this session.
+   *
+   * Session-only and deliberately NOT persisted: servers are in-memory on
+   * the backend and do not survive a restart (see
+   * server/src/realtime/gameServers.ts), so a remembered id from yesterday
+   * would be a private server that no longer exists. Held here rather than
+   * only on the realtime client because OverworldScene is recreated on
+   * every visit and needs to know which server to re-enter.
+   */
+  activeServerId: string | null = null;
+
   playerLevel = 1;
   playerXp = 0;
 
@@ -575,6 +589,15 @@ class GameState {
     this.activeUsername = null;
     this.lastPlayerPosition = null;
     clearToken();
+    // The chosen server goes with the session. Servers are in-memory on the
+    // backend, so a remembered id would be stale by the next sign-in anyway.
+    this.activeServerId = null;
+    // Drop the multiplayer presence socket too. It authenticates with the
+    // JWT just cleared, so leaving it up means a connection reconnecting
+    // forever against a credential that no longer exists - and, until it
+    // noticed, this account's avatar still standing on the casino floor
+    // after they signed out.
+    realtime.stop();
   }
 
   /** Persists the active profile's current state to localStorage. No-op if not logged in. */

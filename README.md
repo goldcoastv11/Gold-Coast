@@ -96,6 +96,107 @@ Output goes to `dist/`.
 
 - **Arrow keys / WASD** — move around
 - **E** — interact (talk to the chip attendant, sit at the table)
+- **😄 React** (top button row) — send an emote other players can see
+
+## Multiplayer
+
+The casino floor is shared. Other signed-in players walk around it in real
+time, wearing their own purchased wardrobe, with their username over their
+head, and can react to each other with a fixed set of emotes.
+
+**How it fits together**
+
+- One WebSocket per session, served by the same Express process at
+  `/realtime` (no second port — Railway exposes one).
+  `server/src/realtime/protocol.ts` is the wire format and the best place to
+  start reading; `presence.ts` is the room model; `server.ts` is the socket
+  adapter.
+- The browser end is `src/api/realtime.ts` (one long-lived connection owned
+  at module scope, not by a scene) and
+  `src/scenes/overworld/RemotePlayers.ts` (drawing, reusing the same
+  `LayeredCharacter` stack as the local player, so other people's outfits
+  are the real pieces).
+
+**Two properties worth knowing before changing anything here**
+
+1. **This channel carries presence only.** No bet, balance, item or round
+   goes over it — those all stay on the authenticated HTTP API, unchanged.
+   That is what makes it safe for position to be client-reported: a forged
+   position moves a cosmetic avatar and reaches nothing else.
+2. **Losing it degrades to single-player, never to a broken game.** Every
+   failure path ends with the floor still fully playable; nothing waits on
+   the socket, and no code path in `OverworldScene` depends on it existing.
+
+Emotes are a closed vocabulary and there is deliberately no chat — see
+`src/ui/EmotePanel.ts` for why that is a product decision rather than an
+unfinished feature.
+
+### Choosing a server
+
+The arcade is instanced. "ENTER ARCADE" now opens a **server browser** instead of dropping you
+straight onto one shared floor:
+
+- **Public servers** — three of them, listed with live player counts. Join and you share that
+  floor and its tables with whoever else is on it.
+- **Private server** — creates a table of your own and gives you a **join code**. It is never
+  listed, so only people you give the code to can get in. The code is shown once, on creation, and
+  no route hands it out again.
+- **Enter code** — type a code somebody gave you.
+
+Each server owns its own floor, its own Roulette wheel and its own Blackjack table
+(`server/src/realtime/gameServers.ts`). Players on different servers never see each other and never
+sit at the same table. Servers live in memory, so private ones don't survive a backend restart;
+public ones are re-created identically. An empty private server is dropped after 15 minutes.
+
+### Live Blackjack
+
+Up to five players and a dealer, taking turns. Reach it from the **LIVE TABLE** button on the solo
+Blackjack screen; **SOLO TABLE** goes back. The solo game is unchanged.
+
+A hand runs betting (15s) → dealing → each seated player acting in turn (12s each) → the dealer →
+results (6s), continuously, on the server's clock. Run out of time on your turn and the table
+stands for you — which never busts a hand you might have won with, and keeps everyone else moving.
+
+Same paytable as the solo game: win 2x, push returns your stake, lose nothing back. (A natural pays
+the same 2x rather than the traditional 3:2, because that is what the solo game pays and the same
+hand paying differently on two screens would be worse than the missing bonus.)
+
+Two things the server, not the client, decides: **whose turn it is**, and **when the dealer's hole
+card is revealed**. Neither is ever in a payload early.
+
+### Live Roulette
+
+The second multiplayer piece: one wheel, everybody at the table betting on
+the same spin. Reach it from the **LIVE TABLE** button on the solo Roulette
+screen; **SOLO TABLE** goes back. The solo game is unchanged — same wheel,
+same paytable, still there.
+
+A round runs betting (12s) → spinning (5s) → results (5s), continuously, on
+the server's clock. `server/src/realtime/rouletteTable.ts` is the state
+machine (no timers, no database, no sockets — driven by the realtime tick,
+which is what makes it testable); `tableSettlement.ts` is the only part of
+the whole multiplayer feature that moves a balance.
+
+Two things about it are worth knowing:
+
+- **Bets go over HTTP** (`POST /games/roulette/table/bet`), authenticated,
+  exactly like every other wager in this product. The socket is how the
+  table is watched, never how it is played — there is no bet message in the
+  protocol at all, and a test asserts that sending one is rejected.
+- **A round settles in one transaction per player, when the wheel stops.**
+  Nothing is debited when a bet is placed. The alternative — debit now,
+  credit later — strands a player's stake if the process restarts between
+  the two, and this table runs unattended and forever. The cost is that
+  someone can bet and then spend the same coins elsewhere before the spin;
+  when that happens the ledger refuses their wager, their bet is voided
+  (nothing taken, nothing paid, and they are told), and everyone else's
+  round settles normally.
+
+Live-table rounds land in the ledger through the same `settleSingleShotBet`
+helper as the solo games, under the same `roulette` game name, so they count
+toward challenges and XP identically and show up in the daily metrics as
+roulette. The transaction metadata carries `table: true` to tell the two
+modes apart.
 
 ## Art credits
 

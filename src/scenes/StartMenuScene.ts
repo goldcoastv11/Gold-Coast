@@ -70,7 +70,7 @@ export class StartMenuScene extends Phaser.Scene {
       "ENTER ARCADE",
       Theme.accent,
       Theme.accentHover,
-      () => fadeToScene(this, "OverworldScene", { startTutorial: data?.startTutorial })
+      () => fadeToScene(this, "ServerBrowserScene", { startTutorial: data?.startTutorial })
     );
 
     makeButton(this, cx, 435, 160, 36, "LOG OUT", Theme.neutral, Theme.neutralHover, () => {
