@@ -6,6 +6,7 @@ export default defineConfig({
     open: true
   },
   build: {
+    rollupOptions: { input: { main: "index.html", mobile: "mobile.html" } },
     outDir: "dist"
   }
 });
