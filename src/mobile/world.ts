@@ -1,4 +1,5 @@
 import * as T from 'three';
+import { STATIONS, Station } from './catalog';
 
 export type Look = { shirt: string; skin: string; hair: string };
 export type Person = { id: string; name: string; x: number; z: number; yaw: number; look: Look; seated: boolean };
@@ -49,9 +50,10 @@ export class ClubWorld {
   private pitch = .35;
   private previous = performance.now();
   private walkTime = 0;
-  private dealer: Figure;
-  pose = { x: -2, z: 5, yaw: Math.PI };
-  mode: 'welcome' | 'lobby' | 'table' | 'wardrobe' = 'welcome';
+  private dealers: Figure[] = [];
+  activeStation: Station = STATIONS[0];
+  pose = { x: -2, z: 2, yaw: Math.PI };
+  mode: 'welcome' | 'lobby' | 'table' | 'wardrobe' | 'quickplay' | 'arcade' = 'welcome';
   enabled = true;
   onFrame: () => void = () => {};
   constructor(host: HTMLElement, look: Look) {
@@ -73,18 +75,22 @@ export class ClubWorld {
     const subtitle = label('THE SOCIAL CLUB', 3.5, .8); subtitle.position.set(0, 2.55, -8.04); this.scene.add(subtitle);
     for (const x of [-11, 11]) { box(this.scene, x, .5, 0, .25, 1, 19, navy); for (const z of [-7, 0, 7]) box(this.scene, x, 2.3, z, .28, 4.6, .28, gold); }
     for (let i = 0; i < 24; i++) { const h = 1 + (i * 7 % 11) * .6; box(this.scene, (i - 12) * 3, h / 2 - 1, -28, 1.9, h, 2, material(i % 2 ? '#536d7c' : '#3f5669')); }
-    const felt = cylinder(this.scene, 0, 1.1, -2, 2.4, .2, green); felt.scale.z = .65;
-    const rim = cylinder(this.scene, 0, 1, -2, 2.52, .15, gold); rim.scale.z = .65;
-    cylinder(this.scene, 0, .5, -2, .65, 1, navy);
-    const sign = label('BLACKJACK', 2, .5); sign.rotation.x = -Math.PI / 2; sign.position.set(0, 1.22, -1.8); this.scene.add(sign);
-    for (const x of [-1.8, -.6, .6, 1.8]) { cylinder(this.scene, x, .55, .2, .34, .18, gold); cylinder(this.scene, x, .27, .2, .10, .5, navy); }
-    this.dealer = figure({ shirt: '#f3e6cd', skin: '#c68b60', hair: '#302922' }); this.dealer.group.position.set(0, 0, -3.8); this.scene.add(this.dealer.group);
+    for (const station of STATIONS) {
+      const { x, z } = station;
+      const felt = cylinder(this.scene, x, 1.1, z, 2.4, .2, material(station.color)); felt.scale.z = .65;
+      const rim = cylinder(this.scene, x, 1, z, 2.52, .15, gold); rim.scale.z = .65;
+      cylinder(this.scene, x, .5, z, .65, 1, navy);
+      const sign = label(station.name.toUpperCase(), 3.8, .65); sign.position.set(x, 2.9, z - 1.6); this.scene.add(sign);
+      for (const dx of [-1.8, -.6, .6, 1.8]) { cylinder(this.scene, x + dx, .55, z + 2.2, .34, .18, gold); cylinder(this.scene, x + dx, .27, z + 2.2, .10, .5, navy); }
+      const dealer = figure({ shirt: '#f3e6cd', skin: '#c68b60', hair: '#302922' }); dealer.group.position.set(x, 0, z - 1.8); this.scene.add(dealer.group); this.dealers.push(dealer);
+      if (station.game === 'roulette') { cylinder(this.scene, x, 1.3, z, .7, .1, gold); cylinder(this.scene, x, 1.37, z, .57, .06, material('#652d37')); }
+      if (station.game === 'slots') { box(this.scene, x, 1.7, z, 1.5, 1.2, .35, navy); const reels = label('7   7   7', 1.3, .45); reels.position.set(x, 1.8, z + .2); this.scene.add(reels); }
+    }
     for (const x of [-8, 8]) {
       for (const z of [-5, 6]) {
         cylinder(this.scene, x, .45, z, .65, .9, navy); cylinder(this.scene, x, 1.8, z, .12, 2.8, gold);
         for (let i = 0; i < 7; i++) { const leaf = new T.Mesh(new T.SphereGeometry(1, 8, 5), green); leaf.scale.set(.24, .10, 1.6); leaf.rotation.set(.3, i * Math.PI * 2 / 7, .15); leaf.position.set(x + Math.sin(i) * .35, 3.2, z); this.scene.add(leaf); }
       }
-      box(this.scene, x, .55, 1, 2, .8, 2.5, navy); box(this.scene, x, 1.05, -.1, 2, .7, .3, green);
     }
     this.self = figure(look); this.scene.add(this.self.group);
     this.camera.position.set(10, 7, 12); this.camera.lookAt(0, 1, -2);
@@ -129,7 +135,7 @@ export class ClubWorld {
       const dx = x * Math.cos(this.yaw) + z * Math.sin(this.yaw), dz = z * Math.cos(this.yaw) - x * Math.sin(this.yaw);
       const nx = T.MathUtils.clamp(this.pose.x + dx * dt * 4, -9.8, 9.8), nz = T.MathUtils.clamp(this.pose.z + dz * dt * 4, -7, 8.8);
       // Keep the player outside the table and seating furniture.
-      const blocked = (nx / 2.95) ** 2 + ((nz + 2) / 2) ** 2 < 1 || (Math.abs(nx) > 6.7 && Math.abs(nx) < 9.3 && nz > -.7 && nz < 2.7);
+      const blocked = STATIONS.some(t => ((nx - t.x) / 2.95) ** 2 + ((nz - t.z) / 2) ** 2 < 1);
       if (!blocked) { this.pose.x = nx; this.pose.z = nz; }
       moving = Math.hypot(dx, dz) > .05 && !blocked;
       if (moving) this.pose.yaw = Math.atan2(dx, dz);
@@ -142,12 +148,12 @@ export class ClubWorld {
     this.self.limbs.forEach((l, i) => l.rotation.x = moving ? Math.sin(this.walkTime) * .5 * (i < 2 ? 1 : -1) : 0);
     const target = new T.Vector3(), aim = new T.Vector3();
     if (this.mode === 'welcome') { target.set(10, 7, 12); aim.set(0, 1, -2); }
-    else if (this.mode === 'table') { target.set(0, 3.9, 3.8); aim.set(0, 1.1, -2.8); }
+    else if (this.mode === 'table') { const t = this.activeStation; target.set(t.x, 3.9, t.z + 5.8); aim.set(t.x, 1.1, t.z - .8); }
     else if (this.mode === 'wardrobe') { target.set(this.pose.x + 1.1, 1.9, this.pose.z + 3.8); aim.set(this.pose.x, 1.05, this.pose.z); this.self.group.rotation.y = .2; }
     else { target.set(T.MathUtils.clamp(this.pose.x + Math.sin(this.yaw) * 4.8, -10.5, 10.5), 1.6 + this.pitch * 5, T.MathUtils.clamp(this.pose.z + Math.cos(this.yaw) * 4.8, -7.8, 10)); aim.set(this.pose.x, 1.35, this.pose.z); }
     this.camera.position.lerp(target, 1 - Math.exp(-dt * 7)); this.camera.lookAt(aim);
-    for (const { figure: f, data: p } of this.people.values()) { const distance = Math.hypot(f.group.position.x - p.x, f.group.position.z - p.z); f.group.position.lerp(new T.Vector3(p.x, 0, p.z), 1 - Math.exp(-dt * 12)); f.group.rotation.y = p.yaw; f.limbs.forEach((l, i) => l.rotation.x = distance > .08 ? Math.sin(now * .01) * .4 * (i < 2 ? 1 : -1) : 0); }
-    this.dealer.group.rotation.y = Math.sin(now * .0005) * .06;
+    for (const { figure: f, data: p } of this.people.values()) { const distance = Math.hypot(f.group.position.x - p.x, f.group.position.z - p.z); f.group.position.lerp(new T.Vector3(p.x, p.seated ? -.2 : 0, p.z), 1 - Math.exp(-dt * 12)); f.group.rotation.y = p.yaw; f.limbs.forEach((l, i) => l.rotation.x = p.seated ? (i % 2 === 0 ? -1.3 : -.4) : distance > .08 ? Math.sin(now * .01) * .4 * (i < 2 ? 1 : -1) : 0); }
+    for (const dealer of this.dealers) dealer.group.rotation.y = Math.sin(now * .0005) * .06;
     this.onFrame(); this.renderer.render(this.scene, this.camera);
   }
 }

@@ -8,7 +8,7 @@ const look: Look = { shirt: '#27c6b5', skin: '#c68b60', hair: '#302922' };
 describe('mobile multiplayer practice rooms', () => {
   let now: number, rooms: RoomService, code: string;
   beforeEach(() => { now = 100000; rooms = new RoomService(() => now, max => max - 1); code = rooms.join('a', 'Alice', undefined, look).code; });
-  const pose = { x: 0, z: 1, yaw: 0, look };
+  const pose = { x: -4, z: 1, yaw: 0, look };
   function approach(id: string) { for (let i = 0; i < 6; i++) { now += 200; rooms.sync(id, code, pose); } }
   function seat(id: string) { approach(id); const s = rooms.sync(id, code); return rooms.action(id, code, 'sit', s.table.revision); }
   function twoPlayers() { rooms.join('b', 'Bob', code, look); seat('a'); return seat('b'); }
@@ -21,7 +21,7 @@ describe('mobile multiplayer practice rooms', () => {
   it('rejects a distant seat request and bounds movement speed', () => {
     expect(() => rooms.action('a', code, 'sit', 0)).toThrow('closer');
     const p = rooms.sync('a', code, { ...pose, x: 10, z: -7 }).players[0];
-    expect(Math.hypot(p.x + 2, p.z - 5)).toBeLessThanOrEqual(.151);
+    expect(Math.hypot(p.x + 2, p.z - 2.2)).toBeLessThanOrEqual(.151);
   });
   it('keeps the deck and dealer hole card secret while players share a round', () => {
     const seated = twoPlayers(); const s = rooms.action('a', code, 'deal', seated.table.revision);
@@ -63,6 +63,26 @@ describe('mobile multiplayer practice rooms', () => {
   });
   it('rejoining is idempotent and does not clear a seat', () => {
     seat('a'); expect(rooms.join('a', 'Alice', code, look).players[0].seated).toBe(true);
+  });
+  it('runs independent hands at two tables and rejects actions aimed at the other table', () => {
+    rooms.join('b', 'Bob', code, look);
+    let a = rooms.action('a', code, 'sit', 0, 'palm', true);
+    let b = rooms.action('b', code, 'sit', 0, 'coast', true);
+    a = rooms.action('a', code, 'deal', a.table.revision);
+    b = rooms.action('b', code, 'deal', b.table.revision);
+    expect(a.table.hands.map(h => h.id)).toEqual(['a']);
+    expect(b.table.hands.map(h => h.id)).toEqual(['b']);
+    expect(() => rooms.action('a', code, 'hit', b.table.revision, 'coast')).toThrow('Leave your current table');
+    rooms.action('a', code, 'stand', a.table.revision);
+    expect(rooms.sync('b', code).table).toEqual(b.table);
+  });
+  it('assigns distinct chairs and enforces four seats separately at each table', () => {
+    for (let i = 1; i < 5; i++) rooms.join(String(i), `Player${i}`, code, look);
+    let s = rooms.action('a', code, 'sit', 0, 'palm', true);
+    for (let i = 1; i < 4; i++) s = rooms.action(String(i), code, 'sit', s.table.revision, 'palm', true);
+    expect(new Set(s.players.filter(p => p.seated).map(p => p.seat)).size).toBe(4);
+    expect(() => rooms.action('4', code, 'sit', s.table.revision, 'palm', true)).toThrow('four seats');
+    expect(rooms.action('4', code, 'sit', 0, 'coast', true).table.id).toBe('coast');
   });
   it('protects the HTTP endpoints and validates coordinates and customization', async () => {
     expect((await request(app).post('/multiplayer/join').send({ look })).status).toBe(401);

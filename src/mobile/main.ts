@@ -1,8 +1,10 @@
 import { ClubWorld, Look, Person } from './world';
 import { API_BASE_URL, getToken, setToken, clearToken, login, signup, getMe } from '../api/client';
 import './style.css';
+import { GAMES, STATIONS, nearestStation, GameId, Station } from './catalog';
+import { RoomService, TableId } from '../../server/src/multiplayer/room';
 
-type Snapshot = { code: string; self: string; players: Person[]; table: { phase: 'waiting' | 'playing' | 'resolved'; revision: number; dealer: number[]; hands: { id: string; name: string; cards: number[]; total: number; done: boolean; result: string | null }[]; turn: string | null; remainingMs: number } };
+type Snapshot = ReturnType<RoomService['join']>;
 const palette = { shirt: ['#27c6b5', '#e9ae54', '#a78bfa', '#f47591'], skin: ['#f0c5a3', '#c68b60', '#865338', '#51362a'], hair: ['#302922', '#ac733b', '#e9ce8a'] };
 let look: Look = { shirt: palette.shirt[0], skin: palette.skin[1], hair: palette.hair[0] };
 try { const saved = JSON.parse(localStorage.getItem('gc3d-look') || 'null'); for (const k of Object.keys(palette) as (keyof Look)[]) if (palette[k].includes(saved?.[k])) look[k] = saved[k]; } catch { /* Storage is optional. */ }
@@ -22,6 +24,14 @@ try { world = new ClubWorld(root, look); }
 catch { root.innerHTML = '<div class="fallback"><h1>This device couldn’t start the 3D lounge.</h1><p>Try a recent version of Safari or Chrome with graphics acceleration enabled.</p><a href="/">Return to the original arcade</a></div>'; throw new Error('WebGL unavailable'); }
 world.controls(el('joystick'), el('nub'), el('look-area'));
 let snapshot: Snapshot | null = null, busy = false, connected = false, touring = false, inWardrobe = false, signedIn = false;
+const practice = new RoomService();
+let quickplayOpen = false, arcadeOpen = false, returnToQuickplay = false, quickplayOrigin: 'welcome' | 'lobby' = 'lobby';
+let frame: HTMLIFrameElement | null = null;
+root.insertAdjacentHTML('beforeend', `<section id="quickplay" hidden><div class="quickplay-heading"><div><div class="eyebrow">SKIP THE WALK. FIND YOUR GAME.</div><h2>Quickplay</h2><p id="quickplay-note">Every game, one tap away.</p></div><button id="close-quickplay">Back to lounge</button></div><label class="game-search">Find a game<input id="game-search" type="search" placeholder="Search all 14 games" /></label><div id="game-list"></div></section><section id="arcade-host" hidden><div id="arcade-loading"><p>Opening your game…</p><button id="cancel-arcade">Back to lounge</button></div></section>`);
+for (const [parent, id] of [['.lobby-actions', 'quickplay-button'], ['.entry-card', 'welcome-quickplay']]) {
+  const button = document.createElement('button'); button.id = id; button.textContent = 'Quickplay · All games'; button.className = 'quickplay-button'; document.querySelector(parent)!.prepend(button);
+}
+el('tour').textContent = 'Explore & play free blackjack →';
 let toastTimer: ReturnType<typeof setTimeout>;
 function notify(message: string) { el('toast').textContent = message; show('toast', true); clearTimeout(toastTimer); toastTimer = setTimeout(() => show('toast', false), 5500); }
 world.canvas.addEventListener('renderfailure', () => notify('Graphics were interrupted. Reload this page to continue.'));
@@ -50,28 +60,31 @@ el('login-form').onsubmit = e => { e.preventDefault(); void authenticate(false);
 el('signup').onclick = () => void authenticate(true);
 el('signout').onclick = () => { clearToken(); authUi(); };
 function setMode(mode: ClubWorld['mode']) {
-  world.mode = mode; world.resetInput(); show('welcome', mode === 'welcome'); show('lobby', mode === 'lobby'); show('wardrobe-panel', mode === 'wardrobe'); show('table-screen', mode === 'table');
+  world.mode = mode; world.resetInput(); show('welcome', mode === 'welcome'); show('lobby', mode === 'lobby'); show('wardrobe-panel', mode === 'wardrobe'); show('table-screen', mode === 'table'); show('quickplay', mode === 'quickplay'); show('arcade-host', mode === 'arcade');
 }
 function receive(data: Snapshot) {
-  snapshot = data; connected = true; world.enabled = true;
-  el('network').textContent = '● CONNECTED'; el('room-label').textContent = `Room ${data.code}`; el('population').textContent = `${data.players.length} / 8`;
+  snapshot = data; connected = true; world.enabled = !arcadeOpen;
+  el('network').textContent = touring ? 'SOLO PRACTICE · OFFLINE' : '● CONNECTED'; el('room-label').textContent = touring ? 'Solo practice' : `Room ${data.code}`; el('population').textContent = touring ? 'Just you' : `${data.players.length} / 8`;
   world.updatePlayers(data.players, data.self);
   const self = data.players.find(p => p.id === data.self)!;
   if (Math.hypot(world.pose.x - self.x, world.pose.z - self.z) > 1.3) { world.pose.x = self.x; world.pose.z = self.z; }
-  if (!inWardrobe) setModeIfChanged(self.seated ? 'table' : 'lobby');
+  if (self.tableId) world.activeStation = STATIONS.find(t => t.id === self.tableId)!;
+  if (!inWardrobe && !quickplayOpen && !arcadeOpen) setModeIfChanged(self.seated ? 'table' : 'lobby');
   renderTable();
 }
 function setModeIfChanged(mode: ClubWorld['mode']) { if (world.mode !== mode) setMode(mode); }
 el('join').onclick = async () => {
   if (busy) return; busy = true; el('join').textContent = 'Connecting…';
-  try { const code = el<HTMLInputElement>('room-code').value.trim().toUpperCase(); const data = await request<Snapshot>('join', { code: code || undefined, look }); touring = false; world.pose.x = data.players.find(p => p.id === data.self)!.x; world.pose.z = 5; receive(data); show('invite', true); }
+  try { const code = el<HTMLInputElement>('room-code').value.trim().toUpperCase(); const data = await request<Snapshot>('join', { code: code || undefined, look }); touring = false; const p = data.players.find(p => p.id === data.self)!; world.pose.x = p.x; world.pose.z = p.z; receive(data); show('invite', true); }
   catch (e) { notify(message(e)); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
   finally { busy = false; el('join').textContent = 'Enter the lounge ↗'; }
 };
-el('tour').onclick = () => { touring = true; snapshot = null; world.enabled = true; world.updatePlayers([], ''); world.pose = { x: -2, z: 5, yaw: Math.PI }; setMode('lobby'); el('network').textContent = 'SOLO TOUR · OFFLINE'; el('room-label').textContent = 'Explore at your pace'; el('population').textContent = 'Just you'; show('invite', false); };
+function startPractice() { touring = true; world.enabled = true; world.updatePlayers([], ''); snapshot = practice.join('solo', 'You', undefined, look); const p = snapshot.players[0]; world.pose = { x: p.x, z: p.z, yaw: Math.PI }; receive(snapshot); show('invite', false); }
+el('tour').onclick = startPractice;
 el('exit').onclick = async () => {
-  if (busy) return; const old = snapshot; snapshot = null; connected = false; touring = false; inWardrobe = false; world.updatePlayers([], ''); setMode('welcome'); el('network').textContent = 'MOBILE PREVIEW';
-  if (old) { busy = true; try { await request('leave', { code: old.code }); } catch { /* The server expires presence after 15 seconds. */ } finally { busy = false; } }
+  if (busy) return; const old = snapshot, wasTour = touring; snapshot = null; connected = false; touring = false; inWardrobe = false; world.updatePlayers([], ''); setMode('welcome'); el('network').textContent = 'MOBILE PREVIEW';
+  if (old && wasTour) practice.leave('solo', old.code);
+  else if (old) { busy = true; try { await request('leave', { code: old.code }); } catch { /* The server expires presence after 15 seconds. */ } finally { busy = false; } }
 };
 el('invite').onclick = async () => {
   if (!snapshot) return; const url = new URL(location.href); url.searchParams.set('room', snapshot.code);
@@ -89,41 +102,102 @@ let lastTable = '';
 function renderTable() {
   if (!snapshot) return;
   const t = snapshot.table, turn = t.turn === snapshot.self, fingerprint = JSON.stringify(t);
+  el('deal').textContent = touring ? 'Deal a hand' : 'Deal for the table';
+  document.querySelector('.table-heading .eyebrow')!.textContent = `${world.activeStation.name.toUpperCase()} · ${touring ? 'SOLO' : 'SHARED'} FREE PRACTICE`;
   if (fingerprint !== lastTable) {
     lastTable = fingerprint; el('dealer-cards').innerHTML = cards(t.dealer);
     el('hands').innerHTML = t.hands.length ? t.hands.map(h => `<div class="hand ${h.id === t.turn ? 'active' : ''} ${h.id === snapshot!.self ? 'mine' : ''}"><div class="hand-name">${escape(h.name)}${h.id === snapshot!.self ? ' · YOU' : ''}<b>${h.total}</b></div><div class="cards">${cards(h.cards)}</div><small>${h.result || (h.done ? 'Standing' : h.id === t.turn ? 'Playing…' : 'Waiting')}</small></div>`).join('') : '<p class="empty-table">Invite a friend to sit down, then deal the first hand.</p>';
   }
-  el('turn-status').textContent = t.phase === 'playing' ? `${turn ? 'Your turn' : `${t.hands.find(h => h.id === t.turn)?.name || 'Player'}’s turn`} · ${Math.ceil(t.remainingMs / 1000)}s` : t.phase === 'resolved' ? 'Hand complete. Ready for another?' : `${snapshot.players.filter(p => p.seated).length} / 4 seats filled`;
+  const empty = document.querySelector('.empty-table');
+  if (empty && touring) empty.textContent = 'Take your time. Deal a free hand against the dealer.';
+  el('turn-status').textContent = t.phase === 'playing' ? `${turn ? 'Your turn' : `${t.hands.find(h => h.id === t.turn)?.name || 'Player'}’s turn`} · ${Math.ceil(t.remainingMs / 1000)}s` : t.phase === 'resolved' ? 'Hand complete. Ready for another?' : `${snapshot.players.filter(p => p.tableId === t.id).length} / 4 seats filled`;
   show('deal', t.phase !== 'playing'); show('hit', t.phase === 'playing'); show('stand', t.phase === 'playing');
   for (const id of ['hit', 'stand']) el<HTMLButtonElement>(id).disabled = !turn || busy || !connected;
   el<HTMLButtonElement>('deal').disabled = busy || !connected;
 }
-async function action(action: string) {
-  if (touring) { notify('This is a solo tour. Sign in and create a room to play blackjack with friends.'); return; }
-  if (!snapshot || busy || !connected) return;
+async function action(action: 'sit' | 'leave' | 'deal' | 'hit' | 'stand', station?: Station, quick = false) {
+  if (!snapshot || busy || !connected) return false;
   busy = true; renderTable();
-  try { receive(await request<Snapshot>('action', { code: snapshot.code, action, revision: snapshot.table.revision })); }
-  catch (e) { notify(message(e)); } finally { busy = false; renderTable(); }
+  try {
+    const tableId = (station?.id ?? snapshot.table.id) as TableId;
+    const revision = snapshot.tables.find(t => t.id === tableId)!.revision;
+    receive(touring ? practice.action('solo', snapshot.code, action, revision, tableId, quick) : await request<Snapshot>('action', { code: snapshot.code, action, revision, tableId, quickplay: quick }));
+    if (action === 'leave' && returnToQuickplay) { returnToQuickplay = false; openQuickplay(); }
+    return true;
+  }
+  catch (e) { notify(message(e)); return false; } finally { busy = false; renderTable(); }
 }
-for (const [id, name] of [['sit', 'sit'], ['leave-table', 'leave'], ['deal', 'deal'], ['hit', 'hit'], ['stand', 'stand']]) el(id).onclick = () => void action(name);
+for (const [id, name] of [['leave-table', 'leave'], ['deal', 'deal'], ['hit', 'hit'], ['stand', 'stand']] as const) el(id).onclick = () => void action(name);
+el('sit').onclick = () => { const station = nearestStation(world.pose.x, world.pose.z); if (station) void launchGame(station.game, station, false); };
 world.onFrame = () => {
-  const near = Math.hypot(world.pose.x, world.pose.z + 2) < 3.9;
+  const station = nearestStation(world.pose.x, world.pose.z), near = !!station;
   show('sit', near); show('nearby', !near);
+  if (station) el('sit').innerHTML = `Sit & play <span>${escape(station.name.toUpperCase())}</span>`;
+  el('nearby').textContent = 'Walk to a table or choose Quickplay';
   el<HTMLButtonElement>('sit').disabled = !touring && (!connected || busy);
 };
 // Serial polling prevents stale responses from overwriting a completed action.
 async function poll() {
   if (snapshot && !busy && !document.hidden) {
     busy = true;
-    try { receive(await request<Snapshot>('sync', { code: snapshot.code, pose: { ...world.pose, look } })); }
+    try { receive(touring ? practice.sync('solo', snapshot.code, { ...world.pose, look }) : await request<Snapshot>('sync', { code: snapshot.code, pose: { ...world.pose, look } })); }
     catch (e) {
       connected = false; world.resetInput(); world.enabled = false; el('network').textContent = 'CONNECTION LOST · RETRYING'; renderTable();
-      if (e instanceof RoomRequestError && (e.status === 404 || e.status === 401)) { snapshot = null; inWardrobe = false; setMode('welcome'); world.enabled = true; el('network').textContent = 'ROOM SESSION ENDED'; notify(message(e)); if (e.status === 401) { clearToken(); authUi(); } }
+      if ((e instanceof RoomRequestError && (e.status === 404 || e.status === 401)) || touring) { snapshot = null; inWardrobe = false; if (!arcadeOpen) { quickplayOpen = false; setMode('welcome'); } world.enabled = true; el('network').textContent = 'ROOM SESSION ENDED'; notify(message(e)); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
     } finally { busy = false; renderTable(); }
   }
   setTimeout(() => void poll(), connected ? 180 : 1200);
 }
 void poll();
+function openQuickplay() {
+  quickplayOrigin = snapshot ? 'lobby' : 'welcome'; quickplayOpen = true; setMode('quickplay'); renderGameList(); el<HTMLInputElement>('game-search').value = '';
+}
+function closeQuickplay() { quickplayOpen = false; setMode(snapshot ? 'lobby' : quickplayOrigin); }
+el('quickplay-button').onclick = el('welcome-quickplay').onclick = openQuickplay;
+el('close-quickplay').onclick = closeQuickplay;
+function renderGameList(query = '') {
+  el('quickplay-note').textContent = 'Blackjack: free solo or shared tables. Other games: sign in to play with Gold Coins.';
+  const list = el('game-list'); list.replaceChildren();
+  for (const game of GAMES.filter(g => `${g.name} ${g.category}`.toLowerCase().includes(query.toLowerCase()))) {
+    const button = document.createElement('button'); button.className = 'game-choice';
+    button.innerHTML = `<span class="game-icon">${game.icon}</span><span><b>${game.name}</b><small>${game.description}</small><em>${game.id === 'blackjack' ? 'FREE PRACTICE · 2 TABLES' : 'GOLD COINS · ONLINE'}</em></span><span class="game-arrow">↗</span>`;
+    button.onclick = () => void launchGame(game.id, undefined, true); list.append(button);
+  }
+  if (!list.children.length) list.textContent = 'No games match your search.';
+}
+el<HTMLInputElement>('game-search').oninput = e => renderGameList((e.target as HTMLInputElement).value);
+async function launchGame(id: GameId, station?: Station, quick = false) {
+  if (busy || arcadeOpen) return;
+  if (id === 'blackjack') {
+    if (!snapshot) startPractice();
+    station ??= STATIONS.find(s => s.game === 'blackjack' && snapshot!.tables.some(t => t.id === s.id && t.phase !== 'playing' && t.seats < 4));
+    if (!station) { notify('Both blackjack tables are busy. Try again after a hand finishes.'); return; }
+    const ok = await action('sit', station, quick);
+    if (ok) { returnToQuickplay = quick; quickplayOpen = false; setMode('table'); }
+    return;
+  }
+  if (!getToken()) { notify('Sign in to play this game with Gold Coins. Free blackjack is available now.'); return; }
+  busy = true;
+  try {
+    const me = await getMe();
+    if (me.activeRound) { notify('Finish or leave your existing arcade hand before opening another game.'); return; }
+    const game = GAMES.find(g => g.id === id)!;
+    returnToQuickplay = quick; arcadeOpen = true; quickplayOpen = false; setMode('arcade'); world.enabled = false;
+    frame = document.createElement('iframe'); frame.title = `${game.name} game`; frame.src = `/index.html?mobileGame=1&game=${game.id}`; frame.allow = 'fullscreen';
+    el('arcade-host').prepend(frame); show('arcade-loading', true);
+  } catch (e) { notify(message(e)); }
+  finally { busy = false; }
+}
+function closeArcade() {
+  frame?.remove(); frame = null; arcadeOpen = false; world.enabled = true;
+  if (returnToQuickplay) { returnToQuickplay = false; openQuickplay(); } else setMode(snapshot ? 'lobby' : 'welcome');
+}
+el('cancel-arcade').onclick = closeArcade;
+window.addEventListener('message', e => {
+  if (!frame || e.source !== frame.contentWindow || e.origin !== location.origin) return;
+  if (e.data?.type === 'gc-game-ready') show('arcade-loading', false);
+  if (e.data?.type === 'gc-game-exit') closeArcade();
+});
 el('fullscreen').onclick = async () => {
   try { if (document.fullscreenElement) await document.exitFullscreen(); else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen(); else notify('For a full-screen view, add Gold Coast to your phone’s Home Screen.'); }
   catch { notify('Fullscreen isn’t available here. You can still play sideways.'); }

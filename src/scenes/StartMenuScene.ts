@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, notifyLounge } from '../mobile/arcadeBridge';
 import { gameState } from "../GameState";
 import { Theme } from "../ui/Theme";
 import { makeButton, makePanel } from "../ui/uiHelpers";
@@ -18,6 +19,8 @@ export class StartMenuScene extends Phaser.Scene {
   }
 
   create(data: StartMenuData) {
+    const requested = embeddedGame();
+    if (requested) { this.scene.start(requested.scene); notifyLounge('gc-game-ready'); return; }
     fadeInOnCreate(this);
     this.cameras.main.setBackgroundColor(Theme.bgDark);
 

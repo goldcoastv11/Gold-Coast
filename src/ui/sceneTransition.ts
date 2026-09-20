@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, notifyLounge } from '../mobile/arcadeBridge';
 
 /**
  * Shared smooth scene-transition helper - per user request ("the camera
@@ -48,6 +49,7 @@ const FADE_B = 0x1b;
  * target scene's own `create()`.
  */
 export function fadeToScene(scene: Phaser.Scene, key: string, data?: object): void {
+  if (key === 'OverworldScene' && embeddedGame()) { scene.scene.stop(); notifyLounge('gc-game-exit'); return; }
   scene.cameras.main.fadeOut(FADE_MS, FADE_R, FADE_G, FADE_B);
   scene.cameras.main.once(Phaser.Cameras.Scene2D.Events.FADE_OUT_COMPLETE, () => {
     scene.scene.start(key, data);
