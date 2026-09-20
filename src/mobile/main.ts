@@ -1,6 +1,8 @@
 import { ClubWorld, Look, Person } from './world';
 import { API_BASE_URL, getToken, setToken, clearToken, login, signup, getMe } from '../api/client';
 import './style.css';
+import './quickplay.css';
+import { ResultTracker, TableAudio, resultTone } from './feedback';
 import { GAMES, STATIONS, nearestStation, GameId, Station } from './catalog';
 import { RoomService, TableId } from '../../server/src/multiplayer/room';
 
@@ -25,11 +27,25 @@ catch { root.innerHTML = '<div class="fallback"><h1>This device couldn’t start
 world.controls(el('joystick'), el('nub'), el('look-area'));
 let snapshot: Snapshot | null = null, busy = false, connected = false, touring = false, inWardrobe = false, signedIn = false;
 const practice = new RoomService();
-let quickplayOpen = false, arcadeOpen = false, returnToQuickplay = false, quickplayOrigin: 'welcome' | 'lobby' = 'lobby';
+let quickplayOpen = false, arcadeOpen = false, returnToQuickplay = false;
+let category = 'All games';
+const resultTracker = new ResultTracker(), tableAudio = new TableAudio();
+document.addEventListener('pointerdown', () => tableAudio.unlock(), { capture: true });
+document.addEventListener('keydown', () => tableAudio.unlock(), { capture: true });
 let frame: HTMLIFrameElement | null = null;
 root.insertAdjacentHTML('beforeend', `<section id="quickplay" hidden><div class="quickplay-heading"><div><div class="eyebrow">SKIP THE WALK. FIND YOUR GAME.</div><h2>Quickplay</h2><p id="quickplay-note">Every game, one tap away.</p></div><button id="close-quickplay">Back to lounge</button></div><label class="game-search">Find a game<input id="game-search" type="search" placeholder="Search all 14 games" /></label><div id="game-list"></div></section><section id="arcade-host" hidden><div id="arcade-loading"><p>Opening your game…</p><button id="cancel-arcade">Back to lounge</button></div></section>`);
 for (const [parent, id] of [['.lobby-actions', 'quickplay-button'], ['.entry-card', 'welcome-quickplay']]) {
   const button = document.createElement('button'); button.id = id; button.textContent = 'Quickplay · All games'; button.className = 'quickplay-button'; document.querySelector(parent)!.prepend(button);
+}
+el('quickplay').innerHTML = `<div class="catalog-top"><a class="catalog-brand" href="/mobile.html">G<span>GOLD COAST<small>PLAY YOUR WAY</small></span></a><div class="row"><button id="catalog-account">Sign in / Friends</button><button id="close-quickplay" class="primary">Enter lounge ↗</button></div></div><div class="catalog-content"><div class="catalog-intro"><div><div class="eyebrow">YOUR NEXT HAND STARTS HERE</div><h1>Quickplay</h1><p id="quickplay-note">All your favorites. Straight to the action.</p></div><span class="catalog-stamp">14 GAMES<br><small>ONE GOLD COAST</small></span></div><label class="game-search"><span>Find your game</span><input id="game-search" type="search" placeholder="Search games…" /></label><nav id="game-categories" aria-label="Game categories"></nav><div class="catalog-section"><h2>Gold Coast games</h2><span id="game-count"></span></div><div id="game-list"></div><p class="catalog-foot">Blackjack is free practice. Sign in for the other games with virtual Gold Coins.</p></div>`;
+el('table-screen').insertAdjacentHTML('beforeend', '<button id="table-sound" class="quiet">Sound on</button><div id="round-result" role="status" aria-live="polite" hidden><b></b><span></span></div>');
+function soundLabel() { el('table-sound').textContent = tableAudio.muted ? 'Sound off' : 'Sound on'; el('table-sound').setAttribute('aria-pressed', String(!tableAudio.muted)); }
+el('table-sound').onclick = () => { tableAudio.toggle(); soundLabel(); }; soundLabel();
+el('catalog-account').onclick = () => { quickplayOpen = false; setMode('welcome'); };
+for (const name of ['All games', 'Cards', 'Tables', 'Arcade']) {
+  const button = document.createElement('button'); button.textContent = name; button.setAttribute('aria-pressed', String(name === category));
+  button.onclick = () => { category = name; el('game-categories').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button))); renderGameList(el<HTMLInputElement>('game-search').value); };
+  el('game-categories').append(button);
 }
 el('tour').textContent = 'Explore & play free blackjack →';
 let toastTimer: ReturnType<typeof setTimeout>;
@@ -48,6 +64,7 @@ async function request<T>(path: string, body: unknown): Promise<T> {
 }
 function message(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong. Please try again.'; }
 function authUi(name?: string) {
+  el('catalog-account').textContent = name ? 'Account / Friends' : 'Sign in / Friends';
   signedIn = !!name; show('login-form', !signedIn); show('signed-in', signedIn); show('room-entry', signedIn); el('greeting').textContent = `Welcome back, ${name || ''}.`;
 }
 async function authenticate(create: boolean) {
@@ -60,29 +77,30 @@ el('login-form').onsubmit = e => { e.preventDefault(); void authenticate(false);
 el('signup').onclick = () => void authenticate(true);
 el('signout').onclick = () => { clearToken(); authUi(); };
 function setMode(mode: ClubWorld['mode']) {
+  document.body.dataset.mode = mode; world.enabled = mode !== 'quickplay' && mode !== 'arcade';
   world.mode = mode; world.resetInput(); show('welcome', mode === 'welcome'); show('lobby', mode === 'lobby'); show('wardrobe-panel', mode === 'wardrobe'); show('table-screen', mode === 'table'); show('quickplay', mode === 'quickplay'); show('arcade-host', mode === 'arcade');
 }
 function receive(data: Snapshot) {
-  snapshot = data; connected = true; world.enabled = !arcadeOpen;
+  snapshot = data; connected = true; world.enabled = !arcadeOpen && !quickplayOpen;
   el('network').textContent = touring ? 'SOLO PRACTICE · OFFLINE' : '● CONNECTED'; el('room-label').textContent = touring ? 'Solo practice' : `Room ${data.code}`; el('population').textContent = touring ? 'Just you' : `${data.players.length} / 8`;
   world.updatePlayers(data.players, data.self);
   const self = data.players.find(p => p.id === data.self)!;
   if (Math.hypot(world.pose.x - self.x, world.pose.z - self.z) > 1.3) { world.pose.x = self.x; world.pose.z = self.z; }
   if (self.tableId) world.activeStation = STATIONS.find(t => t.id === self.tableId)!;
-  if (!inWardrobe && !quickplayOpen && !arcadeOpen) setModeIfChanged(self.seated ? 'table' : 'lobby');
+  if (!inWardrobe && !quickplayOpen && !arcadeOpen && world.mode !== 'welcome') setModeIfChanged(self.seated ? 'table' : 'lobby');
   renderTable();
 }
 function setModeIfChanged(mode: ClubWorld['mode']) { if (world.mode !== mode) setMode(mode); }
 el('join').onclick = async () => {
   if (busy) return; busy = true; el('join').textContent = 'Connecting…';
-  try { const code = el<HTMLInputElement>('room-code').value.trim().toUpperCase(); const data = await request<Snapshot>('join', { code: code || undefined, look }); touring = false; const p = data.players.find(p => p.id === data.self)!; world.pose.x = p.x; world.pose.z = p.z; receive(data); show('invite', true); }
+  try { const code = el<HTMLInputElement>('room-code').value.trim().toUpperCase(); const data = await request<Snapshot>('join', { code: code || undefined, look }); touring = false; const p = data.players.find(p => p.id === data.self)!; world.pose.x = p.x; world.pose.z = p.z; setMode('lobby'); receive(data); show('invite', true); }
   catch (e) { notify(message(e)); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
   finally { busy = false; el('join').textContent = 'Enter the lounge ↗'; }
 };
-function startPractice() { touring = true; world.enabled = true; world.updatePlayers([], ''); snapshot = practice.join('solo', 'You', undefined, look); const p = snapshot.players[0]; world.pose = { x: p.x, z: p.z, yaw: Math.PI }; receive(snapshot); show('invite', false); }
+function startPractice() { touring = true; world.enabled = true; world.updatePlayers([], ''); snapshot = practice.join('solo', 'You', undefined, look); const p = snapshot.players[0]; world.pose = { x: p.x, z: p.z, yaw: Math.PI }; if (!quickplayOpen) setMode('lobby'); receive(snapshot); show('invite', false); }
 el('tour').onclick = startPractice;
 el('exit').onclick = async () => {
-  if (busy) return; const old = snapshot, wasTour = touring; snapshot = null; connected = false; touring = false; inWardrobe = false; world.updatePlayers([], ''); setMode('welcome'); el('network').textContent = 'MOBILE PREVIEW';
+  if (busy) return; const old = snapshot, wasTour = touring; snapshot = null; connected = false; touring = false; inWardrobe = false; world.updatePlayers([], ''); openQuickplay(); el('network').textContent = 'MOBILE PREVIEW';
   if (old && wasTour) practice.leave('solo', old.code);
   else if (old) { busy = true; try { await request('leave', { code: old.code }); } catch { /* The server expires presence after 15 seconds. */ } finally { busy = false; } }
 };
@@ -102,6 +120,16 @@ let lastTable = '';
 function renderTable() {
   if (!snapshot) return;
   const t = snapshot.table, turn = t.turn === snapshot.self, fingerprint = JSON.stringify(t);
+  const own = t.hands.find(h => h.id === snapshot!.self), tone = t.phase === 'resolved' ? resultTone(own?.result ?? null) : null;
+  const cue = resultTracker.observe({ key: `${snapshot.code}/${t.id}`, phase: t.phase, revision: t.revision, result: own?.result ?? null });
+  const banner = el('round-result'); show('round-result', !!tone);
+  el('table-screen').dataset.outcome = tone || '';
+  if (tone) {
+    banner.dataset.tone = tone;
+    banner.querySelector('b')!.textContent = tone === 'win' ? (own?.result === 'Blackjack!' ? '★ BLACKJACK!' : '★ YOU WIN!') : tone === 'loss' ? (own?.result === 'Bust' ? 'BUST · DEALER WINS' : 'DEALER WINS') : 'PUSH · IT’S A TIE';
+    banner.querySelector('span')!.textContent = `Your hand: ${own!.total} · Free practice`;
+  } else banner.classList.remove('celebrate');
+  if (cue && world.mode === 'table') { tableAudio.play(cue); banner.classList.remove('celebrate'); void banner.offsetWidth; banner.classList.add('celebrate'); }
   el('deal').textContent = touring ? 'Deal a hand' : 'Deal for the table';
   document.querySelector('.table-heading .eyebrow')!.textContent = `${world.activeStation.name.toUpperCase()} · ${touring ? 'SOLO' : 'SHARED'} FREE PRACTICE`;
   if (fingerprint !== lastTable) {
@@ -118,6 +146,7 @@ function renderTable() {
 async function action(action: 'sit' | 'leave' | 'deal' | 'hit' | 'stand', station?: Station, quick = false) {
   if (!snapshot || busy || !connected) return false;
   busy = true; renderTable();
+  if (action === 'deal') resultTracker.arm();
   try {
     const tableId = (station?.id ?? snapshot.table.id) as TableId;
     const revision = snapshot.tables.find(t => t.id === tableId)!.revision;
@@ -125,7 +154,7 @@ async function action(action: 'sit' | 'leave' | 'deal' | 'hit' | 'stand', statio
     if (action === 'leave' && returnToQuickplay) { returnToQuickplay = false; openQuickplay(); }
     return true;
   }
-  catch (e) { notify(message(e)); return false; } finally { busy = false; renderTable(); }
+  catch (e) { if (action === 'deal') resultTracker.cancel(); notify(message(e)); return false; } finally { busy = false; renderTable(); }
 }
 for (const [id, name] of [['leave-table', 'leave'], ['deal', 'deal'], ['hit', 'hit'], ['stand', 'stand']] as const) el(id).onclick = () => void action(name);
 el('sit').onclick = () => { const station = nearestStation(world.pose.x, world.pose.z); if (station) void launchGame(station.game, station, false); };
@@ -143,26 +172,29 @@ async function poll() {
     try { receive(touring ? practice.sync('solo', snapshot.code, { ...world.pose, look }) : await request<Snapshot>('sync', { code: snapshot.code, pose: { ...world.pose, look } })); }
     catch (e) {
       connected = false; world.resetInput(); world.enabled = false; el('network').textContent = 'CONNECTION LOST · RETRYING'; renderTable();
-      if ((e instanceof RoomRequestError && (e.status === 404 || e.status === 401)) || touring) { snapshot = null; inWardrobe = false; if (!arcadeOpen) { quickplayOpen = false; setMode('welcome'); } world.enabled = true; el('network').textContent = 'ROOM SESSION ENDED'; notify(message(e)); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
+      if ((e instanceof RoomRequestError && (e.status === 404 || e.status === 401)) || touring) { snapshot = null; inWardrobe = false; if (!arcadeOpen) openQuickplay(); el('network').textContent = 'ROOM SESSION ENDED'; notify(message(e)); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
     } finally { busy = false; renderTable(); }
   }
   setTimeout(() => void poll(), connected ? 180 : 1200);
 }
 void poll();
 function openQuickplay() {
-  quickplayOrigin = snapshot ? 'lobby' : 'welcome'; quickplayOpen = true; setMode('quickplay'); renderGameList(); el<HTMLInputElement>('game-search').value = '';
+  quickplayOpen = true; setMode('quickplay'); renderGameList(); el<HTMLInputElement>('game-search').value = '';
 }
-function closeQuickplay() { quickplayOpen = false; setMode(snapshot ? 'lobby' : quickplayOrigin); }
+function closeQuickplay() { if (busy) return; quickplayOpen = false; if (!snapshot) startPractice(); else setMode(snapshot.players.find(p => p.id === snapshot!.self)?.seated ? 'table' : 'lobby'); }
 el('quickplay-button').onclick = el('welcome-quickplay').onclick = openQuickplay;
 el('close-quickplay').onclick = closeQuickplay;
 function renderGameList(query = '') {
-  el('quickplay-note').textContent = 'Blackjack: free solo or shared tables. Other games: sign in to play with Gold Coins.';
+  el('quickplay-note').textContent = 'All your favorites. Straight to the action.';
   const list = el('game-list'); list.replaceChildren();
-  for (const game of GAMES.filter(g => `${g.name} ${g.category}`.toLowerCase().includes(query.toLowerCase()))) {
+  for (const game of GAMES.filter(g => (category === 'All games' || g.category === category) && `${g.name} ${g.category}`.toLowerCase().includes(query.toLowerCase()))) {
     const button = document.createElement('button'); button.className = 'game-choice';
-    button.innerHTML = `<span class="game-icon">${game.icon}</span><span><b>${game.name}</b><small>${game.description}</small><em>${game.id === 'blackjack' ? 'FREE PRACTICE · 2 TABLES' : 'GOLD COINS · ONLINE'}</em></span><span class="game-arrow">↗</span>`;
+    button.dataset.game = game.id;
+    button.setAttribute('aria-label', `${game.name} — ${game.description}`);
+    button.innerHTML = `<span class="game-cover"><span class="tile-brand">GOLD COAST</span><span class="game-icon" aria-hidden="true">${game.icon}</span><b>${game.name}</b><span class="tile-play">PLAY ↗</span></span><span class="game-meta"><b>${game.name}</b><small>${game.id === 'blackjack' ? 'Free practice · 2 tables' : `${game.category} · Gold Coins`}</small></span>`;
     button.onclick = () => void launchGame(game.id, undefined, true); list.append(button);
   }
+  el('game-count').textContent = `${list.children.length} games`;
   if (!list.children.length) list.textContent = 'No games match your search.';
 }
 el<HTMLInputElement>('game-search').oninput = e => renderGameList((e.target as HTMLInputElement).value);
@@ -190,7 +222,7 @@ async function launchGame(id: GameId, station?: Station, quick = false) {
 }
 function closeArcade() {
   frame?.remove(); frame = null; arcadeOpen = false; world.enabled = true;
-  if (returnToQuickplay) { returnToQuickplay = false; openQuickplay(); } else setMode(snapshot ? 'lobby' : 'welcome');
+  if (returnToQuickplay) { returnToQuickplay = false; openQuickplay(); } else if (snapshot) setMode('lobby'); else openQuickplay();
 }
 el('cancel-arcade').onclick = closeArcade;
 window.addEventListener('message', e => {
@@ -203,4 +235,5 @@ el('fullscreen').onclick = async () => {
   catch { notify('Fullscreen isn’t available here. You can still play sideways.'); }
 };
 const invite = new URL(location.href).searchParams.get('room'); if (invite && /^[a-f0-9]{6}$/i.test(invite)) el<HTMLInputElement>('room-code').value = invite.toUpperCase();
+openQuickplay();
 if (getToken()) { busy = true; getMe().then(me => authUi(me.username)).catch(() => notify('Sign in to reconnect, or explore the solo tour while the server is offline.')).finally(() => busy = false); }

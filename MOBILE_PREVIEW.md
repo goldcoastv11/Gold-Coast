@@ -23,7 +23,7 @@ Presence is polled about five times a second with no overlapping requests, inclu
 
 ## Phone playtest
 
-1. On an iPhone and an Android phone, open `/mobile.html` sideways. Verify portrait shows the rotate prompt.
+1. On an iPhone and an Android phone, open `/mobile.html` sideways. Verify Quickplay opens first and works in portrait; entering the lounge in portrait shows the rotate prompt.
 2. Try solo practice and every appearance option. Walk around the five stations, move and turn the camera together, and check safe areas around phone notches. Sit at blackjack, deal, hit/stand, and leave.
 3. Sign in using separate accounts. Have one player create a room and send the invite link to the other.
 4. Verify both characters move and customization changes appear on the other phone.
@@ -35,3 +35,10 @@ Presence is polled about five times a second with no overlapping requests, inclu
 10. Search the Quickplay list, launch roulette, finish a round, and use Walk away. Verify the list returns. Repeat from the physical roulette station and verify the lounge returns. Check remaining original games on real phones.
 
 The current artwork is procedural placeholder art, with no purchased or generated assets. The dealer has a gentle idle animation, no voice or conversation. Real-device frame rate, battery use, accessibility with assistive technology, and hosted two-phone networking still require the playtest above.
+
+## Quickplay and result feedback
+
+Quickplay is the default landing screen, with category filters, search, and a dark game-tile catalog. Enter lounge opens solo exploration; Account / Friends provides sign-in and room joining. The 3D renderer pauses while browsing Quickplay.
+
+Both lounge blackjack tables show an animated, labeled win/loss/push banner and a matching hand outline. Wins use a rising chime, losses descending notes, and pushes a neutral cue. Sound on/off is saved on the device. Cues play once per observed result; old results do not replay on entry. Reduced-motion preferences disable the result animation. Other games retain their existing feedback.
+
