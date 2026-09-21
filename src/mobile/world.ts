@@ -1,5 +1,5 @@
 import * as T from 'three';
-import { STATIONS, Station } from './catalog';
+import { STATIONS, Station, GAMES, GameId } from './catalog';
 
 export type Look = { shirt: string; skin: string; hair: string };
 export type Person = { id: string; name: string; x: number; z: number; yaw: number; look: Look; seated: boolean };
@@ -51,6 +51,8 @@ export class ClubWorld {
   private previous = performance.now();
   private walkTime = 0;
   private dealers: Figure[] = [];
+  private gameStage = new T.Group();
+  private stageTitle: T.Mesh | null = null;
   activeStation: Station = STATIONS[0];
   pose = { x: -2, z: 2, yaw: Math.PI };
   mode: 'welcome' | 'lobby' | 'table' | 'wardrobe' | 'quickplay' | 'arcade' = 'welcome';
@@ -93,6 +95,18 @@ export class ClubWorld {
       }
     }
     this.self = figure(look); this.scene.add(this.self.group);
+    // A dedicated dealer booth keeps lounge plants, other tables and avatars
+    // out of every game's controls. The lounge itself remains walkable.
+    this.gameStage.position.x = 40; this.scene.add(this.gameStage);
+    const stageNavy = material('#122935'), stageFelt = material('#17484a');
+    box(this.gameStage, 0, -.15, 0, 20, .2, 16, stageNavy);
+    box(this.gameStage, 0, 3, -5, 20, 6, .3, stageNavy);
+    for (const x of [-5, -2, 4, 7]) box(this.gameStage, x, 2.5, -4.8, .035, 5, .05, gold);
+    const stageTable = cylinder(this.gameStage, 1.5, 1, 0, 3.2, .22, stageNavy); stageTable.scale.z = .6;
+    const stageTop = cylinder(this.gameStage, 1.5, 1.14, 0, 3.05, .08, stageFelt); stageTop.scale.z = .6;
+    const stageDealer = figure({ shirt:'#dae4e7', skin:'#c68b60', hair:'#302922' });
+    stageDealer.group.position.set(1.5, 1.4, -2.1); this.gameStage.add(stageDealer.group); this.dealers.push(stageDealer);
+    this.gameStage.visible = false;
     this.camera.position.set(10, 7, 12); this.camera.lookAt(0, 1, -2);
     window.addEventListener('resize', () => this.resize()); this.resize();
     window.addEventListener('keydown', e => { if (!(e.target instanceof HTMLInputElement)) { this.keys.add(e.code); if (e.code.startsWith('Arrow')) e.preventDefault(); } });
@@ -100,6 +114,12 @@ export class ClubWorld {
     window.addEventListener('blur', () => this.resetInput()); document.addEventListener('visibilitychange', () => this.resetInput());
     this.canvas.addEventListener('webglcontextlost', e => { e.preventDefault(); this.enabled = false; this.canvas.dispatchEvent(new CustomEvent('renderfailure')); });
     this.renderer.setAnimationLoop(() => this.frame());
+  }
+  setArcadeGame(id: GameId) {
+    if (this.stageTitle) { this.gameStage.remove(this.stageTitle); dispose(this.stageTitle); }
+    this.stageTitle = label(GAMES.find(g => g.id === id)!.name.toUpperCase(), 3.8, .55);
+    this.stageTitle.position.set(-2, 3.4, -4.6); this.gameStage.add(this.stageTitle);
+    this.camera.position.set(40, 2.7, 5.8); this.camera.lookAt(40, .65, -.8);
   }
   private resize() { const w = innerWidth, h = innerHeight; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.renderer.setSize(w, h); }
   resetInput() { this.keys.clear(); this.stick.x = this.stick.y = 0; }
@@ -143,12 +163,14 @@ export class ClubWorld {
       this.yaw = Math.atan2(Math.sin(this.yaw), Math.cos(this.yaw));
     }
     this.self.group.position.set(this.pose.x, 0, this.pose.z); this.self.group.rotation.y = this.pose.yaw;
-    this.self.group.visible = this.mode !== 'table';
+    this.self.group.visible = this.mode !== 'table' && this.mode !== 'arcade';
+    this.gameStage.visible = this.mode === 'arcade';
     if (moving) this.walkTime += dt * 10;
     this.self.limbs.forEach((l, i) => l.rotation.x = moving ? Math.sin(this.walkTime) * .5 * (i < 2 ? 1 : -1) : 0);
     const target = new T.Vector3(), aim = new T.Vector3();
     if (this.mode === 'welcome') { target.set(10, 7, 12); aim.set(0, 1, -2); }
     else if (this.mode === 'table') { const t = this.activeStation; target.set(t.x, 3.9, t.z + 5.8); aim.set(t.x, 1.1, t.z - .8); }
+    else if (this.mode === 'arcade') { target.set(40, 2.7, 5.8); aim.set(40, .65, -.8); }
     else if (this.mode === 'wardrobe') { target.set(this.pose.x + 1.1, 1.9, this.pose.z + 3.8); aim.set(this.pose.x, 1.05, this.pose.z); this.self.group.rotation.y = .2; }
     else { target.set(T.MathUtils.clamp(this.pose.x + Math.sin(this.yaw) * 4.8, -10.5, 10.5), 1.6 + this.pitch * 5, T.MathUtils.clamp(this.pose.z + Math.cos(this.yaw) * 4.8, -7.8, 10)); aim.set(this.pose.x, 1.35, this.pose.z); }
     this.camera.position.lerp(target, 1 - Math.exp(-dt * 7)); this.camera.lookAt(aim);

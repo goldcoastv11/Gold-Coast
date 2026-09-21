@@ -24,6 +24,15 @@ import { setUnauthorizedHandler } from "./api/client";
 import { startTracking, track, EVENTS } from "./api/track";
 import { gameState } from "./GameState";
 import { isTouchDevice } from "./ui/TouchControls";
+import { embeddedGame } from "./mobile/arcadeBridge";
+
+const loungeGame = embeddedGame();
+if (loungeGame) {
+  document.documentElement.classList.add('lounge-game');
+  const style = document.createElement('style');
+  style.textContent = 'html.lounge-game,html.lounge-game body,html.lounge-game #game-container{background:transparent!important}html.lounge-game #game-container canvas{image-rendering:auto}html.lounge-game #fullscreen-btn{display:none!important}';
+  document.head.append(style);
+}
 
 // Retention Leg 1 (see src/api/track.ts): one session.start per app load,
 // fired here - before Phaser even boots - so it's recorded for every
@@ -90,7 +99,8 @@ const config: Phaser.Types.Core.GameConfig = {
   height: 600,
   parent: "game-container",
   backgroundColor: Theme.bgDark,
-  pixelArt: true,
+  transparent: !!loungeGame,
+  pixelArt: !loungeGame,
   // Phaser's loader defaults to at most 32 concurrent downloads - BootScene
   // preloads well over that (tiles/characters + the 8 sound effects from
   // ui/SoundManager.ts pushed the total past 32 for the first time, back
@@ -325,7 +335,7 @@ let lastAppliedPortraitLogin: boolean | null = null;
  * completely still through keyboard/chrome noise instead.
  */
 function updateMobileLayoutMode(): void {
-  if (!isTouchDevice()) return;
+  if (!isTouchDevice() && !loungeGame) return;
 
   const isPortrait = window.innerHeight > window.innerWidth;
   const loginOk = game.scene.isActive("BootScene") || game.scene.isActive("LoginScene");

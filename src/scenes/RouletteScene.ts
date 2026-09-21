@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame } from '../mobile/arcadeBridge';
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens, toCss } from "../ui/DesignTokens";
@@ -91,6 +92,8 @@ const BET_LABEL_Y = 342;
 const BET_BTN_Y = 388;
 const BET_BTN_H = 44;
 const BET_BTN_W = (BOARD_RIGHT - BOARD_LEFT - Tokens.space.sm * 2) / 3;
+const WHEEL_RADIUS = (DIVIDER_Y - RESULT_LABEL_Y) / 2 - Tokens.space.sm;
+const POCKETS = [0,32,15,19,4,21,2,25,17,34,6,27,13,36,11,30,8,23,10,5,24,16,33,1,20,14,31,9,22,18,29,7,28,12,35,3,26];
 /**
  * The dealer sprite used to sit at y=65 - well above SAFE_ZONE_TOP (130),
  * i.e. croppable on a real phone. It now stands in the board's own left
@@ -109,6 +112,7 @@ export class RouletteScene extends Phaser.Scene {
   private spinTimer?: Phaser.Time.TimerEvent;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
+  private wheel?: Phaser.GameObjects.Container;
 
   constructor() {
     super("RouletteScene");
@@ -120,6 +124,7 @@ export class RouletteScene extends Phaser.Scene {
     this.spinning = false;
     this.spinTimer = undefined;
     this.betButtons = [];
+    this.wheel = undefined;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -152,16 +157,13 @@ export class RouletteScene extends Phaser.Scene {
     drawCabinetFrame(this, DX, DY, BOARD_W, BOARD_H);
 
     // Table image backdrop, over the token surface and under everything else.
-    this.add
-      .image(DX, TABLE_ART_Y, "roulette_table")
-      .setDisplaySize(TABLE_ART_W, TABLE_ART_H)
-      .setAlpha(TABLE_ART_ALPHA);
-
-    // Dealer - stands off to the side, "dealing" via a looping animation.
-    const dealer = this.add
-      .sprite(DEALER_SPRITE_X, DEALER_SPRITE_Y, "dealer_sheet", 1)
-      .setScale(DEALER_SPRITE_SCALE);
-    dealer.play("dealer_walk_down");
+    if (!embeddedGame()) {
+      this.add.image(DX, TABLE_ART_Y, "roulette_table")
+        .setDisplaySize(TABLE_ART_W, TABLE_ART_H).setAlpha(TABLE_ART_ALPHA);
+      const dealer = this.add.sprite(DEALER_SPRITE_X, DEALER_SPRITE_Y, "dealer_sheet", 1)
+        .setScale(DEALER_SPRITE_SCALE);
+      dealer.play("dealer_walk_down");
+    }
 
     // --- Hero result --------------------------------------------------
     // The "Place your bet: Red, Black or Green!" bubble is gone - that
@@ -174,7 +176,22 @@ export class RouletteScene extends Phaser.Scene {
       align: "center",
       originX: 0.5
     });
-    makeInset(this, DX, RESULT_WELL_Y, RESULT_WELL_W, RESULT_WELL_H, Tokens.radius.md);
+    if (embeddedGame()) {
+      this.wheel = this.add.container(DX, RESULT_WELL_Y);
+      const pockets = this.add.graphics();
+      const step = Math.PI * 2 / POCKETS.length;
+      POCKETS.forEach((n, i) => {
+        const start = i * step - Math.PI / 2 - step / 2;
+        pockets.fillStyle(COLOR_NUM[colorOf(n)], 1);
+        pockets.beginPath(); pockets.moveTo(0, 0);
+        pockets.arc(0, 0, WHEEL_RADIUS, start, start + step - .014);
+        pockets.closePath(); pockets.fillPath();
+      });
+      pockets.fillStyle(Tokens.color.inset, 1); pockets.fillCircle(0, 0, WHEEL_RADIUS * .64);
+      pockets.lineStyle(2, Tokens.color.textSecondary, .7); pockets.strokeCircle(0, 0, WHEEL_RADIUS);
+      this.wheel.add(pockets);
+      this.add.circle(DX, RESULT_WELL_Y - WHEEL_RADIUS + Tokens.space.xs, 4, Tokens.color.textPrimary).setDepth(2);
+    } else makeInset(this, DX, RESULT_WELL_Y, RESULT_WELL_W, RESULT_WELL_H, Tokens.radius.md);
     this.resultText = makeText(this, DX, RESULT_WELL_Y, "?", {
       size: Tokens.type.size.display,
       weight: Tokens.type.weight.bold,
@@ -245,6 +262,7 @@ export class RouletteScene extends Phaser.Scene {
         if (this.resultText.active) {
           const n = Phaser.Math.Between(0, 36);
           this.resultText.setText(String(n)).setColor(COLOR_HEX[colorOf(n)]);
+          if (this.wheel) this.wheel.rotation += .35;
         }
       }
     });
@@ -274,6 +292,7 @@ export class RouletteScene extends Phaser.Scene {
       payout
     });
     this.resultText.setText(String(number)).setColor(COLOR_HEX[color]);
+    if (this.wheel) this.wheel.rotation = -POCKETS.indexOf(number) * Math.PI * 2 / POCKETS.length;
 
     if (won) {
       this.messageText

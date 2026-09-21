@@ -77,16 +77,16 @@ el('login-form').onsubmit = e => { e.preventDefault(); void authenticate(false);
 el('signup').onclick = () => void authenticate(true);
 el('signout').onclick = () => { clearToken(); authUi(); };
 function setMode(mode: ClubWorld['mode']) {
-  document.body.dataset.mode = mode; world.enabled = mode !== 'quickplay' && mode !== 'arcade';
+  document.body.dataset.mode = mode; world.enabled = mode !== 'quickplay';
   world.mode = mode; world.resetInput(); show('welcome', mode === 'welcome'); show('lobby', mode === 'lobby'); show('wardrobe-panel', mode === 'wardrobe'); show('table-screen', mode === 'table'); show('quickplay', mode === 'quickplay'); show('arcade-host', mode === 'arcade');
 }
 function receive(data: Snapshot) {
-  snapshot = data; connected = true; world.enabled = !arcadeOpen && !quickplayOpen;
+  snapshot = data; connected = true; world.enabled = !quickplayOpen;
   el('network').textContent = touring ? 'SOLO PRACTICE · OFFLINE' : '● CONNECTED'; el('room-label').textContent = touring ? 'Solo practice' : `Room ${data.code}`; el('population').textContent = touring ? 'Just you' : `${data.players.length} / 8`;
   world.updatePlayers(data.players, data.self);
   const self = data.players.find(p => p.id === data.self)!;
   if (Math.hypot(world.pose.x - self.x, world.pose.z - self.z) > 1.3) { world.pose.x = self.x; world.pose.z = self.z; }
-  if (self.tableId) world.activeStation = STATIONS.find(t => t.id === self.tableId)!;
+  if (self.tableId && !arcadeOpen) world.activeStation = STATIONS.find(t => t.id === self.tableId)!;
   if (!inWardrobe && !quickplayOpen && !arcadeOpen && world.mode !== 'welcome') setModeIfChanged(self.seated ? 'table' : 'lobby');
   renderTable();
 }
@@ -214,7 +214,10 @@ async function launchGame(id: GameId, station?: Station, quick = false) {
     const me = await getMe();
     if (me.activeRound) { notify('Finish or leave your existing arcade hand before opening another game.'); return; }
     const game = GAMES.find(g => g.id === id)!;
-    returnToQuickplay = quick; arcadeOpen = true; quickplayOpen = false; setMode('arcade'); world.enabled = false;
+    world.activeStation = station ?? STATIONS.find(s => s.game === id) ?? STATIONS[0];
+    el('arcade-host').dataset.game = id;
+    world.setArcadeGame(id);
+    returnToQuickplay = quick; arcadeOpen = true; quickplayOpen = false; setMode('arcade');
     frame = document.createElement('iframe'); frame.title = `${game.name} game`; frame.src = `/index.html?mobileGame=1&game=${game.id}`; frame.allow = 'fullscreen';
     el('arcade-host').prepend(frame); show('arcade-loading', true);
   } catch (e) { notify(message(e)); }
