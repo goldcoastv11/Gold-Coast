@@ -89,6 +89,10 @@ describe('mobile multiplayer practice rooms', () => {
     const token = signToken({ sub: 'practice-test', username: 'Test' });
     const join = await request(app).post('/multiplayer/join').auth(token, { type: 'bearer' }).send({ look });
     expect(join.status).toBe(200);
+    const farStation = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, x: 14, z: 22.2 } });
+    expect(farStation.status).toBe(200);
+    const outsideLounge = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, z: 24 } });
+    expect(outsideLounge.status).toBe(400);
     const bad = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, x: 99999 } });
     expect(bad.status).toBe(400);
     const badLook = await request(app).post('/multiplayer/join').auth(token, { type: 'bearer' }).send({ look: { ...look, shirt: 'url(evil)' } });

@@ -1,8 +1,25 @@
 import { describe, expect, it } from 'vitest';
-import { GAMES, STATIONS, nearestStation, requestedArcadeGame } from './catalog';
-import { RoomService } from '../../server/src/multiplayer/room';
+import { GAMES, STATIONS, nearestStation, requestedArcadeGame, gameLaunchUrl } from './catalog';
+import { RoomService, LOUNGE_BOUNDS } from '../../server/src/multiplayer/room';
 
 describe('mobile game entry', () => {
+  it('keeps direct Quickplay and lounge presentations distinct for every game', () => {
+    for (const game of GAMES) {
+      expect(gameLaunchUrl(game.id, true)).toContain('view=quickplay');
+      expect(gameLaunchUrl(game.id, false)).toContain('view=lounge');
+      expect(requestedArcadeGame(new URL(gameLaunchUrl(game.id, true), 'http://localhost').search)?.id).toBe(game.id);
+    }
+  });
+  it('provides reachable lounge stations for all fourteen games', () => {
+    expect(new Set(STATIONS.map(s => s.game))).toEqual(new Set(GAMES.map(g => g.id)));
+    expect(new Set(STATIONS.map(s => s.id)).size).toBe(STATIONS.length);
+    for (const s of STATIONS) {
+      expect(s.x).toBeGreaterThanOrEqual(LOUNGE_BOUNDS.minX);
+      expect(s.x).toBeLessThanOrEqual(LOUNGE_BOUNDS.maxX);
+      expect(s.z + 2.2).toBeLessThanOrEqual(LOUNGE_BOUNDS.maxZ);
+      expect(nearestStation(s.x, s.z + 2.2)?.id).toBe(s.id);
+    }
+  });
   it('only permits known embedded game destinations', () => {
     expect(requestedArcadeGame('?game=slots')).toBeUndefined();
     expect(requestedArcadeGame('?mobileGame=1&game=https://evil.test')).toBeUndefined();

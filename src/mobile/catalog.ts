@@ -23,7 +23,14 @@ export const STATIONS: Station[] = [
   { id: 'roulette', name: 'Sunset Roulette', game: 'roulette', x: -7, z: 5, color: '#773943' },
   { id: 'baccarat', name: 'Pearl Baccarat', game: 'baccarat', x: 0, z: 6, color: '#514675' },
   { id: 'slots', name: 'Golden Slots', game: 'slots', x: 7, z: 5, color: '#997333' },
+  ...GAMES.filter(g => !['blackjack', 'roulette', 'baccarat', 'slots'].includes(g.id)).map((g, i) => {
+    const positions = [[-15,-2],[15,-2],[-15,5],[15,5],[-14,13],[-7,13],[0,13],[7,13],[14,13],[0,20]];
+    return { id: g.id, name: g.name, game: g.id, x: positions[i][0], z: positions[i][1], color: '#225660' };
+  }),
 ];
+export function gameLaunchUrl(id: GameId, quick: boolean) {
+  return `/index.html?mobileGame=1&game=${id}&view=${quick ? 'quickplay' : 'lounge'}`;
+}
 export function nearestStation(x: number, z: number) {
   return STATIONS.filter(t => Math.hypot(t.x - x, t.z - z) <= 3.5).sort((a, b) => Math.hypot(a.x - x, a.z - z) - Math.hypot(b.x - x, b.z - z))[0];
 }

@@ -24,13 +24,14 @@ import { setUnauthorizedHandler } from "./api/client";
 import { startTracking, track, EVENTS } from "./api/track";
 import { gameState } from "./GameState";
 import { isTouchDevice } from "./ui/TouchControls";
-import { embeddedGame } from "./mobile/arcadeBridge";
+import { embeddedGame, loungePresentation } from "./mobile/arcadeBridge";
 
 const loungeGame = embeddedGame();
+const dealerView = loungePresentation();
 if (loungeGame) {
-  document.documentElement.classList.add('lounge-game');
+  document.documentElement.classList.add(dealerView ? 'lounge-game' : 'quick-game');
   const style = document.createElement('style');
-  style.textContent = 'html.lounge-game,html.lounge-game body,html.lounge-game #game-container{background:transparent!important}html.lounge-game #game-container canvas{image-rendering:auto}html.lounge-game #fullscreen-btn{display:none!important}';
+  style.textContent = 'html.lounge-game,html.lounge-game body,html.lounge-game #game-container{background:transparent!important}html.lounge-game #game-container canvas,html.quick-game #game-container canvas{image-rendering:auto}html.lounge-game #fullscreen-btn,html.quick-game #fullscreen-btn{display:none!important}html.quick-game,html.quick-game body{background:#0f212e!important}';
   document.head.append(style);
 }
 
@@ -99,7 +100,7 @@ const config: Phaser.Types.Core.GameConfig = {
   height: 600,
   parent: "game-container",
   backgroundColor: Theme.bgDark,
-  transparent: !!loungeGame,
+  transparent: dealerView,
   pixelArt: !loungeGame,
   // Phaser's loader defaults to at most 32 concurrent downloads - BootScene
   // preloads well over that (tiles/characters + the 8 sound effects from

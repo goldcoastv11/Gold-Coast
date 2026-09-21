@@ -3,7 +3,7 @@ import { API_BASE_URL, getToken, setToken, clearToken, login, signup, getMe } fr
 import './style.css';
 import './quickplay.css';
 import { ResultTracker, TableAudio, resultTone } from './feedback';
-import { GAMES, STATIONS, nearestStation, GameId, Station } from './catalog';
+import { GAMES, STATIONS, nearestStation, GameId, Station, gameLaunchUrl } from './catalog';
 import { RoomService, TableId } from '../../server/src/multiplayer/room';
 
 type Snapshot = ReturnType<RoomService['join']>;
@@ -28,6 +28,7 @@ world.controls(el('joystick'), el('nub'), el('look-area'));
 let snapshot: Snapshot | null = null, busy = false, connected = false, touring = false, inWardrobe = false, signedIn = false;
 const practice = new RoomService();
 let quickplayOpen = false, arcadeOpen = false, returnToQuickplay = false;
+let loungeDirectory = false;
 let category = 'All games';
 const resultTracker = new ResultTracker(), tableAudio = new TableAudio();
 document.addEventListener('pointerdown', () => tableAudio.unlock(), { capture: true });
@@ -77,11 +78,11 @@ el('login-form').onsubmit = e => { e.preventDefault(); void authenticate(false);
 el('signup').onclick = () => void authenticate(true);
 el('signout').onclick = () => { clearToken(); authUi(); };
 function setMode(mode: ClubWorld['mode']) {
-  document.body.dataset.mode = mode; world.enabled = mode !== 'quickplay';
+  document.body.dataset.mode = mode; world.enabled = mode !== 'quickplay' && !(mode === 'arcade' && returnToQuickplay);
   world.mode = mode; world.resetInput(); show('welcome', mode === 'welcome'); show('lobby', mode === 'lobby'); show('wardrobe-panel', mode === 'wardrobe'); show('table-screen', mode === 'table'); show('quickplay', mode === 'quickplay'); show('arcade-host', mode === 'arcade');
 }
 function receive(data: Snapshot) {
-  snapshot = data; connected = true; world.enabled = !quickplayOpen;
+  snapshot = data; connected = true; world.enabled = !quickplayOpen && !(arcadeOpen && returnToQuickplay);
   el('network').textContent = touring ? 'SOLO PRACTICE · OFFLINE' : '● CONNECTED'; el('room-label').textContent = touring ? 'Solo practice' : `Room ${data.code}`; el('population').textContent = touring ? 'Just you' : `${data.players.length} / 8`;
   world.updatePlayers(data.players, data.self);
   const self = data.players.find(p => p.id === data.self)!;
@@ -179,20 +180,26 @@ async function poll() {
 }
 void poll();
 function openQuickplay() {
+  loungeDirectory = false;
   quickplayOpen = true; setMode('quickplay'); renderGameList(); el<HTMLInputElement>('game-search').value = '';
 }
 function closeQuickplay() { if (busy) return; quickplayOpen = false; if (!snapshot) startPractice(); else setMode(snapshot.players.find(p => p.id === snapshot!.self)?.seated ? 'table' : 'lobby'); }
 el('quickplay-button').onclick = el('welcome-quickplay').onclick = openQuickplay;
 el('close-quickplay').onclick = closeQuickplay;
+const loungeGamesButton = document.createElement('button'); loungeGamesButton.textContent = 'Lounge games'; loungeGamesButton.id = 'lounge-games';
+document.querySelector('.lobby-actions')!.prepend(loungeGamesButton);
+loungeGamesButton.onclick = () => { loungeDirectory = true; quickplayOpen = true; setMode('quickplay'); el<HTMLInputElement>('game-search').value = ''; renderGameList(); };
 function renderGameList(query = '') {
-  el('quickplay-note').textContent = 'All your favorites. Straight to the action.';
+  document.querySelector('.catalog-intro h1')!.textContent = loungeDirectory ? 'Lounge games' : 'Quickplay';
+  el('quickplay-note').textContent = loungeDirectory ? 'Take a seat with your character, dealer, and game.' : 'All your favorites. Straight to the action.';
+  document.querySelector('.catalog-foot')!.textContent = loungeDirectory ? 'Blackjack: free practice. Other games use virtual Gold Coins.' : 'Direct games with virtual Gold Coins. Sign in to play. Free practice blackjack is available in the lounge.';
   const list = el('game-list'); list.replaceChildren();
   for (const game of GAMES.filter(g => (category === 'All games' || g.category === category) && `${g.name} ${g.category}`.toLowerCase().includes(query.toLowerCase()))) {
     const button = document.createElement('button'); button.className = 'game-choice';
     button.dataset.game = game.id;
     button.setAttribute('aria-label', `${game.name} — ${game.description}`);
-    button.innerHTML = `<span class="game-cover"><span class="tile-brand">GOLD COAST</span><span class="game-icon" aria-hidden="true">${game.icon}</span><b>${game.name}</b><span class="tile-play">PLAY ↗</span></span><span class="game-meta"><b>${game.name}</b><small>${game.id === 'blackjack' ? 'Free practice · 2 tables' : `${game.category} · Gold Coins`}</small></span>`;
-    button.onclick = () => void launchGame(game.id, undefined, true); list.append(button);
+    button.innerHTML = `<span class="game-cover"><span class="tile-brand">GOLD COAST</span><span class="game-icon" aria-hidden="true">${game.icon}</span><b>${game.name}</b><span class="tile-play">PLAY ↗</span></span><span class="game-meta"><b>${game.name}</b><small>${game.id === 'blackjack' && loungeDirectory ? 'Free practice · 2 tables' : `${game.category} · Gold Coins`}</small></span>`;
+    button.onclick = () => void launchGame(game.id, loungeDirectory ? STATIONS.find(s => s.game === game.id) : undefined, !loungeDirectory); list.append(button);
   }
   el('game-count').textContent = `${list.children.length} games`;
   if (!list.children.length) list.textContent = 'No games match your search.';
@@ -200,15 +207,15 @@ function renderGameList(query = '') {
 el<HTMLInputElement>('game-search').oninput = e => renderGameList((e.target as HTMLInputElement).value);
 async function launchGame(id: GameId, station?: Station, quick = false) {
   if (busy || arcadeOpen) return;
-  if (id === 'blackjack') {
+  if (id === 'blackjack' && !quick) {
     if (!snapshot) startPractice();
     station ??= STATIONS.find(s => s.game === 'blackjack' && snapshot!.tables.some(t => t.id === s.id && t.phase !== 'playing' && t.seats < 4));
     if (!station) { notify('Both blackjack tables are busy. Try again after a hand finishes.'); return; }
-    const ok = await action('sit', station, quick);
+    const ok = await action('sit', station, loungeDirectory);
     if (ok) { returnToQuickplay = quick; quickplayOpen = false; setMode('table'); }
     return;
   }
-  if (!getToken()) { notify('Sign in to play this game with Gold Coins. Free blackjack is available now.'); return; }
+  if (!getToken()) { notify('Sign in to play with Gold Coins, or enter the lounge for free practice blackjack.'); return; }
   busy = true;
   try {
     const me = await getMe();
@@ -216,9 +223,10 @@ async function launchGame(id: GameId, station?: Station, quick = false) {
     const game = GAMES.find(g => g.id === id)!;
     world.activeStation = station ?? STATIONS.find(s => s.game === id) ?? STATIONS[0];
     el('arcade-host').dataset.game = id;
-    world.setArcadeGame(id);
+    el('arcade-host').dataset.presentation = quick ? 'quickplay' : 'lounge';
+    if (!quick) world.setArcadeGame(id);
     returnToQuickplay = quick; arcadeOpen = true; quickplayOpen = false; setMode('arcade');
-    frame = document.createElement('iframe'); frame.title = `${game.name} game`; frame.src = `/index.html?mobileGame=1&game=${game.id}`; frame.allow = 'fullscreen';
+    frame = document.createElement('iframe'); frame.title = `${game.name} game`; frame.src = gameLaunchUrl(game.id, quick); frame.allow = 'fullscreen';
     el('arcade-host').prepend(frame); show('arcade-loading', true);
   } catch (e) { notify(message(e)); }
   finally { busy = false; }

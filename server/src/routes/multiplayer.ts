@@ -2,7 +2,7 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { registerRoute } from "./registry";
-import { RoomService, RoomError, SHIRTS, SKINS, HAIR } from "../multiplayer/room";
+import { RoomService, RoomError, SHIRTS, SKINS, HAIR, LOUNGE_BOUNDS } from "../multiplayer/room";
 
 const rooms = new RoomService();
 const color = (choices: string[]) => z.string().refine(v => choices.includes(v));
@@ -12,7 +12,7 @@ const router = Router();
 router.use("/multiplayer", requireAuth);
 const schemas = {
   join: z.object({ code: Code.optional(), look: LookSchema }),
-  sync: z.object({ code: Code, pose: z.object({ x: z.number().finite().min(-10).max(10), z: z.number().finite().min(-7).max(9), yaw: z.number().finite().min(-100).max(100), look: LookSchema }).optional() }),
+  sync: z.object({ code: Code, pose: z.object({ x: z.number().finite().min(LOUNGE_BOUNDS.minX).max(LOUNGE_BOUNDS.maxX), z: z.number().finite().min(LOUNGE_BOUNDS.minZ).max(LOUNGE_BOUNDS.maxZ), yaw: z.number().finite().min(-100).max(100), look: LookSchema }).optional() }),
   action: z.object({ code: Code, action: z.enum(["sit", "leave", "deal", "hit", "stand"]), revision: z.number().int().nonnegative(), tableId: z.enum(['palm', 'coast']).optional(), quickplay: z.boolean().optional() }),
   leave: z.object({ code: Code })
 };

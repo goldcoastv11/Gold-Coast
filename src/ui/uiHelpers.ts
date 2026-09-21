@@ -2,7 +2,7 @@ import Phaser from "phaser";
 import { Tokens, toCss } from "./DesignTokens";
 import { gameState, BET_STEP } from "../GameState";
 import { playSfx } from "./SoundManager";
-import { embeddedGame } from "../mobile/arcadeBridge";
+import { loungePresentation } from "../mobile/arcadeBridge";
 import {
   SAFE_ZONE_TOP,
   SAFE_ZONE_BOTTOM,
@@ -725,7 +725,7 @@ export function makeGameShell(
     onBetChange?: () => void;
   }
 ): GameShellHandle {
-  if (embeddedGame()) {
+  if (loungePresentation()) {
     scene.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
   }
   // Page ground. Drawn as a real full-canvas rect behind everything rather
@@ -746,7 +746,7 @@ export function makeGameShell(
   // full-canvas backdrop and must stay at 0,0 covering the whole viewport,
   // not be nudged with the rest of the shell.
   const ground = scene.add.graphics().setDepth(-1000).setScrollFactor(0);
-  ground.fillStyle(Tokens.color.bg, embeddedGame() ? .38 : 1);
+  ground.fillStyle(Tokens.color.bg, loungePresentation() ? .38 : 1);
   ground.fillRect(0, 0, scene.scale.width, scene.scale.height);
 
   // Everything this function creates from here on is sidebar chrome that
@@ -913,7 +913,7 @@ export function drawCabinetFrame(
   radius: number = Tokens.radius.lg
 ): Phaser.GameObjects.Graphics {
   const g = scene.add.graphics().setDepth(-1);
-  if (embeddedGame()) {
+  if (loungePresentation()) {
     // Every embedded game uses the same dark felt playing surface, including
     // games with no physical table. Content and hit targets keep their bounds.
     const rail = Tokens.space.sm;

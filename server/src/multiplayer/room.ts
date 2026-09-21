@@ -10,6 +10,7 @@ function handValue(cards: number[]) {
   return sum;
 }
 export const BLACKJACK_TABLES = [{ id: 'palm', name: 'Palm Blackjack', x: -4, z: -2 }, { id: 'coast', name: 'Coast Blackjack', x: 4, z: -2 }] as const;
+export const LOUNGE_BOUNDS = { minX: -18, maxX: 18, minZ: -7, maxZ: 23 } as const;
 export type TableId = typeof BLACKJACK_TABLES[number]['id'];
 
 export type Look = { shirt: string; skin: string; hair: string };
