@@ -13,7 +13,8 @@ export const BLACKJACK_TABLES = [{ id: 'palm', name: 'Palm Blackjack', x: -4, z:
 export const LOUNGE_BOUNDS = { minX: -18, maxX: 18, minZ: -7, maxZ: 23 } as const;
 export type TableId = typeof BLACKJACK_TABLES[number]['id'];
 
-export type Look = { shirt: string; skin: string; hair: string };
+export type Look = { shirt: string; skin: string; hair: string; outfit?: string };
+export const OUTFIT_IDS = ['Casual_2', 'Casual_Hoodie', 'Beach', 'Suit', 'Punk', 'Worker', 'Farmer', 'Adventurer', 'King', 'Spacesuit', 'Swat'] as const;
 export const SHIRTS = ["#27c6b5", "#e9ae54", "#a78bfa", "#f47591"];
 export const SKINS = ["#f0c5a3", "#c68b60", "#865338", "#51362a"];
 export const HAIR = ["#302922", "#ac733b", "#e9ce8a"];

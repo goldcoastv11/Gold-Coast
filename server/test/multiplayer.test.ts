@@ -64,6 +64,14 @@ describe('mobile multiplayer practice rooms', () => {
   it('rejoining is idempotent and does not clear a seat', () => {
     seat('a'); expect(rooms.join('a', 'Alice', code, look).players[0].seated).toBe(true);
   });
+  it('shares outfit changes with another player without disturbing the seat or hand', () => {
+    const seated = twoPlayers();
+    const hand = rooms.action('a', code, 'deal', seated.table.revision).table;
+    rooms.sync('a', code, { ...pose, look: { ...look, outfit: 'Spacesuit' } });
+    const seen = rooms.sync('b', code);
+    expect(seen.players.find(p => p.id === 'a')).toMatchObject({ seated: true, look: { outfit: 'Spacesuit' } });
+    expect(seen.table).toEqual(hand);
+  });
   it('runs independent hands at two tables and rejects actions aimed at the other table', () => {
     rooms.join('b', 'Bob', code, look);
     let a = rooms.action('a', code, 'sit', 0, 'palm', true);
@@ -97,6 +105,11 @@ describe('mobile multiplayer practice rooms', () => {
     expect(bad.status).toBe(400);
     const badLook = await request(app).post('/multiplayer/join').auth(token, { type: 'bearer' }).send({ look: { ...look, shirt: 'url(evil)' } });
     expect(badLook.status).toBe(400);
+    const costume = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, look: { ...look, outfit: 'King' } } });
+    expect(costume.status).toBe(200);
+    expect(costume.body.players[0].look.outfit).toBe('King');
+    const invalidCostume = await request(app).post('/multiplayer/join').auth(token, { type: 'bearer' }).send({ look: { ...look, outfit: '../../private' } });
+    expect(invalidCostume.status).toBe(400);
     await request(app).post('/multiplayer/leave').auth(token, { type: 'bearer' }).send({ code: join.body.code });
   });
 });

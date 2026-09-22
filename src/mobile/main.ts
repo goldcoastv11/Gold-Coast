@@ -5,11 +5,12 @@ import './quickplay.css';
 import { ResultTracker, TableAudio, resultTone } from './feedback';
 import { GAMES, STATIONS, nearestStation, GameId, Station, gameLaunchUrl } from './catalog';
 import { RoomService, TableId } from '../../server/src/multiplayer/room';
+import { OUTFITS, outfitFor } from './outfits';
 
 type Snapshot = ReturnType<RoomService['join']>;
 const palette = { shirt: ['#27c6b5', '#e9ae54', '#a78bfa', '#f47591'], skin: ['#f0c5a3', '#c68b60', '#865338', '#51362a'], hair: ['#302922', '#ac733b', '#e9ce8a'] };
 let look: Look = { shirt: palette.shirt[0], skin: palette.skin[1], hair: palette.hair[0] };
-try { const saved = JSON.parse(localStorage.getItem('gc3d-look') || 'null'); for (const k of Object.keys(palette) as (keyof Look)[]) if (palette[k].includes(saved?.[k])) look[k] = saved[k]; } catch { /* Storage is optional. */ }
+try { const saved = JSON.parse(localStorage.getItem('gc3d-look') || 'null'); for (const k of Object.keys(palette) as (keyof typeof palette)[]) if (palette[k].includes(saved?.[k])) look[k] = saved[k]; look.outfit = outfitFor(saved?.outfit).id; } catch { /* Storage is optional. */ }
 const root = document.querySelector<HTMLDivElement>('#app')!;
 root.innerHTML = `
   <header><div class="brand"><span class="brand-mark">G</span><div>GOLD COAST<small>THE SOCIAL CLUB</small></div></div><div class="header-right"><span id="network">MOBILE PREVIEW</span><button id="fullscreen" class="quiet" aria-label="Toggle fullscreen">⛶</button></div></header>
@@ -109,8 +110,16 @@ el('invite').onclick = async () => {
   if (!snapshot) return; const url = new URL(location.href); url.searchParams.set('room', snapshot.code);
   try { await navigator.clipboard.writeText(url.toString()); notify('Invite link copied. Send it to a friend.'); } catch { notify(`Ask your friend to enter room code ${snapshot.code}.`); }
 };
-for (const key of Object.keys(palette) as (keyof Look)[]) {
-  const section = document.createElement('div'); section.className = 'swatch-row'; section.innerHTML = `<h3>${key === 'shirt' ? 'Outfit' : key === 'skin' ? 'Skin tone' : 'Hair color'}</h3>`;
+el('swatches').insertAdjacentHTML('beforebegin', '<label class="outfit-label">Character outfit<select id="outfit-choice" aria-label="Character outfit"></select></label><p id="outfit-status" role="status" aria-live="polite"></p>');
+const outfitChoice = el<HTMLSelectElement>('outfit-choice');
+for (const outfit of OUTFITS) { const option = document.createElement('option'); option.value = outfit.id; option.textContent = outfit.name; outfitChoice.append(option); }
+outfitChoice.value = outfitFor(look.outfit).id;
+outfitChoice.onchange = () => {
+  look = { ...look, outfit: outfitFor(outfitChoice.value).id }; world.setLook(look);
+  try { localStorage.setItem('gc3d-look', JSON.stringify(look)); } catch { /* optional */ }
+};
+for (const key of Object.keys(palette) as (keyof typeof palette)[]) {
+  const section = document.createElement('div'); section.className = 'swatch-row'; section.innerHTML = `<h3>${key === 'shirt' ? 'Clothing' : key === 'skin' ? 'Skin tone' : 'Hair color'}</h3>`;
   palette[key].forEach((color, i) => { const button = document.createElement('button'); button.className = 'swatch'; button.style.background = color; button.setAttribute('aria-label', `${key} option ${i + 1}`); button.setAttribute('aria-pressed', String(look[key] === color)); button.onclick = () => { look = { ...look, [key]: color }; world.setLook(look); section.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', String(b === button))); try { localStorage.setItem('gc3d-look', JSON.stringify(look)); } catch { /* optional */ } }; section.append(button); });
   el('swatches').append(section);
 }
@@ -160,6 +169,7 @@ async function action(action: 'sit' | 'leave' | 'deal' | 'hit' | 'stand', statio
 for (const [id, name] of [['leave-table', 'leave'], ['deal', 'deal'], ['hit', 'hit'], ['stand', 'stand']] as const) el(id).onclick = () => void action(name);
 el('sit').onclick = () => { const station = nearestStation(world.pose.x, world.pose.z); if (station) void launchGame(station.game, station, false); };
 world.onFrame = () => {
+  if (inWardrobe && el('outfit-status').textContent !== world.self.status) el('outfit-status').textContent = world.self.status;
   const station = nearestStation(world.pose.x, world.pose.z), near = !!station;
   show('sit', near); show('nearby', !near);
   if (station) el('sit').innerHTML = `Sit & play <span>${escape(station.name.toUpperCase())}</span>`;

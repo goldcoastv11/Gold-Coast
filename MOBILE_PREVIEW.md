@@ -34,7 +34,9 @@ Presence is polled about five times a second with no overlapping requests, inclu
 9. Seat players at different blackjack tables and verify their rounds do not affect each other. Test the Lounge games selector while a blackjack table is full or mid-hand.
 10. Search the Quickplay list, launch roulette, finish a round, and use Walk away. Verify the list returns. Repeat from the physical roulette station and verify the lounge returns. Check remaining original games on real phones.
 
-The current artwork is procedural placeholder art, with no purchased or generated assets. The dealer has a gentle idle animation, no voice or conversation. Real-device frame rate, battery use, accessibility with assistive technology, and hosted two-phone networking still require the playtest above.
+Players can choose all eleven CC0 Quaternius Ultimate Modular Men outfits in Customize, then change clothing, skin, and hair colors. The astronaut helmet covers skin and hair. Choices persist locally and synchronize to other room members. Each player has an independent skeleton. Models load on selection and are cached across characters; Quickplay does not preload all outfits. Rapid selection changes ignore stale downloads. Players use walking/idle animations and a seated leg pose; dealers wear a navy suit and gold tie. The original license and source are in `public/models/quaternius/`. No Unity runtime is needed.
+
+All fifteen stations use detailed furniture with woven felt, seat markings, leather rails, brass trim, wood bases and upholstered chairs. Each game has its own surface and equipment: roulette wheel, baccarat markings, slot/video poker cabinets, coin stacks, tower, gem grid, dice, multiplier display, Plinko board, Keno cage, prize wheel, and Hi-Lo cards. Lounge game booths reuse the matching table. These furniture props are decorative and do not represent live cards or affect outcomes. Landscape phones use a closer seated blackjack camera. Dealers have no voice or conversation. Real-device frame rate, battery use, accessibility with assistive technology, and hosted two-phone networking still require the playtest above.
 
 ## Quickplay and result feedback
 
@@ -45,4 +47,8 @@ Both lounge blackjack tables show an animated, labeled win/loss/push banner and 
 
 Visual checks for this presentation covered roulette, Mines, and Baccarat at 844 x 390. The 3D booth stays active behind lounge games, so real-device performance should be checked with both renderers running. The original standalone arcade keeps its existing opaque presentation.
 
-The latest routing checks verified direct Quickplay blackjack without 3D scenery and the complete Lounge games menu. The lounge Mines view visibly shows the customized player, dealer, and game. Tests cover all game destinations, station coverage, reachable station positions, and the expanded server movement bounds. 184 frontend tests and 286 server tests pass.
+The latest character checks verified all eleven outfit downloads and switching in the wardrobe. Tests cover the model files, motion clips, color mappings, client/server outfit agreement, and multiplayer outfit updates without disturbing a seated hand. Earlier routing checks verified direct Quickplay blackjack without 3D scenery and the complete Lounge games menu. Tests also cover all game destinations, station coverage, reachable positions, and movement bounds. 196 frontend tests and 287 server tests pass.
+
+## Release policy
+
+The owner requires changes to be tested locally and grouped into meaningful releases. Do not publish or enable automatic preview builds without explicit approval. Netlify pull-request previews were disabled on September 22, 2026; branch deploys are limited to production. The owner explicitly approved this combined production release. The homepage now opens mobile Quickplay, while embedded game URLs remain intact.

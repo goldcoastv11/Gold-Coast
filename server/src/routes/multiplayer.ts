@@ -2,11 +2,11 @@ import { Router } from "express";
 import { z } from "zod";
 import { requireAuth, AuthedRequest } from "../auth/middleware";
 import { registerRoute } from "./registry";
-import { RoomService, RoomError, SHIRTS, SKINS, HAIR, LOUNGE_BOUNDS } from "../multiplayer/room";
+import { RoomService, RoomError, SHIRTS, SKINS, HAIR, LOUNGE_BOUNDS, OUTFIT_IDS } from "../multiplayer/room";
 
 const rooms = new RoomService();
 const color = (choices: string[]) => z.string().refine(v => choices.includes(v));
-const LookSchema = z.object({ shirt: color(SHIRTS), skin: color(SKINS), hair: color(HAIR) });
+const LookSchema = z.object({ shirt: color(SHIRTS), skin: color(SKINS), hair: color(HAIR), outfit: z.enum(OUTFIT_IDS).optional() });
 const Code = z.string().regex(/^[A-F0-9]{6}$/);
 const router = Router();
 router.use("/multiplayer", requireAuth);
