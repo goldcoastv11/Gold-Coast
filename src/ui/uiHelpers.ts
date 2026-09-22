@@ -2,6 +2,7 @@ import Phaser from "phaser";
 import { Tokens, toCss } from "./DesignTokens";
 import { gameState, BET_STEP } from "../GameState";
 import { playSfx } from "./SoundManager";
+import { loungePresentation } from "../mobile/arcadeBridge";
 import {
   SAFE_ZONE_TOP,
   SAFE_ZONE_BOTTOM,
@@ -724,6 +725,9 @@ export function makeGameShell(
     onBetChange?: () => void;
   }
 ): GameShellHandle {
+  if (loungePresentation()) {
+    scene.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
+  }
   // Page ground. Drawn as a real full-canvas rect behind everything rather
   // than relying on each scene's own camera background colour, so the whole
   // shell sits on the token ground even in scenes that have not been
@@ -742,7 +746,7 @@ export function makeGameShell(
   // full-canvas backdrop and must stay at 0,0 covering the whole viewport,
   // not be nudged with the rest of the shell.
   const ground = scene.add.graphics().setDepth(-1000).setScrollFactor(0);
-  ground.fillStyle(Tokens.color.bg, 1);
+  ground.fillStyle(Tokens.color.bg, loungePresentation() ? .38 : 1);
   ground.fillRect(0, 0, scene.scale.width, scene.scale.height);
 
   // Everything this function creates from here on is sidebar chrome that
@@ -909,6 +913,18 @@ export function drawCabinetFrame(
   radius: number = Tokens.radius.lg
 ): Phaser.GameObjects.Graphics {
   const g = scene.add.graphics().setDepth(-1);
+  if (loungePresentation()) {
+    // Every embedded game uses the same dark felt playing surface, including
+    // games with no physical table. Content and hit targets keep their bounds.
+    const rail = Tokens.space.sm;
+    g.fillStyle(0x101e29, .97);
+    g.fillRoundedRect(cx - w / 2 - rail, cy - h / 2 - rail, w + rail * 2, h + rail * 2, Tokens.radius.lg * 2);
+    g.fillStyle(0x163d43, .96);
+    g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, Tokens.radius.lg * 2);
+    g.lineStyle(1, 0x55817f, .55);
+    g.strokeRoundedRect(cx - w / 2 + rail, cy - h / 2 + rail, w - rail * 2, h - rail * 2, Tokens.radius.lg);
+    return g;
+  }
   g.fillStyle(Tokens.elevation.raised.fill, 1);
   g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, radius);
   return g;

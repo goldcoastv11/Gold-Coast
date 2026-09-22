@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Gold Coast Arcade</title>
+  <script>
+    // Keep direct game/iframe URLs intact while making Quickplay the homepage.
+    if (location.pathname === '/' && !new URLSearchParams(location.search).has('mobileGame')) {
+      location.replace('/mobile.html' + location.search + location.hash);
+    }
+  </script>
 
   <!-- PWA / "Add to Home Screen" support - the real, complete fix for the
        mobile browser's address bar eating screen space (not the letterbox

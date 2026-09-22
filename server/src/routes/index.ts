@@ -26,6 +26,7 @@ import "./games";
 import "./leaderboard";
 import "./magazine";
 import "./me";
+import "./multiplayer";
 import "./position";
 import "./progression";
 import "./room";

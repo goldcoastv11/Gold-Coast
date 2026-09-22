@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame } from '../mobile/arcadeBridge';
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -158,15 +159,15 @@ export class BlackjackScene extends Phaser.Scene {
     // Real felt art as backdrop, over the token surface and under everything
     // else. It's fixed art and can't be re-toned from tokens, so it runs
     // quiet enough to read as texture rather than as its own warm colour.
-    this.add.image(DX, DY, "blackjack_table").setDisplaySize(BOARD_W, BOARD_H).setAlpha(TABLE_ART_ALPHA);
+    if (!embeddedGame()) this.add.image(DX, DY, "blackjack_table").setDisplaySize(BOARD_W, BOARD_H).setAlpha(TABLE_ART_ALPHA);
 
     // Dealer - stands off to the side, "dealing" via a looping animation.
     // Was at DY-190 (=110), above SAFE_ZONE_TOP and croppable on a phone;
     // now stands inside the band, in the board's own left gutter.
-    const dealer = this.add
+    if (!embeddedGame()) { const dealer = this.add
       .sprite(DEALER_SPRITE_X, DEALER_SPRITE_Y, "dealer_sheet", 1)
       .setScale(DEALER_SPRITE_SCALE);
-    dealer.play("dealer_walk_down");
+    dealer.play("dealer_walk_down"); }
 
     // --- Dealer hand ---------------------------------------------------
     // The dealer's "Get closer to 21 than me without busting!" speech bubble
