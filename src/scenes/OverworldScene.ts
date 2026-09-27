@@ -49,6 +49,9 @@ import { registerUiCamera, isolateFixedUi, isolateWorldObject } from "../ui/scen
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
+import { realtime } from "../api/realtime";
+import { ROOM_OVERWORLD } from "../api/realtimeProtocol";
+import { RemotePlayers } from "./overworld/RemotePlayers";
 import { launchLevelUpMinigame } from "../levelUpMinigameLauncher";
 import type { PendingLevelMinigame } from "../api/types";
 import { playSfx, playMusic } from "../ui/SoundManager";
@@ -437,6 +440,17 @@ export class OverworldScene extends Phaser.Scene {
    * handleMovement()) is what keeps the clothes from trailing the body.
    */
   private layeredCharacter?: LayeredCharacter;
+  /**
+   * Everyone else on the casino floor (see scenes/overworld/RemotePlayers.ts).
+   *
+   * Optional, and every use site is guarded, because multiplayer is a layer
+   * on top of a game that works without it: no code path in this scene may
+   * depend on this existing, and the whole floor must still be playable
+   * with the realtime channel down.
+   */
+  private remotePlayers?: RemotePlayers;
+  /** Unsubscribe callbacks for this scene's realtime listeners, run on SHUTDOWN - see subscribeToRealtime(). */
+  private realtimeUnsubscribes: Array<() => void> = [];
   /** Second camera, zoom pinned at 1, that every screen-fixed UI element renders through instead of the zoomed main camera - see updateCameraZoom()/ui/sceneCameraSplit.ts. */
   private uiCamera!: Phaser.Cameras.Scene2D.Camera;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -1129,6 +1143,14 @@ export class OverworldScene extends Phaser.Scene {
     isolateWorldObject(this, worldContentSoFar);
     isolateFixedUi(this, fixedUiSoFar);
 
+    // Multiplayer presence. Deliberately AFTER the camera split above:
+    // remote players are world-space objects created outside this
+    // synchronous pass (a roster can only arrive on a later tick), so they
+    // isolate themselves from `uiCamera` individually rather than being
+    // caught by the `worldContentSoFar` snapshot - see
+    // ui/sceneCameraSplit.ts and RemotePlayers.ensureSprites().
+    this.setUpRealtimePresence();
+
     this.updateHud();
 
     // Onboarding tutorial - runs last, after every station/camera/HUD
@@ -1387,19 +1409,28 @@ export class OverworldScene extends Phaser.Scene {
     this.uiCamera.setSize(this.scale.width, this.scale.height);
   }
 
-  update() {
+  update(_time: number, delta: number) {
     this.updateAmbientNpcs();
+    // Runs regardless of panelOpen, exactly like the ambient bystanders
+    // above: other real players keep walking around while you have a shop
+    // panel up, and freezing them would read as the game having hung.
+    this.remotePlayers?.update(delta);
 
     if (this.panelOpen) {
       if (this.tutorialAllowMovement) {
         this.handleMovement();
+        this.reportPositionToRealtime();
       } else {
         this.player.setVelocity(0, 0);
+        // Still reported: a player who stops because a panel opened must
+        // not be left mid-stride on everyone else's screen.
+        this.reportPositionToRealtime();
       }
       return;
     }
 
     this.handleMovement();
+    this.reportPositionToRealtime();
     this.handleProximity();
     this.handleInteraction();
 
@@ -1422,6 +1453,26 @@ export class OverworldScene extends Phaser.Scene {
   }
 
   private lastDir: "down" | "left" | "right" | "up" = "down";
+
+  /**
+   * Reports where the local player is to everyone else on the floor.
+   *
+   * Called every frame; the throttling (10Hz) and the "nothing changed,
+   * send nothing" dedupe both live in the realtime client, so this scene
+   * doesn't carry a timer of its own - and a player standing still costs no
+   * traffic at all.
+   *
+   * `moving` is read from the physics body rather than from
+   * handleMovement()'s input flags, because it must also be right on the
+   * frames handleMovement() never ran (a panel is open, the player was
+   * frozen). Getting that wrong leaves someone walking on the spot forever
+   * on every other screen in the arcade.
+   */
+  private reportPositionToRealtime() {
+    const velocity = this.player.body?.velocity;
+    const moving = !!velocity && (velocity.x !== 0 || velocity.y !== 0);
+    realtime.sendMove(this.player.x, this.player.y, this.lastDir, moving);
+  }
 
   private handleMovement() {
     const t = this.touchControls?.state;
@@ -1530,6 +1581,12 @@ export class OverworldScene extends Phaser.Scene {
     // every ongoing per-frame sync). Harmless to call twice in one frame -
     // sync() is a pure copy from the base sprite's current state.
     this.layeredCharacter?.sync();
+    // Push the change to everyone who can see this player. Carries no
+    // payload - the server re-reads the wardrobe from the database, since
+    // what someone is wearing is purchased state and a client must never be
+    // able to assert it (see server/src/realtime/protocol.ts). No-op while
+    // offline, so a shop visit never blocks on the socket.
+    realtime.announceAppearance();
   }
 
   /**
@@ -1856,6 +1913,11 @@ export class OverworldScene extends Phaser.Scene {
     track(EVENTS.GAME_OPENED, { game: sceneKey });
     gameState.lastPlayerPosition = { x: this.player.x, y: this.player.y };
     this.savePositionRemote(this.player.x, this.player.y);
+    // Step off the shared floor immediately rather than waiting for this
+    // scene's SHUTDOWN, which only fires once the fade completes - so
+    // nobody is left standing at a cabinet for half a second after they
+    // walked into it.
+    realtime.setRoom(null);
     fadeToScene(this, sceneKey);
   }
 
@@ -1871,6 +1933,84 @@ export class OverworldScene extends Phaser.Scene {
     api.savePosition(x, y).catch(() => {
       // Best-effort - see doc comment above.
     });
+  }
+
+  /**
+   * Brings up multiplayer presence for this visit to the floor.
+   *
+   * Every listener registered here is torn down on SHUTDOWN. That matters
+   * more than usual in this scene: Phaser REUSES the scene instance across
+   * start/stop cycles (see create()'s own note), and the realtime client
+   * outlives every scene - so a listener that survived a shutdown would
+   * still be holding a destroyed sprite the next time a roster arrived.
+   * `realtime.on()` hands back its own unsubscribe for exactly this reason.
+   *
+   * Nothing here is awaited or blocking. If the socket never connects, this
+   * scene is precisely the single-player casino floor it was before
+   * multiplayer existed.
+   */
+  private setUpRealtimePresence() {
+    const remotePlayers = new RemotePlayers(this, {
+      // The same scale the local player gets, from the same rig data - so a
+      // remote character can never be drawn a different size to the person
+      // standing next to them (applyPlayerScale()).
+      scaleFor: (bodyTextureKey: string) => {
+        const base = resolveRig(bodyTextureKey).displayScale;
+        return isTouchDevice() ? base * MOBILE_CHAR_SCALE_BOOST : base;
+      }
+    });
+    this.remotePlayers = remotePlayers;
+
+    this.realtimeUnsubscribes = [
+      realtime.on("roster", (players) => {
+        remotePlayers.setRoster(players);
+        this.updateHud();
+      }),
+      realtime.on("join", (player) => {
+        remotePlayers.add(player);
+        this.updateHud();
+      }),
+      realtime.on("leave", (id) => {
+        remotePlayers.remove(id);
+        this.updateHud();
+      }),
+      realtime.on("state", (deltas) => remotePlayers.applyDeltas(deltas)),
+      realtime.on("emote", (id, emote) => {
+        // The server echoes your own emote back so it is drawn by the same
+        // path as everyone else's - but this scene draws the LOCAL player
+        // itself, and RemotePlayers has no sprite for you, so it lands as a
+        // no-op there. Handled explicitly instead.
+        if (id === realtime.id) {
+          this.showToast(`You react: ${emote}`, Theme.textMuted);
+          return;
+        }
+        remotePlayers.showEmote(id, emote);
+      }),
+      realtime.on("appearance", (player) => remotePlayers.updateAppearance(player)),
+      realtime.on("status", () => this.updateHud())
+    ];
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+      this.realtimeUnsubscribes.forEach((off) => off());
+      this.realtimeUnsubscribes = [];
+      remotePlayers.destroy();
+      this.remotePlayers = undefined;
+      // The socket deliberately stays open (see api/realtime.ts) - only
+      // presence ends, so walking back out of a game screen repopulates the
+      // floor without a fresh handshake. goToGame() has already announced
+      // the room change; this covers every OTHER way this scene can end.
+      realtime.setRoom(null);
+    });
+
+    // Safe to call repeatedly - a start() while already connected is a
+    // no-op, and this scene is created afresh every time the player comes
+    // back to the floor.
+    realtime.start();
+    // The server the player picked in the browser, passed explicitly on
+    // every entry: this scene is recreated on each visit, and a room only
+    // exists inside a server. The connection re-announces both together
+    // after a reconnect (see api/realtime.ts's desiredServerId).
+    realtime.setRoom(ROOM_OVERWORLD, gameState.activeServerId);
   }
 
   /**
@@ -2253,7 +2393,17 @@ export class OverworldScene extends Phaser.Scene {
     // CLAUDE.md): this used to also print `🎟️ ${gameState.tickets}` next to
     // the coin count. That balance is retired and permanently 0 now, so it
     // was dropped rather than kept as a second, always-zero figure.
-    this.hudText.setText(`🪙 ${gameState.goldCoins}   ⭐ Lv ${gameState.playerLevel}`);
+    //
+    // The 👥 count is the one piece of multiplayer state on the HUD, and it
+    // is deliberately omitted entirely rather than shown as "👥 0" when the
+    // realtime channel is down. A zero would claim the arcade is empty; no
+    // badge at all correctly says nothing about who else is here, which is
+    // all this client knows while offline.
+    const others =
+      realtime.currentStatus === "online" && this.remotePlayers
+        ? `   👥 ${this.remotePlayers.count}`
+        : "";
+    this.hudText.setText(`🪙 ${gameState.goldCoins}   ⭐ Lv ${gameState.playerLevel}${others}`);
   }
 
   /**

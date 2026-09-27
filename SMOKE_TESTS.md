@@ -266,6 +266,145 @@ these manual entries are for whoever can test on a real device).
 - [ ] Walking into each game's entrance/kiosk transitions to the right scene.
 - [ ] Skin shop kiosk (if present) opens and reflects owned vs. lockable skins.
 
+## Multiplayer presence (`api/realtime.ts`, `scenes/overworld/RemotePlayers.ts`)
+
+> **Verified live on 2026-09-02**, against a running dev server and the real
+> dev database, with two real accounts on two real WebSocket connections
+> (throwaway script, not kept). Confirmed end to end: both handshakes, the
+> roster carrying a real equipped wardrobe, movement and emotes crossing
+> between players, leaving the floor, both players seated at the same
+> Roulette round, a bet placed over HTTP appearing on the other player's
+> table, a duplicate bet refused, no debit at bet time, the same winning
+> number on both screens, **both balances landing exactly on the settled
+> figures** (2000 → 2020 on a winning red, 500 → 480 on a losing black),
+> and a bet sent over the socket rejected. 18/18.
+>
+> So the mechanics below are known to work. What is still unverified is
+> everything you can only see: layout, sprites, name tags, the countdown,
+> readability on a phone. That is what this checklist is for.
+
+**Needs two browsers.** Two accounts in the same browser will NOT work: the
+server keys presence by account, so a second connection from the same account
+deliberately displaces the first (see `server/src/realtime/presence.ts`). Use
+two profiles, or one normal window and one incognito, signed in as different
+players.
+
+- [ ] Both players on the casino floor: each sees the other's character
+      walking, with the other player's username above their head.
+- [ ] Movement is smooth, not steppy or teleporting. Turning on the spot
+      changes the remote character's facing; standing still stops their walk
+      animation rather than leaving them walking in place.
+- [ ] The `👥 N` count in the coin HUD matches how many OTHER players are on
+      the floor (it should read 1 with two players connected, and vanish
+      entirely if the connection drops).
+- [ ] Player A buys and equips a wardrobe piece → it appears on A's character
+      on B's screen without either of them reloading.
+- [ ] Player A walks into a game cabinet → A disappears from B's floor within
+      a moment. A walks back out → A reappears, at the right spot.
+- [ ] Player A closes their tab → A disappears from B's floor (no ghost left
+      standing there).
+- [ ] "😄 React" in the top button row opens the emote picker; picking one
+      pops that emote over your character on the OTHER player's screen, and
+      it fades after a couple of seconds.
+- [ ] Spamming emotes as fast as possible eventually shows "Slow down" and
+      does NOT disconnect you.
+- [ ] Stop the server while both are on the floor: the other player
+      disappears and the `👥` count goes away, but **the floor stays fully
+      playable** - walking, panels, and (once the server is back) games all
+      keep working. This is the degradation guarantee; if the game breaks
+      here, that is a bug regardless of the server being down.
+- [ ] Restart the server: within ~20s the players reappear on each other's
+      screens with no reload and no re-login.
+- [ ] Sign out from one browser: that player disappears from the other's
+      floor and does not come back until they sign in again.
+
+## Server browser (`ServerBrowserScene`, `server/src/realtime/gameServers.ts`)
+
+> **Verified live on 2026-09-03** with three real accounts and real sockets: public listing, private
+> creation, code resolution (including lower-case), an unknown code refused, cross-server isolation,
+> and per-server player counts. 24/24 including the Blackjack section below. What is unverified is
+> everything visual — layout, the code display, how it reads on a phone.
+
+- [ ] "ENTER ARCADE" opens the browser, listing three public servers with player counts.
+- [ ] Joining a public server drops you onto its floor.
+- [ ] **Two browsers, same public server** → you see each other. **Two browsers, different public
+      servers** → you do NOT. This is the whole point of servers; if it fails, stop.
+- [ ] "🔒 PRIVATE" creates a table and shows a join code. It stays on that screen rather than
+      entering — the code is shown once and is the only way in.
+- [ ] "ENTER CODE" → typing that code in the second browser puts both players on the same private
+      floor. Lower-case should work.
+- [ ] A wrong code says "No table with that code" and doesn't hang.
+- [ ] The private server never appears in the public list.
+- [ ] Back returns to the start menu.
+
+## Live Blackjack table (`LiveBlackjackScene`, `server/src/realtime/blackjackTable.ts`)
+
+**Two browsers, two accounts, both on the SAME server.** Walk into Blackjack, click **LIVE TABLE**.
+
+**This is a money path — write balances down and check them by hand.**
+
+- [ ] Both screens show the same countdown and the same hand.
+- [ ] Player A takes a seat → A appears in "AT THE TABLE" on B's screen with their stake.
+- [ ] A tries to take a second seat in the same hand → refused.
+- [ ] Betting closes → cards are dealt on both screens, and the dealer shows **one** card plus
+      "??". The hole card must not be visible until the dealer plays.
+- [ ] The "▶" marker and the HIT/STAND buttons light up for **exactly one player at a time**, and
+      only for the player whose turn it actually is.
+- [ ] The waiting player's HIT/STAND stay disabled. (They cannot act on the other's hand — the
+      server refuses it too.)
+- [ ] Do nothing on your turn → after ~12s the table stands for you and moves on. It must not hang.
+- [ ] Hitting past 21 busts you, ends your turn, and pays nothing.
+- [ ] At payout, the dealer's full hand and total are shown, and every seat's outcome is listed.
+- [ ] **Balances:** a win leaves you up exactly your stake, a loss down exactly your stake, a push
+      unchanged. Anything else is a payout bug.
+- [ ] Taking a seat does NOT change your balance until the hand ends — that is deliberate.
+- [ ] A new hand opens afterwards and you can play again.
+- [ ] "SOLO TABLE" returns to the single-player game, which must behave exactly as before.
+- [ ] Stop the server mid-hand: the screen says "NOT CONNECTED", buttons disable, **and no Gold
+      Coins have moved** for the interrupted hand.
+
+## Live Roulette table (`LiveRouletteScene`, `server/src/realtime/rouletteTable.ts`)
+
+**Two browsers again**, both signed in as different players. Walk into
+Roulette, then click **LIVE TABLE** (top-right of the board) on each.
+
+**This section is a money path. Check the balances by hand, do not assume.**
+
+- [ ] Both screens show the SAME countdown and the same round — within a
+      second of each other. If the two are counting different numbers, stop
+      and report it; the server owns the clock and they must agree.
+- [ ] Player A bets → the bet appears in "AT THE TABLE" on B's screen within
+      a moment, with A's username, amount, and colour, and shows "(you)" on
+      A's own screen only.
+- [ ] A tries to bet a second time on the same round → refused with "You
+      already have a bet on this round". The first bet stands.
+- [ ] Betting closes → both screens start spinning at the same moment and
+      land on the SAME number.
+- [ ] **Write down A's Gold Coins before the spin.** After the result:
+      a losing bet leaves them down exactly the stake; a winning red/black
+      bet leaves them up exactly the stake (2x back); a winning green leaves
+      them up 35x the stake (36x back). Anything else is a payout bug.
+- [ ] The result rows list every player's outcome, and the balance in the
+      sidebar matches what the message line said.
+- [ ] Placing a bet does NOT change the balance until the wheel stops —
+      that is deliberate (the whole round settles in one transaction), so a
+      balance that drops at bet time is a bug.
+- [ ] A round nobody bets on still spins and shows a number, and says
+      "you sat this round out".
+- [ ] Bet, then before the wheel stops spend those Gold Coins in another
+      game (open a second tab as the SAME player — note this displaces the
+      live table's socket, so use it to verify the ledger, not the UI). The
+      table bet should be voided, not paid: the message reads "your bet was
+      voided", and the balance shows no wager and no win for that round.
+- [ ] Stop the server mid-round: both screens say "NOT CONNECTED" and the
+      bet buttons disable. **No Gold Coins should have moved** for the
+      interrupted round. Restart it: a new round opens and betting works.
+- [ ] "SOLO TABLE" returns to the single-player wheel, and "LIVE TABLE"
+      there comes back — the solo game must behave exactly as before this
+      feature landed.
+- [ ] Walk Away from the live table returns to the casino floor, and the
+      player reappears on the other browser's floor.
+
 ## Quickplay (`ui/QuickplayPanel.ts`, roadmap/quickplay-grid)
 
 - [ ] The "🎮 Quickplay" corner button (stacked under Clothes/Challenges)

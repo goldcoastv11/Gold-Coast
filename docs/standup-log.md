@@ -155,3 +155,32 @@ See `docs/legal/open-questions.md` for the full list.
 - Coin Kiosk still to be extracted from OverworldScene.
 - Overworld station name-tags and bench/hedge tints still cold blue.
 - Ground shadows and larger characters — remaining items from the art review.
+
+---
+
+## Session — 2026-09-02 (multiplayer)
+
+**Founder directive:** add multiplayer. Scoped live in two parts: shared overworld presence first, then one shared game table. Emotes rather than chat.
+
+**Landed (branch `feature/multiplayer-presence`, two commits, not merged):**
+- **A shared casino floor.** Other signed-in players walk around it in real time, wearing their own purchased wardrobe, with their name above their head, and can react with eight emotes. A "N others here" count sits in the coin HUD.
+- **A live Roulette table.** One wheel, everyone betting on the same spin — 12s to bet, 5s to spin, 5s on results, running continuously on the server's clock. Reached from a LIVE TABLE button on the solo Roulette screen. The solo game is untouched.
+
+**The two rules the design turns on, both now written into CLAUDE.md:**
+- The WebSocket carries **presence only**. Bets, balances, items and rounds all still go over the authenticated HTTP API. That is what makes it safe for a player's position to be client-reported — a forged position moves a cosmetic avatar and reaches nothing else. There is no bet message in the socket protocol at all, and a test asserts that sending one is rejected.
+- **Losing the connection degrades to single-player, never to a broken game.** Nothing waits on the socket and no scene depends on it existing.
+
+**The money decision worth knowing:** a live-table round settles in one transaction per player when the wheel stops — nothing is debited when the bet is placed. Debiting early would strand a player's stake if the process restarted mid-round, and this table runs unattended forever. The cost is that someone can bet and then spend the same coins elsewhere before the spin; when that happens the ledger refuses their wager, their bet is voided (nothing taken, nothing paid, and they are told), and everyone else settles normally.
+
+**Verified live — a first for this repo.** Against a running dev server and the real database, with two real accounts and two real connections: handshakes, roster, movement, emotes, both players at the same round, a bet relayed to the other player, a duplicate bet refused, no debit at bet time, the same winning number on both screens, both balances landing exactly on the settled figures, and a socket-sent bet rejected. 18/18. So the mechanics are known to work, not just tested.
+
+**Still not verified: anything visual.** Nobody has looked at the floor with two characters on it, the name tags, the emote bubbles, or the live table's layout. Same standing limitation as previous sessions. SMOKE_TESTS.md has two new sections; the Roulette one asks for balances to be written down and checked by hand, because it is a money path.
+
+**Tests:** 345 server (from 273), 223 client (from 201).
+
+**Environment note:** the local dev Postgres was several migrations behind the schema (`player_progress.pending_minigame_level` did not exist), which surfaced as settlement failures during live testing. Fixed with `npx prisma migrate deploy` against the local database only — production was not touched.
+
+**Open, deliberately not done:**
+- Presence is in-memory and single-process. A second Railway instance would split the floor in two and run two independent wheels. That is the day this needs a shared backplane; nothing before it is.
+- Remote players are not y-sorted against furniture — they inherit the same limitation the pet sprite already has, rather than solving world-wide depth sorting inside a multiplayer change.
+- No free-text chat, by founder decision. Adding one reverses that decision rather than extending this feature.

@@ -112,6 +112,10 @@ phones.
 | Currency ledger | `server/src/economy/ledger.ts` |
 | Game payout logic | `server/src/games/`, settle helpers in `shared.ts` |
 | Challenges / XP / levels | `server/src/progression/` |
+| Multiplayer presence | `server/src/realtime/` (protocol → presence → server), `src/api/realtime.ts`, `src/scenes/overworld/` |
+| Servers (public/private) | `server/src/realtime/gameServers.ts` + `routes/servers.ts`, `src/scenes/ServerBrowserScene.ts` |
+| Live Roulette table | `server/src/realtime/rouletteTable.ts` (round loop) + `tableSettlement.ts` (the ledger), `src/scenes/LiveRouletteScene.ts` |
+| Live Blackjack table | `server/src/realtime/blackjackTable.ts` (round loop) + `blackjackSettlement.ts` (the ledger), `src/scenes/LiveBlackjackScene.ts` |
 
 **Catalogs are duplicated client-side and server-side, not shared** (`wardrobeCatalog`,
 `furnitureCatalog`, `roomCatalog`, `itemCatalog`) - the server's Docker build context is scoped to
@@ -121,6 +125,77 @@ before concluding that. All four currently agree (verified, not assumed) and are
 same-named "client and server catalogues agree" test in each of
 `src/{wardrobe,furniture,room,item}Catalog.test.ts`, which fails loudly if only one side is edited -
 run those (or the whole suite) after changing either one, and change both files together.
+
+The realtime protocol is duplicated the same way and for the same reason (`server/src/realtime/
+protocol.ts` ↔ `src/api/realtimeProtocol.ts`), guarded by `src/api/realtimeProtocol.test.ts`. Its
+failure mode is nastier than a catalog's: a drifted emote list or path produces a client that
+connects and handshakes fine and then has every message silently rejected, which looks exactly like
+"the server is down".
+
+# Multiplayer — the boundary that must not move
+
+The WebSocket channel at `/realtime` carries **presence only**: position, facing, and a closed set
+of emotes. Nothing on it moves money, grants an item, records progress, or settles a round — all of
+that stays on the authenticated HTTP API, server-authoritative, exactly as before.
+
+Two rules follow, and both are load-bearing:
+
+- **Position is client-reported, and that is fine** *only because* it is cosmetic. A forged position
+  moves an avatar and reaches nothing else. If a new message on this channel ever touches state that
+  matters, it must not inherit that trust — settle it over HTTP and let the socket only announce it.
+- **Emotes are a closed vocabulary, not a text field.** Founder decision 2026-09-02, when
+  multiplayer was scoped: nothing a player types reaches another player's screen. That is what buys
+  this product no profanity filter, no moderation queue, no report flow, and no user-generated-
+  content retention question while compliance work is paused. Adding free-text chat reverses that
+  decision — it needs the founder, not a follow-up PR.
+
+Presence is in-memory and single-process, like the rate-limit buckets in `routes/events.ts`. If a
+second Railway instance is ever added, players on one would not see players on the other — and the
+live Roulette table would run two independent wheels. That is the day this needs a shared backplane,
+and nothing before it does.
+
+## Servers
+
+The arcade is instanced. A **server** owns its own casino floor, Roulette wheel and Blackjack
+table (`realtime/gameServers.ts`); players on different servers never see each other. Three public
+servers are seeded at boot; private ones are created on demand and reachable only by a join code.
+
+Two rules that are easy to break:
+
+- **Rooms are keyed `serverId:room`.** Use `roomKey()`/`parseRoomKey()` — never build or parse that
+  string by hand. A room join with no server is refused rather than defaulted; silently dropping
+  someone onto an arbitrary server is worse than telling them to pick one.
+- **Which server a player is on comes from PRESENCE, never from the request body.** The live-table
+  routes resolve it with `presenceHub.locate()`. A client that could name its own server could bet
+  on a table it isn't sitting at, on someone else's server — and that moves real Gold Coins.
+
+Private servers are never listed, and a join code is returned exactly once, in the create response.
+Anything that touches every table (a broadcaster, a sweep) registers with the **registry**, not with
+each table: subscribing once at startup silently misses every server created later, which is how
+private servers end up mysteriously not broadcasting.
+
+## The live tables' money rules
+
+These apply identically to both live tables (Roulette and Blackjack).
+
+- **Bets and actions arrive over HTTP** (`/games/{roulette,blackjack}/table/...`), never over the
+  socket. There is no bet or hit/stand message in the protocol at all, and a test asserts that
+  sending one is rejected. Do not add one.
+- **A round settles in one transaction per player, when the round ends** — never a debit at bet time
+  (a restart between the legs would strand the stake) and never one transaction for the whole table
+  (one player who cannot cover their bet would roll back everyone else's winnings). Both are
+  load-bearing; the two `*Table.ts` and `*Settlement.ts` files explain each in place.
+- **Turn ownership is enforced inside the table**, not at the route (Blackjack). Acting on someone
+  else's hand is cheating that costs *them* Gold Coins, so the check lives with the state it checks.
+- **Settlement goes through `settleSingleShotBet`**, same as all 14 solo games, under the same
+  `roulette`/`blackjack` game name. That is what keeps the ledger comparable and makes live rounds
+  count toward challenges and XP. Do not add bespoke currency wiring — `games/shared.ts` is the
+  whole currency surface.
+- **The dealer's hole card must never be in a payload before the dealer draws.** The Blackjack
+  snapshot keys that off the dealer having actually drawn, not off the phase name — the last player
+  standing flips the phase before the draw, and a phase-based check leaks into that gap.
+- **A bet that cannot be settled is voided, not paid.** Nothing debited, nothing credited, the
+  player is told, and the broadcast result says so. Never report a win that was not paid.
 
 ---
 

@@ -31,6 +31,18 @@ export function handValue(hand: number[]): number {
   return total;
 }
 
+/**
+ * A freshly shuffled 52-card shoe, as ranks.
+ *
+ * Exported so the live multiplayer table (realtime/blackjackTable.ts) deals
+ * from the same implementation rather than growing a second one - two decks
+ * that could drift apart is exactly the kind of thing nobody notices until
+ * the odds are wrong on one screen.
+ */
+export function buildShuffledDeck(): number[] {
+  return buildDeck();
+}
+
 function buildDeck(): number[] {
   const deck: number[] = [];
   for (let suit = 0; suit < 4; suit++) {
