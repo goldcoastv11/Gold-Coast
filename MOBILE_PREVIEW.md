@@ -52,3 +52,13 @@ The latest character checks verified all eleven outfit downloads and switching i
 ## Release policy
 
 The owner requires changes to be tested locally and grouped into meaningful releases. Do not publish or enable automatic preview builds without explicit approval. Netlify pull-request previews were disabled on September 22, 2026; branch deploys are limited to production. The owner explicitly approved this combined production release. The homepage now opens mobile Quickplay, while embedded game URLs remain intact.
+
+## September 26 local update: portrait Quickplay and rewards
+
+Quickplay games now use a portrait composition (board above betting controls), while the lounge retains its landscape view. Shared game surfaces and cards have smoother edges, subtle depth, sharper text, and a fitted green win announcement in the embedded games. The original standalone arcade remains available.
+
+The main menu and lounge both expose Challenges & XP and the Coin kiosk. Challenges load actual server progress; claims use the existing idempotent reward endpoint. Shuffle cups reveal the existing server-granted coin refill, with the same 30-second cooldown. No reward math, ledger rules, or database schema changed.
+
+Sign in and Create account are explicit modes with password visibility, inline errors, and a return to the game selected before authentication. The wardrobe offers 10 clothing colors, 6 skin tones and 6 hair colors across the existing 11 outfits. Multiplayer validates the same palette used by the client.
+
+Local browser checks at 390 × 844 covered account creation and return to Mines, Dice play, Blackjack deal/stand, Keno layout, challenge progress and claim, and a shuffle-cup coin award. At 844 × 390, new wardrobe colors rendered correctly. Browser logs were free of errors. Real iPhone/Android testing and a full playthrough of every game remain recommended before production release. No deploy was made for this batch.

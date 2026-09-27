@@ -2,13 +2,15 @@ import { ClubWorld, Look, Person } from './world';
 import { API_BASE_URL, getToken, setToken, clearToken, login, signup, getMe } from '../api/client';
 import './style.css';
 import './quickplay.css';
+import { installRewards } from './rewards';
+import './rewards.css';
 import { ResultTracker, TableAudio, resultTone } from './feedback';
 import { GAMES, STATIONS, nearestStation, GameId, Station, gameLaunchUrl } from './catalog';
-import { RoomService, TableId } from '../../server/src/multiplayer/room';
+import { RoomService, TableId, SHIRTS, SKINS, HAIR } from '../../server/src/multiplayer/room';
 import { OUTFITS, outfitFor } from './outfits';
 
 type Snapshot = ReturnType<RoomService['join']>;
-const palette = { shirt: ['#27c6b5', '#e9ae54', '#a78bfa', '#f47591'], skin: ['#f0c5a3', '#c68b60', '#865338', '#51362a'], hair: ['#302922', '#ac733b', '#e9ce8a'] };
+const palette = { shirt: SHIRTS, skin: SKINS, hair: HAIR };
 let look: Look = { shirt: palette.shirt[0], skin: palette.skin[1], hair: palette.hair[0] };
 try { const saved = JSON.parse(localStorage.getItem('gc3d-look') || 'null'); for (const k of Object.keys(palette) as (keyof typeof palette)[]) if (palette[k].includes(saved?.[k])) look[k] = saved[k]; look.outfit = outfitFor(saved?.outfit).id; } catch { /* Storage is optional. */ }
 const root = document.querySelector<HTMLDivElement>('#app')!;
@@ -71,15 +73,28 @@ function authUi(name?: string) {
 }
 async function authenticate(create: boolean) {
   if (busy || !el<HTMLFormElement>('login-form').reportValidity()) return;
-  busy = true;
-  try { const result = await (create ? signup : login)(el<HTMLInputElement>('username').value.trim(), el<HTMLInputElement>('password').value); setToken(result.token); el<HTMLInputElement>('password').value = ''; authUi(result.user.username); }
-  catch (e) { notify(message(e)); } finally { busy = false; }
+  busy = true; submitAuth.disabled = true; el('auth-error').textContent = '';
+  try { const result = await (create ? signup : login)(el<HTMLInputElement>('username').value.trim(), el<HTMLInputElement>('password').value); setToken(result.token); el<HTMLInputElement>('password').value = ''; authUi(result.user.username); rewards.update(result.user); const next = pendingGame; pendingGame = null; busy = false; if (next) await launchGame(next.id, next.station, next.quick); else openQuickplay(); }
+  catch (e) { el('auth-error').textContent = message(e); } finally { busy = false; submitAuth.disabled = false; }
 }
-el('login-form').onsubmit = e => { e.preventDefault(); void authenticate(false); };
-el('signup').onclick = () => void authenticate(true);
-el('signout').onclick = () => { clearToken(); authUi(); };
+el('login-form').onsubmit = e => { e.preventDefault(); void authenticate(creatingAccount); };
+let creatingAccount = false;
+const submitAuth = el<HTMLButtonElement>('login-form').querySelector<HTMLButtonElement>('button[type=submit]')!;
+el('signup').onclick = () => {
+  if (busy) return;
+  creatingAccount = !creatingAccount;
+  submitAuth.textContent = creatingAccount ? 'Create your free account' : 'Sign in';
+  el('signup').textContent = creatingAccount ? 'Already a member? Sign in' : 'New here? Create account';
+  el<HTMLInputElement>('password').autocomplete = creatingAccount ? 'new-password' : 'current-password';
+  el('auth-error').textContent = '';
+};
+el('login-form').insertAdjacentHTML('beforeend', '<button id="show-password" type="button" class="text-button" aria-pressed="false">Show password</button><p id="auth-error" role="alert"></p><p class="auth-help">Use 3–32 letters, numbers or underscores for your username. Password: at least 6 characters.</p>');
+el('show-password').onclick = () => { const input = el<HTMLInputElement>('password'); const visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; el('show-password').textContent = visible ? 'Hide password' : 'Show password'; el('show-password').setAttribute('aria-pressed', String(visible)); };
+el('signup').textContent = 'New here? Create account';
+let pendingGame: { id: GameId; station?: Station; quick: boolean } | null = null;
+el('signout').onclick = () => { clearToken(); authUi(); rewards.clear(); pendingGame = null; openQuickplay(); };
 function setMode(mode: ClubWorld['mode']) {
-  document.body.dataset.mode = mode; world.enabled = mode !== 'quickplay' && !(mode === 'arcade' && returnToQuickplay);
+  document.body.dataset.mode = mode; document.body.dataset.presentation = mode === 'arcade' && returnToQuickplay ? 'quickplay' : 'lounge'; world.enabled = mode !== 'quickplay' && !(mode === 'arcade' && returnToQuickplay);
   world.mode = mode; world.resetInput(); show('welcome', mode === 'welcome'); show('lobby', mode === 'lobby'); show('wardrobe-panel', mode === 'wardrobe'); show('table-screen', mode === 'table'); show('quickplay', mode === 'quickplay'); show('arcade-host', mode === 'arcade');
 }
 function receive(data: Snapshot) {
@@ -225,7 +240,7 @@ async function launchGame(id: GameId, station?: Station, quick = false) {
     if (ok) { returnToQuickplay = quick; quickplayOpen = false; setMode('table'); }
     return;
   }
-  if (!getToken()) { notify('Sign in to play with Gold Coins, or enter the lounge for free practice blackjack.'); return; }
+  if (!getToken()) { pendingGame = { id, station, quick }; quickplayOpen = false; setMode('welcome'); el('username').focus(); notify('Sign in or create a free account to play. We’ll bring you straight back to your game.'); return; }
   busy = true;
   try {
     const me = await getMe();
@@ -242,6 +257,7 @@ async function launchGame(id: GameId, station?: Station, quick = false) {
   finally { busy = false; }
 }
 function closeArcade() {
+  void rewards.refresh();
   frame?.remove(); frame = null; arcadeOpen = false; world.enabled = true;
   if (returnToQuickplay) { returnToQuickplay = false; openQuickplay(); } else if (snapshot) setMode('lobby'); else openQuickplay();
 }
@@ -256,5 +272,6 @@ el('fullscreen').onclick = async () => {
   catch { notify('Fullscreen isn’t available here. You can still play sideways.'); }
 };
 const invite = new URL(location.href).searchParams.get('room'); if (invite && /^[a-f0-9]{6}$/i.test(invite)) el<HTMLInputElement>('room-code').value = invite.toUpperCase();
+const rewards = installRewards(root, () => { quickplayOpen = false; setMode('welcome'); }, notify);
 openQuickplay();
-if (getToken()) { busy = true; getMe().then(me => authUi(me.username)).catch(() => notify('Sign in to reconnect, or explore the solo tour while the server is offline.')).finally(() => busy = false); }
+if (getToken()) { busy = true; getMe().then(me => { authUi(me.username); rewards.update(me); }).catch(() => notify('Sign in to reconnect, or explore the solo tour while the server is offline.')).finally(() => busy = false); }

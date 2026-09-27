@@ -169,3 +169,6 @@ export function centerDesignBlock(
 export const GAME_SHELL_DESIGN_WIDTH = DESIGN_WIDTH;
 export const GAME_SHELL_DISPLAY_CENTER_X = 570;
 export const GAME_SHELL_DISPLAY_CENTER_Y = DESIGN_CENTER_Y;
+
+/** Quickplay portrait composition: board above controls; lounge stays landscape. */
+export const QUICKPLAY_PORTRAIT = { width: 500, height: 1000, controlsOffsetY: 400, boardScrollY: 70 } as const;

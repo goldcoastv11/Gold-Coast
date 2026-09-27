@@ -1,3 +1,4 @@
+import { embeddedGame } from '../mobile/arcadeBridge';
 import Phaser from "phaser";
 import { Theme } from "./Theme";
 import { playSfx } from "./SoundManager";
@@ -31,6 +32,7 @@ export function showWinCelebration(scene: Phaser.Scene, gcPayout: number): void 
   }
 
   const { width, height } = scene.scale;
+  const modern = !!embeddedGame();
   const DEPTH = 900; // above every game's own UI (panels/modals top out well under this)
 
   // Full-screen gold flash pulse behind the text - the "flash across the
@@ -38,7 +40,7 @@ export function showWinCelebration(scene: Phaser.Scene, gcPayout: number): void 
   // label. Plain alpha fade rather than a blend mode, so it reads as a
   // warm flash without blowing out whatever's underneath.
   const flash = scene.add
-    .rectangle(width / 2, height / 2, width, height, Theme.gold, 0.32)
+    .rectangle(width / 2, height / 2, width, height, modern ? 0x00e701 : Theme.gold, modern ? 0.12 : 0.32)
     .setScrollFactor(0)
     .setDepth(DEPTH);
   scene.tweens.add({
@@ -52,10 +54,10 @@ export function showWinCelebration(scene: Phaser.Scene, gcPayout: number): void 
   const label = scene.add
     .text(width / 2, height / 2, `+${gcPayout} GOLD COINS!`, {
       fontSize: "64px",
-      color: Theme.textGold,
+      color: modern ? '#88ffad' : Theme.textGold,
       fontStyle: "bold",
       stroke: "#000000",
-      strokeThickness: 8
+      strokeThickness: modern ? 0 : 8
     })
     .setOrigin(0.5)
     .setScrollFactor(0)
@@ -63,14 +65,17 @@ export function showWinCelebration(scene: Phaser.Scene, gcPayout: number): void 
     .setScale(0.3)
     .setAlpha(0);
 
+  const fitScale = Math.min(1, (width - 48) / label.width);
+  label.setScale(fitScale * 0.9);
+
   // Pop in -> flash (a couple of quick alpha blinks, the literal "flash"
   // the text itself does) -> hold -> fade out -> destroy. Phaser's tween
   // chain runs these strictly in sequence on the same target.
   scene.tweens.chain({
     targets: label,
     tweens: [
-      { scale: 1, alpha: 1, duration: 220, ease: "Back.Out" },
-      { alpha: 0.35, duration: 90, yoyo: true, repeat: 2 },
+      { scale: fitScale, alpha: 1, duration: 220, ease: "Cubic.Out" },
+      { alpha: modern ? 1 : 0.35, duration: 90, yoyo: true, repeat: modern ? 0 : 2 },
       { alpha: 0, duration: 450, ease: "Cubic.In", delay: 500 }
     ],
     onComplete: () => label.destroy()

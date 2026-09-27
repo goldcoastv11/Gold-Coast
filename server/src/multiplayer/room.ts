@@ -15,9 +15,9 @@ export type TableId = typeof BLACKJACK_TABLES[number]['id'];
 
 export type Look = { shirt: string; skin: string; hair: string; outfit?: string };
 export const OUTFIT_IDS = ['Casual_2', 'Casual_Hoodie', 'Beach', 'Suit', 'Punk', 'Worker', 'Farmer', 'Adventurer', 'King', 'Spacesuit', 'Swat'] as const;
-export const SHIRTS = ["#27c6b5", "#e9ae54", "#a78bfa", "#f47591"];
-export const SKINS = ["#f0c5a3", "#c68b60", "#865338", "#51362a"];
-export const HAIR = ["#302922", "#ac733b", "#e9ce8a"];
+export const SHIRTS = ["#27c6b5", "#e9ae54", "#a78bfa", "#f47591", "#f4f4f5", "#182536", "#e34e54", "#4b88df", "#60855c", "#cba675"];
+export const SKINS = ["#f0c5a3", "#c68b60", "#865338", "#51362a", "#ffe0c2", "#a66e49"];
+export const HAIR = ["#302922", "#ac733b", "#e9ce8a", "#e8e8e8", "#c54c36", "#7664bd"];
 type Player = { id: string; name: string; x: number; z: number; yaw: number; look: Look; seen: number; moved: number; seated: boolean; tableId: TableId | null; seat: number | null };
 type Hand = { id: string; name: string; cards: number[]; done: boolean; result: string | null };
 type Table = { phase: "waiting" | "playing" | "resolved"; revision: number; deck: number[]; dealer: number[]; hands: Hand[]; turn: string | null; deadline: number };

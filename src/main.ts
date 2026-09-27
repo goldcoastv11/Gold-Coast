@@ -1,3 +1,4 @@
+import { QUICKPLAY_PORTRAIT } from './ui/Layout';
 import Phaser from "phaser";
 import { Theme, DISPLAY_FONT } from "./ui/Theme";
 import { BootScene } from "./scenes/BootScene";
@@ -27,6 +28,7 @@ import { isTouchDevice } from "./ui/TouchControls";
 import { embeddedGame, loungePresentation } from "./mobile/arcadeBridge";
 
 const loungeGame = embeddedGame();
+const quickGame = loungeGame && !loungePresentation();
 const dealerView = loungePresentation();
 if (loungeGame) {
   document.documentElement.classList.add(dealerView ? 'lounge-game' : 'quick-game');
@@ -90,8 +92,10 @@ Phaser.GameObjects.GameObjectFactory.register("text", function (
 ) {
   const stylesOwnFamily =
     style !== undefined && (style.fontFamily !== undefined || style.font !== undefined);
-  const withDefaultFont = stylesOwnFamily ? style : { ...style, fontFamily: DISPLAY_FONT };
-  return basePhaserTextFactory.call(this, x, y, text, withDefaultFont);
+  const withDefaultFont = stylesOwnFamily ? style : { ...style, fontFamily: loungeGame ? 'Segoe UI, system-ui, sans-serif' : DISPLAY_FONT };
+  const result = basePhaserTextFactory.call(this, x, y, text, withDefaultFont);
+  if (loungeGame) result.setResolution(2);
+  return result;
 });
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -102,6 +106,8 @@ const config: Phaser.Types.Core.GameConfig = {
   backgroundColor: Theme.bgDark,
   transparent: dealerView,
   pixelArt: !loungeGame,
+  antialias: !!loungeGame,
+  roundPixels: !loungeGame,
   // Phaser's loader defaults to at most 32 concurrent downloads - BootScene
   // preloads well over that (tiles/characters + the 8 sound effects from
   // ui/SoundManager.ts pushed the total past 32 for the first time, back
@@ -340,19 +346,20 @@ function updateMobileLayoutMode(): void {
 
   const isPortrait = window.innerHeight > window.innerWidth;
   const loginOk = game.scene.isActive("BootScene") || game.scene.isActive("LoginScene");
-  const isPortraitLogin = isPortrait && loginOk;
-  document.body.classList.toggle("portrait-ok", loginOk);
+  const isPortraitLogin = isPortrait && loginOk && !quickGame;
+  document.body.classList.toggle("portrait-ok", loginOk || quickGame);
 
   // Portrait (either the exempted login case or the rotate-prompt case)
   // keeps the original landscape-shaped 800x600 game size - see this
   // function's own doc comment above for why. Only real landscape play
   // resizes to match the device's own aspect ratio.
-  const desiredWidth = isPortrait ? LANDSCAPE_MIN_WIDTH : computeLandscapeWidth();
-  const sizeChanged = desiredWidth !== lastAppliedGameWidth;
+  const desiredWidth = isPortrait && quickGame && !loginOk ? QUICKPLAY_PORTRAIT.width : isPortrait ? LANDSCAPE_MIN_WIDTH : computeLandscapeWidth();
+  const desiredHeight = isPortrait && quickGame && !loginOk ? QUICKPLAY_PORTRAIT.height : LANDSCAPE_HEIGHT;
+  const sizeChanged = desiredWidth !== lastAppliedGameWidth || game.scale.height !== desiredHeight;
   const portraitLoginChanged = isPortraitLogin !== lastAppliedPortraitLogin;
 
   if (sizeChanged) {
-    game.scale.setGameSize(desiredWidth, LANDSCAPE_HEIGHT);
+    game.scale.setGameSize(desiredWidth, desiredHeight);
     lastAppliedGameWidth = desiredWidth;
   }
   if (portraitLoginChanged) {
