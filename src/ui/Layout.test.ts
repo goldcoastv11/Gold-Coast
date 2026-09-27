@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  QUICKPLAY_PORTRAIT,
   DESIGN_WIDTH,
   DESIGN_HEIGHT,
   DESIGN_CENTER_X,
@@ -158,5 +159,17 @@ describe("centerDesignBlock", () => {
     sidebarChrome.forEach((o, i) => {
       expect(o.x).toBeCloseTo(originalXs[i] + expectedOffset, 10);
     });
+  });
+});
+
+describe('portrait Quickplay geometry', () => {
+  it('keeps the full game board above the controls and inside the phone canvas', () => {
+    const { width, height, controlsOffsetY, boardScrollY } = QUICKPLAY_PORTRAIT;
+    // Largest existing board extends 220 to either side; game controls reach y=484.
+    expect(width / 2 - 220).toBeGreaterThanOrEqual(0);
+    expect(width / 2 + 220).toBeLessThanOrEqual(width);
+    expect(SAFE_ZONE_TOP - boardScrollY).toBeGreaterThanOrEqual(0);
+    expect(SAFE_ZONE_BOTTOM - boardScrollY).toBeLessThan(SAFE_ZONE_TOP + controlsOffsetY);
+    expect(484 + controlsOffsetY).toBeLessThan(height);
   });
 });

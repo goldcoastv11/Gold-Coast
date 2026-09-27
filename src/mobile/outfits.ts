@@ -10,5 +10,15 @@ export const OUTFITS = [
   { id: 'King', name: 'Royal', shirt: ['Blue'], hair: ['Hair_White'] },
   { id: 'Spacesuit', name: 'Astronaut', shirt: ['SciFi_Main', 'SciFi_MainDark'], hair: [] },
   { id: 'Swat', name: 'Tactical', shirt: ['Swat'], hair: [] },
+  { id: 'Women_Adventurer', name: 'Explorer · Woman', shirt: ["Green","LightGreen"], hair: ["Hair_Brown","Brown"] },
+  { id: 'Women_Casual', name: 'Coastal casual · Woman', shirt: ["White"], hair: ["Hair_Brown","Hair_Blond","Brown"] },
+  { id: 'Women_Formal', name: 'Evening dress · Woman', shirt: ["Red"], hair: ["Brown"] },
+  { id: 'Women_Medieval', name: 'Medieval · Woman', shirt: ["White"], hair: ["Brown","DarkBrown"] },
+  { id: 'Women_Punk', name: 'Punk · Woman', shirt: ["Black"], hair: ["Pink","Hair_Brown","Brown"] },
+  { id: 'Women_SciFi', name: 'Sci-fi · Woman', shirt: ["LightBlue","Blue"], hair: ["Hair_Black","Brown"] },
+  { id: 'Women_Soldier', name: 'Tactical · Woman', shirt: ["Swat"], hair: ["Hair_Brown","Brown"] },
+  { id: 'Women_Suit', name: 'Evening suit · Woman', shirt: ["Black"], hair: ["Hair_Brown","Hair_Blond","Brown"] },
+  { id: 'Women_Witch', name: 'Witch · Woman', shirt: ["Purple"], hair: ["Hair_Black","Brown"] },
+  { id: 'Women_Worker', name: 'Worker · Woman', shirt: ["Worker_Vest"], hair: ["Brown","Brown2","Brown_02"] },
 ];
 export const outfitFor = (id?: string) => OUTFITS.find(o => o.id === id) ?? OUTFITS[0];

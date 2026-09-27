@@ -2,14 +2,15 @@ import Phaser from "phaser";
 import { Tokens, toCss } from "./DesignTokens";
 import { gameState, BET_STEP } from "../GameState";
 import { playSfx } from "./SoundManager";
-import { loungePresentation } from "../mobile/arcadeBridge";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import {
   SAFE_ZONE_TOP,
   SAFE_ZONE_BOTTOM,
   GAME_SHELL_DESIGN_WIDTH,
   GAME_SHELL_DISPLAY_CENTER_X,
   GAME_SHELL_DISPLAY_CENTER_Y,
-  centerDesignBlock
+  centerDesignBlock,
+  QUICKPLAY_PORTRAIT
 } from "./Layout";
 // Re-exported so the 14 game scenes' existing `from "../ui/uiHelpers"`
 // imports of these keep working untouched - Layout.ts is the actual
@@ -881,7 +882,18 @@ export function makeGameShell(
     (obj): obj is Phaser.GameObjects.GameObject & { x: number } =>
       !beforeShellChrome.has(obj) && typeof (obj as { x?: unknown }).x === "number"
   );
-  centerDesignBlock(scene, screenFixed);
+  if (embeddedGame() && !loungePresentation()) {
+    const originals = screenFixed.map(obj => ({ obj: obj as typeof obj & { y: number }, x: obj.x, y: (obj as typeof obj & { y: number }).y }));
+    const layout = () => {
+      const portrait = scene.scale.height > scene.scale.width;
+      const dx = portrait ? scene.scale.width / 2 - SIDEBAR_CX : Math.max(0, (scene.scale.width - GAME_SHELL_DESIGN_WIDTH) / 2);
+      for (const { obj, x, y } of originals) { obj.x = x + dx; obj.y = y + (portrait ? QUICKPLAY_PORTRAIT.controlsOffsetY : 0); }
+      scene.cameras.main.setScroll(portrait ? GAME_SHELL_DISPLAY_CENTER_X - scene.scale.width / 2 : -dx, portrait ? QUICKPLAY_PORTRAIT.boardScrollY : 0);
+      ground.clear().fillStyle(Tokens.color.bg, 1).fillRect(0, 0, scene.scale.width, scene.scale.height);
+    };
+    layout(); scene.scale.on('resize', layout);
+    scene.events.once('shutdown', () => scene.scale.off('resize', layout));
+  } else centerDesignBlock(scene, screenFixed);
 
   return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }
@@ -925,8 +937,12 @@ export function drawCabinetFrame(
     g.strokeRoundedRect(cx - w / 2 + rail, cy - h / 2 + rail, w - rail * 2, h - rail * 2, Tokens.radius.lg);
     return g;
   }
+  g.fillStyle(0x07151e, .45);
+  g.fillRoundedRect(cx - w / 2, cy - h / 2 + 6, w, h, radius + 4);
   g.fillStyle(Tokens.elevation.raised.fill, 1);
-  g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, radius);
+  g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, radius + 4);
+  g.lineStyle(1, 0x547183, .25);
+  g.strokeRoundedRect(cx - w / 2 + .5, cy - h / 2 + .5, w - 1, h - 1, radius + 4);
   return g;
 }
 
@@ -977,8 +993,13 @@ export function drawCardSurface(
         ? Tokens.card.back
         : Tokens.card.face;
 
+  if (surface !== 'empty') { g.fillStyle(0x06111b, .35); g.fillRoundedRect(x - w / 2 + 1, y - h / 2 + 4, w, h, radius + 3); }
   g.fillStyle(fill, 1);
-  g.fillRoundedRect(x - w / 2, y - h / 2, w, h, radius);
+  g.fillRoundedRect(x - w / 2, y - h / 2, w, h, radius + 3);
+  if (surface === 'back') {
+    g.lineStyle(1, 0x718fa4, .5); g.strokeRoundedRect(x - w / 2 + 5, y - h / 2 + 5, w - 10, h - 10, radius);
+    for (let row = -2; row <= 2; row++) for (let col = -1; col <= 1; col++) { g.fillStyle(0x8aa8bc, .22); g.fillCircle(x + col * w / 5, y + row * h / 7, 2); }
+  }
 
   if (surface === "held") {
     g.lineStyle(2, Tokens.color.accent, 1);
