@@ -1,0 +1,58 @@
+# Netlify build configuration.
+#
+# Deliberately minimal: the build command, publish directory and base are
+# still set in the Netlify UI, and this file does NOT restate them. One
+# setting lives here, because it is the one worth reviewing in a diff.
+#
+# ## Why this exists
+#
+# This repository is BOTH halves of the product: the Phaser client at the
+# repo root, and the Express/Prisma server under `server/`. Netlify's base
+# directory is `/`, so every push to `main` rebuilt and republished the
+# client - including pushes that only touched the server, the docs, or a
+# markdown file, none of which can change a single byte of the client
+# bundle.
+#
+# That is not a theoretical waste. Over 2026-08-20 to 08-30 the team pushed
+# 146 commits to `main`, of which 56 (38%) touched nothing outside
+# `server/`, `docs/` and root markdown. Netlify charges credits per
+# production deploy; 100 deploys consumed 1,500 credits against a 1,000/month
+# allowance, which exhausted the plan and PAUSED production deploys
+# altogether. That pause is what left the live client stranded on an
+# 30 August build while the server moved on - the client/server mismatch
+# that broke login for every player (see the adReward compatibility shim in
+# server/src/serializers.ts).
+#
+# So this is a cost control that is really an outage control.
+#
+# ## How `ignore` works, and which way it fails
+#
+# Netlify runs this command before building. **Exit code 0 means SKIP the
+# build**; any non-zero exit means build. `git diff --quiet` exits 0 when
+# there are NO differences in the given paths - so "nothing outside the
+# excluded directories changed" cleanly means "skip".
+#
+# Every failure mode therefore lands on BUILD, which is the safe direction:
+#
+# - No `$CACHED_COMMIT_REF` (first build, or a cleared cache) - guarded
+#   explicitly below, because without the guard `git diff` would compare the
+#   working tree against HEAD, find nothing, exit 0, and skip forever.
+# - A commit that git cannot resolve (a force-push, a shallow clone) makes
+#   `git diff` exit 2, which builds.
+#
+# Verified against this repo's real history before shipping: a docs-only
+# commit skips, a server-only commit skips, and `eced44f` - the commit that
+# caused the login outage, which changed the client AND the server - still
+# builds, because it touched client code.
+#
+# ## Changing the exclusion list
+#
+# Only ever exclude paths that CANNOT affect the built bundle. `src/`,
+# `public/`, `index.html`, `package.json`, `package-lock.json`,
+# `vite.config.ts` and `tsconfig.json` all can, and are deliberately absent
+# from the list. Getting this wrong does not fail loudly - it silently
+# serves players a stale client, which is precisely the failure this repo
+# has already had once.
+
+[build]
+  ignore = "if [ -z \"$CACHED_COMMIT_REF\" ]; then exit 1; fi; git diff --quiet \"$CACHED_COMMIT_REF\" \"$COMMIT_REF\" -- . ':(exclude)server' ':(exclude)docs' ':(exclude)*.md'"
