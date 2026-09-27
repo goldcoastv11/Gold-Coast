@@ -14,7 +14,7 @@ export const LOUNGE_BOUNDS = { minX: -18, maxX: 18, minZ: -7, maxZ: 23 } as cons
 export type TableId = typeof BLACKJACK_TABLES[number]['id'];
 
 export type Look = { shirt: string; skin: string; hair: string; outfit?: string };
-export const OUTFIT_IDS = ['Casual_2', 'Casual_Hoodie', 'Beach', 'Suit', 'Punk', 'Worker', 'Farmer', 'Adventurer', 'King', 'Spacesuit', 'Swat'] as const;
+export const OUTFIT_IDS = ['Casual_2', 'Casual_Hoodie', 'Beach', 'Suit', 'Punk', 'Worker', 'Farmer', 'Adventurer', 'King', 'Spacesuit', 'Swat', 'Women_Adventurer', 'Women_Casual', 'Women_Formal', 'Women_Medieval', 'Women_Punk', 'Women_SciFi', 'Women_Soldier', 'Women_Suit', 'Women_Witch', 'Women_Worker'] as const;
 export const SHIRTS = ["#27c6b5", "#e9ae54", "#a78bfa", "#f47591", "#f4f4f5", "#182536", "#e34e54", "#4b88df", "#60855c", "#cba675"];
 export const SKINS = ["#f0c5a3", "#c68b60", "#865338", "#51362a", "#ffe0c2", "#a66e49"];
 export const HAIR = ["#302922", "#ac733b", "#e9ce8a", "#e8e8e8", "#c54c36", "#7664bd"];

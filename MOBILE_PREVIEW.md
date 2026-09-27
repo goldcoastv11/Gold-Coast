@@ -62,3 +62,5 @@ The main menu and lounge both expose Challenges & XP and the Coin kiosk. Challen
 Sign in and Create account are explicit modes with password visibility, inline errors, and a return to the game selected before authentication. The wardrobe offers 10 clothing colors, 6 skin tones and 6 hair colors across the existing 11 outfits. Multiplayer validates the same palette used by the client.
 
 Local browser checks at 390 × 844 covered account creation and return to Mines, Dice play, Blackjack deal/stand, Keno layout, challenge progress and claim, and a shuffle-cup coin award. At 844 × 390, new wardrobe colors rendered correctly. Browser logs were free of errors. Real iPhone/Android testing and a full playthrough of every game remain recommended before production release. No deploy was made for this batch.
+
+September 26 character expansion: added all 10 Ultimate Modular Women models, bringing the wardrobe to 21 outfits. Verified all 10 load in the browser; casual and worker models visually checked. Frontend build and 207 tests pass; backend typechecks and targeted multiplayer regression tests also run. Models download only when selected. Nothing was deployed.

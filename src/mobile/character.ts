@@ -55,7 +55,7 @@ export class Character {
           const mat = source.clone() as T.MeshStandardMaterial;
           this.ownedMaterials.push(mat); mat.roughness = .88;
           const name = source.name;
-          const channel = name.startsWith('Skin') ? 'skin' : outfit.hair.includes(name) ? 'hair' : !this.dealer && outfit.shirt.includes(name) ? 'shirt' : null;
+          const channel = name.startsWith('Skin') ? 'skin' : outfit.hair.includes(name) && (!outfit.id.startsWith('Women_') || node.name.includes('_Head')) ? 'hair' : !this.dealer && outfit.shirt.includes(name) ? 'shirt' : null;
           if (channel) this.colors.push({ material: mat, channel, shade: name === 'Skin_Darker' ? .8 : 1 });
           if (this.dealer && name === 'Suit') mat.color.set('#192d3d');
           if (this.dealer && name === 'Tie') mat.color.set('#d6ad62');
