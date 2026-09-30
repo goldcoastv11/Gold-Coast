@@ -10,6 +10,7 @@ import { ResultTracker, TableAudio, resultTone } from './feedback';
 import { GAMES, STATIONS, nearestStation, GameId, Station, gameLaunchUrl } from './catalog';
 import { RoomService, TableId, SHIRTS, SKINS, HAIR, INDEPENDENT_LOUNGE_GAMES } from '../../server/src/multiplayer/room';
 import { OUTFITS, outfitFor } from './outfits';
+import { VoiceChat } from './voiceChat';
 
 type Snapshot = ReturnType<RoomService['join']>;
 const palette = { shirt: SHIRTS, skin: SKINS, hair: HAIR };
@@ -22,6 +23,7 @@ root.innerHTML = `
   <section id="lobby" hidden><div class="room-card"><span class="eyebrow">THE PALM LOUNGE</span><div><b id="room-label">Solo tour</b><span id="population">1 / 8</span></div><button id="invite" class="text-button">Copy invite link ↗</button></div><div class="lobby-actions"><button id="wardrobe">Customize</button><button id="exit">Exit room</button></div><div id="look-area" aria-label="Move the mouse to look around; click to lock the view"></div><div id="joystick" aria-label="Drag to move" role="group"><div id="nub"></div></div><div class="controls-hint"><span class="desktop-hint">WASD TO MOVE <b>•</b> MOUSE TO LOOK <b>•</b> E TO PLAY <b>•</b> ESC TO RELEASE</span><span class="touch-hint">MOVE <b>•</b> DRAG TO LOOK</span></div><button id="sit" class="primary interact">Take a seat <span>BLACKJACK</span></button><div id="nearby" class="nearby">Walk toward the green blackjack table</div></section>
   <section id="wardrobe-panel" class="wardrobe panel" hidden><div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>Your signature look</h2><p>Starter styles. All yours.</p><div id="swatches"></div><button id="done-look" class="primary">Looks good →</button></section>
   <section id="table-screen" hidden><div class="table-heading"><span class="eyebrow">THE PALM TABLE · FREE PRACTICE</span><h2>Blackjack</h2><p>No coins spent or earned · Dealer stands on 17</p></div><button id="leave-table" class="quiet leave-table">Leave table ↗</button><div class="dealer-label"><b>Your dealer</b><span>Welcome to the table</span></div><div id="dealer-cards" class="dealer-cards"></div><div id="hands" class="hands"></div><div class="table-footer"><span id="turn-status" role="status"></span><div class="row"><button id="deal" class="primary">Deal for the table</button><button id="hit" class="primary">Hit</button><button id="stand">Stand</button><button id="play-turn" class="primary" hidden>Play my turn</button></div></div></section>
+  <div id="voice-controls" hidden><span id="voice-status">Voice off</span><button id="join-voice" class="primary">Join voice</button><button id="mute-voice" hidden>Mute</button><button id="leave-voice" hidden>Leave voice</button></div>
   <div id="toast" role="status" aria-live="polite" hidden></div><div id="rotate"><div class="rotate-icon">▯ ↻</div><h2>A wider view awaits</h2><p>Turn your phone sideways to enter Gold Coast.</p></div>`;
 const el = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const show = (id: string, visible: boolean) => el(id).hidden = !visible;
@@ -71,10 +73,25 @@ async function request<T>(path: string, body: unknown): Promise<T> {
   } catch (e) { if (e instanceof RoomRequestError) throw e; throw new Error('Connection interrupted. Check your connection or try again when the server is online.'); }
   finally { clearTimeout(timer); }
 }
+const voice = new VoiceChat(request, state => {
+  el('voice-status').textContent = state.label;
+  show('join-voice', !state.active); show('mute-voice', state.active); show('leave-voice', state.active);
+  el<HTMLButtonElement>('join-voice').disabled = state.joining;
+  el('join-voice').textContent = state.joining ? 'Connecting…' : 'Join voice';
+  el('mute-voice').textContent = state.muted ? 'Unmute' : 'Mute';
+  el('mute-voice').setAttribute('aria-pressed', String(state.muted));
+});
+function updateVoiceAvailability() { show('voice-controls', !!snapshot && !touring && signedIn); }
+el('join-voice').onclick = async () => {
+  if (!snapshot || touring) return;
+  try { await voice.join(snapshot.code, snapshot.self); } catch (e) { notify(message(e)); }
+};
+el('mute-voice').onclick = () => voice.toggleMute();
+el('leave-voice').onclick = () => void voice.leave();
 function message(e: unknown) { return e instanceof Error ? e.message : 'Something went wrong. Please try again.'; }
 function authUi(name?: string) {
   el('catalog-account').textContent = name ? 'Account / Friends' : 'Sign in / Friends';
-  signedIn = !!name; show('login-form', !signedIn); show('signed-in', signedIn); show('room-entry', signedIn); el('greeting').textContent = `Welcome back, ${name || ''}.`;
+  signedIn = !!name; show('login-form', !signedIn); show('signed-in', signedIn); show('room-entry', signedIn); el('greeting').textContent = `Welcome back, ${name || ''}.`; updateVoiceAvailability();
 }
 async function authenticate(create: boolean) {
   if (busy || !el<HTMLFormElement>('login-form').reportValidity()) return;
@@ -97,7 +114,7 @@ el('login-form').insertAdjacentHTML('beforeend', '<button id="show-password" typ
 el('show-password').onclick = () => { const input = el<HTMLInputElement>('password'); const visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; el('show-password').textContent = visible ? 'Hide password' : 'Show password'; el('show-password').setAttribute('aria-pressed', String(visible)); };
 el('signup').textContent = 'New here? Create account';
 let pendingGame: { id: GameId; station?: Station; quick: boolean } | null = null;
-el('signout').onclick = () => { clearToken(); authUi(); rewards.clear(); pendingGame = null; openQuickplay(); };
+el('signout').onclick = async () => { await voice.leave(); clearToken(); authUi(); rewards.clear(); pendingGame = null; openQuickplay(); };
 function setMode(mode: ClubWorld['mode']) {
   if (mode !== 'lobby' && document.pointerLockElement === el('look-area')) document.exitPointerLock?.();
   document.body.dataset.mode = mode; document.body.dataset.presentation = mode === 'arcade' && returnToQuickplay ? 'quickplay' : 'lounge'; world.enabled = mode !== 'quickplay' && !(mode === 'arcade' && returnToQuickplay);
@@ -112,6 +129,7 @@ function receive(data: Snapshot) {
   if (Math.hypot(world.pose.x - self.x, world.pose.z - self.z) > 1.3) { world.pose.x = self.x; world.pose.z = self.z; }
   if (self.tableId && !arcadeOpen) world.activeStation = STATIONS.find(t => t.id === self.tableId)!;
   if (!inWardrobe && !quickplayOpen && !arcadeOpen && world.mode !== 'welcome') setModeIfChanged(self.seated ? 'table' : 'lobby');
+  updateVoiceAvailability();
   renderTable();
 }
 function setModeIfChanged(mode: ClubWorld['mode']) { if (world.mode !== mode) setMode(mode); }
@@ -122,9 +140,9 @@ el('join').onclick = async () => {
   finally { busy = false; el('join').textContent = 'Enter the lounge ↗'; }
 };
 function startPractice() { touring = true; world.enabled = true; world.updatePlayers([], ''); snapshot = practice.join('solo', 'You', undefined, look); const p = snapshot.players[0]; world.pose = { x: p.x, z: p.z, yaw: Math.PI }; if (!quickplayOpen) setMode('lobby'); receive(snapshot); show('invite', false); }
-el('tour').onclick = startPractice;
+el('tour').onclick = () => { void voice.leave(); startPractice(); updateVoiceAvailability(); };
 el('exit').onclick = async () => {
-  if (busy) return; const old = snapshot, wasTour = touring; snapshot = null; connected = false; touring = false; inWardrobe = false; world.updatePlayers([], ''); openQuickplay(); el('network').textContent = 'MOBILE PREVIEW';
+  if (busy) return; await voice.leave(); const old = snapshot, wasTour = touring; snapshot = null; connected = false; touring = false; inWardrobe = false; world.updatePlayers([], ''); openQuickplay(); el('network').textContent = 'MOBILE PREVIEW'; updateVoiceAvailability();
   if (old && wasTour) practice.leave('solo', old.code);
   else if (old) { busy = true; try { await request('leave', { code: old.code }); } catch { /* The server expires presence after 15 seconds. */ } finally { busy = false; } }
 };
@@ -333,7 +351,7 @@ async function poll() {
     try { receive(touring ? practice.sync('solo', snapshot.code, { ...world.pose, look }) : await request<Snapshot>('sync', { code: snapshot.code, pose: { ...world.pose, look } })); }
     catch (e) {
       connected = false; world.resetInput(); world.enabled = false; el('network').textContent = 'CONNECTION LOST · RETRYING'; renderTable();
-      if ((e instanceof RoomRequestError && (e.status === 404 || e.status === 401)) || touring) { snapshot = null; inWardrobe = false; if (!arcadeOpen) openQuickplay(); el('network').textContent = 'ROOM SESSION ENDED'; notify(message(e)); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
+      if ((e instanceof RoomRequestError && (e.status === 404 || e.status === 401)) || touring) { void voice.leave(); snapshot = null; inWardrobe = false; if (!arcadeOpen) openQuickplay(); el('network').textContent = 'ROOM SESSION ENDED'; notify(message(e)); updateVoiceAvailability(); if (e instanceof RoomRequestError && e.status === 401) { clearToken(); authUi(); } }
     } finally { busy = false; renderTable(); }
   }
   setTimeout(() => void poll(), connected ? 180 : 1200);
@@ -434,6 +452,7 @@ el('fullscreen').onclick = async () => {
   catch { notify('Fullscreen isn’t available here. You can still play sideways.'); }
 };
 const invite = new URL(location.href).searchParams.get('room'); if (invite && /^[a-f0-9]{6}$/i.test(invite)) el<HTMLInputElement>('room-code').value = invite.toUpperCase();
+window.addEventListener('pagehide', () => void voice.leave());
 const rewards = installRewards(root, () => { quickplayOpen = false; setMode('welcome'); }, notify);
 openQuickplay();
 if (getToken()) { busy = true; getMe().then(me => { authUi(me.username); rewards.update(me); }).catch(() => notify('Sign in to reconnect, or explore the solo tour while the server is offline.')).finally(() => busy = false); }

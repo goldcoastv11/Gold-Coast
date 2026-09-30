@@ -15,7 +15,13 @@ const schemas = {
   join: z.object({ code: Code.optional(), look: LookSchema }),
   sync: z.object({ code: Code, pose: z.object({ x: z.number().finite().min(LOUNGE_BOUNDS.minX).max(LOUNGE_BOUNDS.maxX), z: z.number().finite().min(LOUNGE_BOUNDS.minZ).max(LOUNGE_BOUNDS.maxZ), yaw: z.number().finite().min(-100).max(100), look: LookSchema }).optional() }),
   action: z.object({ code: Code, action: z.enum(["sit", "leave", "bet", "deal", "hit", "stand", "begin", "share", "finish"]), revision: z.number().int().nonnegative(), tableId: z.enum(SOCIAL_TABLES.map(t => t.id) as [string, ...string[]]).optional(), quickplay: z.boolean().optional(), result: z.string().max(80).optional(), betAmount: z.number().int().min(1).max(10000).optional(), view: GameView.optional() }),
-  leave: z.object({ code: Code })
+  leave: z.object({ code: Code }),
+  voiceRoom: z.object({ code: Code }),
+  voiceSignal: z.discriminatedUnion('kind', [
+    z.object({ code: Code, to: z.string().min(1).max(100), kind: z.literal('offer'), payload: z.object({ type: z.literal('offer'), sdp: z.string().min(1).max(30000) }) }),
+    z.object({ code: Code, to: z.string().min(1).max(100), kind: z.literal('answer'), payload: z.object({ type: z.literal('answer'), sdp: z.string().min(1).max(30000) }) }),
+    z.object({ code: Code, to: z.string().min(1).max(100), kind: z.literal('candidate'), payload: z.object({ candidate: z.string().max(2000), sdpMid: z.string().max(100).nullable().optional(), sdpMLineIndex: z.number().int().min(0).max(100).nullable().optional(), usernameFragment: z.string().max(200).nullable().optional() }) })
+  ])
 };
 for (const kind of ["join", "sync", "action", "leave"] as const) {
   router.post(`/multiplayer/${kind}`, (req, res, next) => {
@@ -32,4 +38,24 @@ for (const kind of ["join", "sync", "action", "leave"] as const) {
     } catch (e) { if (e instanceof RoomError) res.status(e.status).json({ error: e.message }); else next(e); }
   });
 }
+router.post('/multiplayer/voice/join', (req, res, next) => {
+  const parsed = schemas.voiceRoom.safeParse(req.body); if (!parsed.success) { res.status(400).json({ error: 'Invalid voice room request.' }); return; }
+  const { userId } = req as AuthedRequest; res.setHeader('Cache-Control', 'no-store');
+  try { res.json(rooms.voiceJoin(userId, parsed.data.code)); } catch (e) { if (e instanceof RoomError) res.status(e.status).json({ error: e.message }); else next(e); }
+});
+router.post('/multiplayer/voice/poll', (req, res, next) => {
+  const parsed = schemas.voiceRoom.safeParse(req.body); if (!parsed.success) { res.status(400).json({ error: 'Invalid voice room request.' }); return; }
+  const { userId } = req as AuthedRequest; res.setHeader('Cache-Control', 'no-store');
+  try { res.json(rooms.voicePoll(userId, parsed.data.code)); } catch (e) { if (e instanceof RoomError) res.status(e.status).json({ error: e.message }); else next(e); }
+});
+router.post('/multiplayer/voice/signal', (req, res, next) => {
+  const parsed = schemas.voiceSignal.safeParse(req.body); if (!parsed.success) { res.status(400).json({ error: 'Invalid voice signal.' }); return; }
+  const { userId } = req as AuthedRequest; res.setHeader('Cache-Control', 'no-store');
+  try { res.json(rooms.voiceSignal(userId, parsed.data.code, parsed.data.to, parsed.data.kind, parsed.data.payload)); } catch (e) { if (e instanceof RoomError) res.status(e.status).json({ error: e.message }); else next(e); }
+});
+router.post('/multiplayer/voice/leave', (req, res, next) => {
+  const parsed = schemas.voiceRoom.safeParse(req.body); if (!parsed.success) { res.status(400).json({ error: 'Invalid voice room request.' }); return; }
+  const { userId } = req as AuthedRequest; res.setHeader('Cache-Control', 'no-store');
+  try { res.json(rooms.voiceLeave(userId, parsed.data.code)); } catch (e) { if (e instanceof RoomError) res.status(e.status).json({ error: e.message }); else next(e); }
+});
 registerRoute(router);

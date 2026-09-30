@@ -40,7 +40,9 @@ type Hand = { id: string; name: string; cards: number[]; bet: number; done: bool
 export type LoungeGameView = Record<string, string | number | boolean | number[] | string[] | null>;
 type Activity = { phase: "waiting" | "playing" | "resolved"; result: string | null; view: LoungeGameView | null; startedAt: number };
 type Table = { game: string; phase: "waiting" | "playing" | "resolved"; revision: number; deck: number[]; dealer: number[]; hands: Hand[]; bets: Record<string, number>; activities: Record<string, Activity>; turn: string | null; deadline: number; lastPlay: { playerId: string; playerName: string; result: string; view: LoungeGameView | null } | null };
-type Room = { code: string; players: Map<string, Player>; tables: Record<TableId, Table> };
+export type VoiceSignalKind = 'offer' | 'answer' | 'candidate' | 'left';
+export type VoiceSignal = { id: number; from: string; fromName: string; kind: VoiceSignalKind; payload: unknown };
+type Room = { code: string; players: Map<string, Player>; tables: Record<TableId, Table>; voice: Set<string>; voiceInboxes: Map<string, VoiceSignal[]>; nextVoiceSignal: number };
 export const INDEPENDENT_LOUNGE_GAMES = ['slots', 'coinflip', 'dragontower', 'mines', 'hilo', 'videopoker'] as const;
 const independentGame = (game: string) => (INDEPENDENT_LOUNGE_GAMES as readonly string[]).includes(game);
 const table = (game: string): Table => ({ game, phase: "waiting", revision: 0, deck: [], dealer: [], hands: [], bets: {}, activities: {}, turn: null, deadline: 0, lastPlay: null });
@@ -76,9 +78,19 @@ export class RoomService {
     t.turn = seated[(current + 1 + seated.length) % seated.length].id;
     t.phase = 'waiting'; t.deadline = 0;
   }
+  private removeVoiceMember(room: Room, id: string) {
+    if (!room.voice.delete(id)) return;
+    room.voiceInboxes.delete(id);
+    for (const member of room.voice) {
+      const inbox = room.voiceInboxes.get(member) ?? [];
+      inbox.push({ id: room.nextVoiceSignal++, from: id, fromName: '', kind: 'left', payload: null });
+      room.voiceInboxes.set(member, inbox.slice(-100));
+    }
+  }
   private sweep() {
     for (const [code, room] of this.rooms) {
       for (const [id, p] of room.players) if (this.now() - p.seen > 15000) room.players.delete(id);
+      for (const id of [...room.voice]) if (!room.players.has(id)) this.removeVoiceMember(room, id);
       for (const t of Object.values(room.tables)) {
         if (!t.hands.length && t.phase === 'playing' && this.now() >= t.deadline) {
           const player = room.players.get(t.turn ?? '');
@@ -111,12 +123,12 @@ export class RoomService {
     if (code && !existing) throw new RoomError("Room not found. Check the invite code.", 404);
     if (existing && existing.players.size >= 8) throw new RoomError("This room is full (8 players).", 409);
     if (!code && this.rooms.size >= 100) throw new RoomError("Rooms are busy. Please try again later.", 503);
-    for (const room of this.rooms.values()) room.players.delete(id);
+    for (const room of this.rooms.values()) { room.players.delete(id); this.removeVoiceMember(room, id); }
     if (!code) { do { code = randomInt(0x1000000).toString(16).padStart(6, '0').toUpperCase(); } while (this.rooms.has(code)); }
     let room = this.rooms.get(code);
     if (!room) {
       const tables = Object.fromEntries(SOCIAL_TABLES.map(s => [s.id, table(s.game)])) as Record<TableId, Table>;
-      room = { code, players: new Map(), tables }; this.rooms.set(code, room);
+      room = { code, players: new Map(), tables, voice: new Set(), voiceInboxes: new Map(), nextVoiceSignal: 1 }; this.rooms.set(code, room);
     }
     room.players.set(id, { id, name, x: room.players.size * 0.7 - 2, z: 2.2, yaw: 0, look, seen: this.now(), moved: this.now(), seated: false, tableId: null, seat: null });
     return this.snapshot(room, id);
@@ -213,7 +225,32 @@ export class RoomService {
     t.revision++;
     return this.snapshot(room, id);
   }
-  leave(id: string, code: string) { this.rooms.get(code)?.players.delete(id); this.sweep(); }
+  voiceJoin(id: string, code: string) {
+    const room = this.room(id, code), player = room.players.get(id)!;
+    room.voice.add(id); room.voiceInboxes.set(id, room.voiceInboxes.get(id) ?? []);
+    return { members: [...room.voice].map(memberId => ({ id: memberId, name: room.players.get(memberId)?.name ?? 'Player' })), self: id, name: player.name };
+  }
+  voicePoll(id: string, code: string) {
+    const room = this.room(id, code);
+    if (!room.voice.has(id)) throw new RoomError('Join voice chat first.', 409);
+    const signals = room.voiceInboxes.get(id) ?? []; room.voiceInboxes.set(id, []);
+    return { members: [...room.voice].map(memberId => ({ id: memberId, name: room.players.get(memberId)?.name ?? 'Player' })), signals };
+  }
+  voiceSignal(id: string, code: string, to: string, kind: VoiceSignalKind, payload: unknown) {
+    const room = this.room(id, code), sender = room.players.get(id)!;
+    if (!room.voice.has(id)) throw new RoomError('Join voice chat first.', 409);
+    if (!room.voice.has(to) || !room.players.has(to)) throw new RoomError('That player is no longer in voice chat.', 404);
+    if (to === id) throw new RoomError('Choose another player.', 400);
+    const inbox = room.voiceInboxes.get(to) ?? [];
+    inbox.push({ id: room.nextVoiceSignal++, from: id, fromName: sender.name, kind, payload });
+    room.voiceInboxes.set(to, inbox.slice(-100));
+    return { ok: true };
+  }
+  voiceLeave(id: string, code: string) {
+    const room = this.rooms.get(code); if (room) this.removeVoiceMember(room, id);
+    return { ok: true };
+  }
+  leave(id: string, code: string) { const room = this.rooms.get(code); if (room) { room.players.delete(id); this.removeVoiceMember(room, id); } this.sweep(); }
   private snapshot(room: Room, id: string) {
     const chosen = room.players.get(id)!.tableId ?? 'palm', t = room.tables[chosen];
     return { code: room.code, self: id, tables: SOCIAL_TABLES.map(s => ({ ...s, phase: room.tables[s.id].phase, revision: room.tables[s.id].revision, seats: [...room.players.values()].filter(p => p.tableId === s.id).length })), players: [...room.players.values()].map(({ seen, moved, ...p }) => p), table: {
