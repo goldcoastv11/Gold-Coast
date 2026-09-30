@@ -19,6 +19,9 @@ describe('mobile game entry', () => {
       expect(s.z + 2.2).toBeLessThanOrEqual(LOUNGE_BOUNDS.maxZ);
       expect(nearestStation(s.x, s.z + 2.2)?.id).toBe(s.id);
     }
+    for (const [i, station] of STATIONS.entries()) for (const other of STATIONS.slice(i + 1)) {
+      expect(Math.hypot(station.x - other.x, station.z - other.z)).toBeGreaterThanOrEqual(9);
+    }
   });
   it('only permits known embedded game destinations', () => {
     expect(requestedArcadeGame('?game=slots')).toBeUndefined();
@@ -33,6 +36,7 @@ describe('mobile game entry', () => {
     const rooms = new RoomService(() => 1000, max => max - 1);
     let state = rooms.join('local', 'You', undefined, { shirt: '#27c6b5', skin: '#c68b60', hair: '#302922' });
     state = rooms.action('local', state.code, 'sit', 0, 'coast', true);
+    state = rooms.action('local', state.code, 'bet', state.table.revision, 'coast', false, undefined, 25);
     state = rooms.action('local', state.code, 'deal', state.table.revision);
     while (state.table.turn) state = rooms.action('local', state.code, 'stand', state.table.revision);
     expect(state.table.phase).toBe('resolved'); expect(state.table.hands[0].result).toBeTruthy();

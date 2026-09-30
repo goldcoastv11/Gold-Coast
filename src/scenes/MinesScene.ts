@@ -1,8 +1,10 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
 import {
+  makeButton,
   makeText,
   makeGameShell,
   formatBalance,
@@ -19,6 +21,7 @@ import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, drawQuickReadout, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 
 const GRID_SIZE = 5; // 5x5 = 25 tiles
 const TOTAL_TILES = GRID_SIZE * GRID_SIZE;
@@ -78,6 +81,12 @@ export class MinesScene extends Phaser.Scene {
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
+  private directQuickplay = false;
+  private gridCenterX = GRID_CENTER_X;
+  private gridCenterY = GRID_CENTER_Y;
+  private tileSize: number = TILE_SIZE;
+  private tileGap: number = TILE_GAP;
+  private selectedMineCount = MINE_COUNT;
 
   constructor() {
     super("MinesScene");
@@ -93,6 +102,15 @@ export class MinesScene extends Phaser.Scene {
     this.revealed = new Set();
     this.tiles = [];
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) {
+      this.scale.once("resize", () => this.scene.restart());
+      this.createDirectQuickplayLayout();
+      this.buildEmptyGridVisuals();
+      this.updateBalance();
+      return;
+    }
 
     // Stake-style shell: left sidebar (title/balance/bet/multiplier/
     // message/Bet-Cashout/Walk Away) + open right-side display area for
@@ -122,19 +140,70 @@ export class MinesScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplayLayout() {
+    const stage = createQuickplayStage(this);
+    drawManualAuto(this, stage);
+    drawQuickLabel(this, stage, 61, "AMOUNT");
+    this.balanceText = makeText(this, stage.right, stage.top + 61, "", { size: Tokens.type.size.xs, color: Tokens.text.muted, align: "right", originX: 1 }).setScrollFactor(0);
+    this.betControl = makeQuickBetControl(this, stage, 89);
+    drawQuickReadout(this, stage, 120, "MINES", String(this.selectedMineCount));
+    makeText(this, stage.right - Tokens.space.md, stage.top + 150, "⌄", { size: Tokens.type.size.lg, color: Tokens.text.primary, align: "right", originX: 1, originY: 0.5 }).setScrollFactor(0);
+    this.add.zone(stage.controls.x + stage.controls.w / 2, stage.top + 150, stage.contentW, 40).setScrollFactor(0).setInteractive({ useHandCursor: true }).on("pointerup", () => this.showMineCountMenu(stage));
+    drawQuickReadout(this, stage, 191, "GEMS", String(TOTAL_TILES - this.selectedMineCount));
+
+    this.startBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 270, stage.contentW, 44, "PLAY", Tokens.color.info, Tokens.color.infoHover, () => this.startGame(), Tokens.text.primary, Tokens.radius.md);
+    this.cashOutBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 322, stage.contentW, 44, "CASH OUT", Tokens.color.accent, Tokens.color.accentHover, () => this.cashOut(), Tokens.text.onAccent, Tokens.radius.md);
+    this.cashOutBtn.container.setVisible(false);
+    this.cashOutBtn.setEnabled(false);
+    drawQuickLabel(this, stage, 360, "TOTAL NET GAIN");
+    const gainBg = this.add.graphics().setScrollFactor(0);
+    gainBg.fillStyle(Tokens.color.inset, 1).fillRoundedRect(stage.left, stage.top + 376, stage.contentW, 40, Tokens.radius.md);
+    gainBg.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(stage.left, stage.top + 376, stage.contentW, 40, Tokens.radius.md);
+    this.multiplierText = makeText(this, stage.left + Tokens.space.md, stage.top + 396, "Multiplier: 1.00x", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, originY: 0.5 }).setScrollFactor(0);
+    this.messageText = makeText(this, stage.left, stage.top + 432, `${this.selectedMineCount} mines hidden among ${TOTAL_TILES} tiles`, { size: Tokens.type.size.xs, color: Tokens.text.muted, wordWrapWidth: stage.contentW, originY: 0 }).setScrollFactor(0);
+    this.walkAwayBtn = makeQuickBackButton(this, stage, () => this.leaveGame());
+    for (const button of [this.startBtn, this.cashOutBtn]) button.container.setScrollFactor(0);
+
+    this.gridCenterX = stage.board.x + stage.board.w / 2;
+    this.gridCenterY = stage.board.y + stage.board.h / 2;
+    this.tileGap = Math.max(8, Math.min(12, stage.board.w / 70));
+    this.tileSize = Math.min(76, (stage.board.w - 72 - this.tileGap * 4) / GRID_SIZE, (stage.board.h - 72 - this.tileGap * 4) / GRID_SIZE);
+  }
+
+  private showMineCountMenu(stage: ReturnType<typeof createQuickplayStage>) {
+    if (this.active || this.busy) return;
+    const values = [1, 3, 5, 10, 15, 20, 24];
+    const menu = this.add.container(0, 0).setDepth(2200).setScrollFactor(0);
+    const rowH = 32;
+    const top = stage.top + 172;
+    const panel = this.add.graphics();
+    panel.fillStyle(Tokens.color.surfaceRaised, 1).fillRoundedRect(stage.left, top, stage.contentW, rowH * values.length, Tokens.radius.md);
+    panel.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(stage.left, top, stage.contentW, rowH * values.length, Tokens.radius.md);
+    menu.add(panel);
+    values.forEach((value, index) => {
+      const y = top + index * rowH;
+      if (index) panel.lineStyle(1, Tokens.color.hairline, 0.7).lineBetween(stage.left, y, stage.right, y);
+      menu.add(makeText(this, stage.left + Tokens.space.md, y + rowH / 2, `${value} mines`, { size: Tokens.type.size.sm, weight: value === this.selectedMineCount ? Tokens.type.weight.bold : Tokens.type.weight.semibold, color: value === this.selectedMineCount ? Tokens.text.accent : Tokens.text.primary, originY: 0.5 }));
+      menu.add(makeText(this, stage.right - Tokens.space.md, y + rowH / 2, `${TOTAL_TILES - value} gems`, { size: Tokens.type.size.xs, color: Tokens.text.secondary, align: "right", originX: 1, originY: 0.5 }));
+      const hit = this.add.zone(stage.controls.x + stage.controls.w / 2, y + rowH / 2, stage.contentW, rowH).setInteractive({ useHandCursor: true });
+      hit.on("pointerup", () => { this.selectedMineCount = value; this.scene.restart(); });
+      menu.add(hit);
+    });
+  }
+
   private buildEmptyGridVisuals() {
     this.tiles.forEach((t) => t.container.destroy());
     this.tiles = [];
 
-    const totalWidth = GRID_SIZE * TILE_SIZE + (GRID_SIZE - 1) * TILE_GAP;
-    const totalHeight = GRID_SIZE * TILE_SIZE + (GRID_SIZE - 1) * TILE_GAP;
-    const startX = GRID_CENTER_X - totalWidth / 2 + TILE_SIZE / 2;
-    const startY = GRID_CENTER_Y - totalHeight / 2 + TILE_SIZE / 2;
+    const totalWidth = GRID_SIZE * this.tileSize + (GRID_SIZE - 1) * this.tileGap;
+    const totalHeight = GRID_SIZE * this.tileSize + (GRID_SIZE - 1) * this.tileGap;
+    const startX = this.gridCenterX - totalWidth / 2 + this.tileSize / 2;
+    const startY = this.gridCenterY - totalHeight / 2 + this.tileSize / 2;
 
     for (let row = 0; row < GRID_SIZE; row++) {
       for (let col = 0; col < GRID_SIZE; col++) {
-        const x = startX + col * (TILE_SIZE + TILE_GAP);
-        const y = startY + row * (TILE_SIZE + TILE_GAP);
+        const x = startX + col * (this.tileSize + this.tileGap);
+        const y = startY + row * (this.tileSize + this.tileGap);
         this.tiles.push(this.makeTile(x, y));
       }
     }
@@ -155,7 +224,7 @@ export class MinesScene extends Phaser.Scene {
   }
 
   private paintTile(bg: Phaser.GameObjects.Graphics, label: Phaser.GameObjects.Text, state: TileState) {
-    this.fillTile(bg, TILE_FILL[state]);
+    this.fillTile(bg, this.directQuickplay && state === "hidden" ? Tokens.color.surfaceRaised : TILE_FILL[state]);
 
     if (state === "gem") label.setText("💎").setColor(Tokens.text.accent);
     else if (state === "mine") label.setText("💣").setColor(Tokens.text.negative);
@@ -164,8 +233,12 @@ export class MinesScene extends Phaser.Scene {
 
   private fillTile(bg: Phaser.GameObjects.Graphics, fill: number) {
     bg.clear();
+    if (this.directQuickplay) {
+      bg.fillStyle(Tokens.color.scrim, 0.75);
+      bg.fillRoundedRect(-this.tileSize / 2, -this.tileSize / 2 + 5, this.tileSize, this.tileSize, Tokens.radius.sm);
+    }
     bg.fillStyle(fill, 1);
-    bg.fillRoundedRect(-TILE_SIZE / 2, -TILE_SIZE / 2, TILE_SIZE, TILE_SIZE, Tokens.radius.sm);
+    bg.fillRoundedRect(-this.tileSize / 2, -this.tileSize / 2, this.tileSize, this.tileSize, Tokens.radius.sm);
   }
 
   /**
@@ -204,7 +277,7 @@ export class MinesScene extends Phaser.Scene {
    */
   private attemptStart(bet: number, allowRecovery: boolean) {
     api
-      .startMines(bet, "GC")
+      .startMines(bet, "GC", this.directQuickplay ? this.selectedMineCount : MINE_COUNT)
       .then((res) => {
         gameState.hydrateFromServer(res.user);
         this.roundId = res.roundId;
@@ -286,7 +359,7 @@ export class MinesScene extends Phaser.Scene {
         this.paintTile(tile.bg, tile.label, "gem");
       } else if (this.active && !this.busy) {
         this.paintTile(tile.bg, tile.label, "clickable");
-        tile.container.setSize(TILE_SIZE, TILE_SIZE);
+        tile.container.setSize(this.tileSize, this.tileSize);
         tile.container.setInteractive({ useHandCursor: true });
         // Hover lifts the tile one surface step, the same way every button
         // in this system signals "you can press this" - no glow, no ring.

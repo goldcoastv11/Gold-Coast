@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation, notifyLounge } from "../mobile/arcadeBridge";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
 import {
@@ -18,6 +19,7 @@ import {
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, drawQuickReadout, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { track, EVENTS } from "../api/track";
@@ -74,6 +76,10 @@ function multiplierFor(target: number): number {
 }
 
 export class DiceScene extends Phaser.Scene {
+  private directQuickplay = false;
+  private barX = BAR_X;
+  private barY = BAR_Y;
+  private barWidth = BAR_WIDTH;
   private target = DEFAULT_TARGET;
   private rolling = false;
   private rollTimer?: Phaser.Time.TimerEvent;
@@ -104,6 +110,8 @@ export class DiceScene extends Phaser.Scene {
     this.rollTimer = undefined;
     this.lastRoll = null;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) this.scale.once("resize", () => this.scene.restart());
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.rollTimer) {
@@ -111,6 +119,11 @@ export class DiceScene extends Phaser.Scene {
         this.rollTimer = undefined;
       }
     });
+
+    if (this.directQuickplay) {
+      this.createDirectQuickplay();
+      return;
+    }
 
     this.shell = makeGameShell(this, "DICE", "ROLL", {
       onStart: () => this.roll(),
@@ -203,6 +216,35 @@ export class DiceScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplay() {
+    const stage = createQuickplayStage(this);
+    drawManualAuto(this, stage, 32);
+    drawQuickLabel(this, stage, 78, "Amount");
+    this.betControl = makeQuickBetControl(this, stage, 120);
+    this.rollBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 174, stage.contentW, 44, "Play", 0x1f7ae0, 0x2b8bf0, () => this.roll(), Tokens.text.primary, Tokens.radius.md);
+    this.balanceText = makeText(this, -100, -100, "");
+    this.messageText = drawQuickReadout(this, stage, 214, "Net Gain on Win", `${multiplierFor(this.target).toFixed(2)}×`);
+    makeQuickBackButton(this, stage, () => notifyLounge("gc-game-exit"));
+
+    const cx = stage.board.x + stage.board.w / 2;
+    this.barX = cx;
+    this.barY = stage.board.y + stage.board.h * 0.45;
+    this.barWidth = Math.min(stage.board.w - 110, 700);
+    this.zoneBar = this.add.graphics();
+    this.marker = this.add.triangle(this.barX, this.barY - 18, -6, 8, 6, 8, 0, -6, 0x4a90e2).setVisible(false);
+    [0, 25, 50, 75, 100].forEach((v) => makeText(this, this.barX - this.barWidth / 2 + this.barWidth * v / 100, this.barY - 50, String(v), { size: Tokens.type.size.sm, weight: Tokens.type.weight.bold, color: Tokens.text.primary, originX: 0.5 }));
+    this.targetLabel = makeText(this, cx, this.barY + 54, "", { size: Tokens.type.size.xl, weight: Tokens.type.weight.bold, color: Tokens.text.primary, originX: 0.5 });
+    this.rollText = makeText(this, cx, stage.board.y + 92, "--", { size: Tokens.type.size.display, weight: Tokens.type.weight.bold, color: Tokens.text.primary, originX: 0.5 });
+    const panelY = stage.board.y + stage.board.h - 76;
+    const cellW = Math.min(210, (stage.board.w - 70) / 3);
+    this.minusBtn = makeButton(this, cx - cellW - 8, panelY, cellW, 54, "−5  Target", Tokens.color.surface, Tokens.color.surfaceHover, () => this.adjustTarget(-TARGET_STEP), Tokens.text.primary, Tokens.radius.md);
+    this.plusBtn = makeButton(this, cx + cellW + 8, panelY, cellW, 54, "+5  Target", Tokens.color.surface, Tokens.color.surfaceHover, () => this.adjustTarget(TARGET_STEP), Tokens.text.primary, Tokens.radius.md);
+    this.statsText = makeText(this, cx, panelY, "", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.secondary, align: "center", originX: 0.5, originY: 0.5 });
+    this.redrawZoneBar();
+    this.updateTargetLabel();
+    this.updateBalance();
+  }
+
   private adjustTarget(delta: number) {
     if (this.rolling) return;
     this.target = Phaser.Math.Clamp(this.target + delta, TARGET_MIN, TARGET_MAX);
@@ -218,24 +260,24 @@ export class DiceScene extends Phaser.Scene {
 
   /** Draws the win (accent) / lose (negative) zone bar for the current target. */
   private redrawZoneBar() {
-    const left = BAR_X - BAR_WIDTH / 2;
-    const winWidth = (this.target / 100) * BAR_WIDTH;
+    const left = this.barX - this.barWidth / 2;
+    const winWidth = (this.target / 100) * this.barWidth;
 
     this.zoneBar.clear();
     this.zoneBar.fillStyle(Tokens.color.accent, 1);
-    this.zoneBar.fillRoundedRect(left, BAR_Y - BAR_H / 2, winWidth, BAR_H, Tokens.radius.xs);
+    this.zoneBar.fillRoundedRect(left, this.barY - BAR_H / 2, winWidth, BAR_H, Tokens.radius.xs);
     this.zoneBar.fillStyle(Tokens.color.negative, 1);
     this.zoneBar.fillRoundedRect(
       left + winWidth,
-      BAR_Y - BAR_H / 2,
-      BAR_WIDTH - winWidth,
+      this.barY - BAR_H / 2,
+      this.barWidth - winWidth,
       BAR_H,
       Tokens.radius.xs
     );
 
     if (this.lastRoll !== null) {
-      const markerX = left + (this.lastRoll / 99) * BAR_WIDTH;
-      this.marker.setPosition(markerX, BAR_Y - BAR_H).setVisible(true);
+      const markerX = left + (this.lastRoll / 99) * this.barWidth;
+      this.marker.setPosition(markerX, this.barY - BAR_H).setVisible(true);
     }
   }
 

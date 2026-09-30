@@ -1,9 +1,11 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
 import {
   makeGameShell,
+  makeButton,
   makeText,
   formatBalance,
   GameShellHandle,
@@ -41,6 +43,18 @@ const SLOT_H = 26;
 
 // Symmetric payout table, one entry per slot (index = number of "right" bounces) - mirrors server/src/games/plinko.ts's PLINKO_MULTIPLIERS exactly (display/preview only; the server is what actually resolves a drop, see drop()).
 const MULTIPLIERS = [16, 5, 1.2, 0.5, 0.2, 0.5, 1.2, 5, 16];
+const MEDIUM_ROWS = 12;
+const MEDIUM_MULTIPLIERS = [100, 20, 5, 2, 0.8, 0.4, 0.3, 0.4, 0.8, 2, 5, 20, 100];
+const QUICKPLAY_ROWS = 16;
+const QUICKPLAY_MULTIPLIERS = [1000, 130, 26, 9, 4, 2, 0.2, 0.2, 0.2, 0.2, 0.2, 2, 4, 9, 26, 130, 1000];
+
+type DirectDifficulty = "low" | "medium" | "high";
+
+const DIRECT_CONFIGS: Record<DirectDifficulty, { rows: 8 | 12 | 16; multipliers: readonly number[] }> = {
+  low: { rows: ROWS, multipliers: MULTIPLIERS },
+  medium: { rows: MEDIUM_ROWS, multipliers: MEDIUM_MULTIPLIERS },
+  high: { rows: QUICKPLAY_ROWS, multipliers: QUICKPLAY_MULTIPLIERS }
+};
 
 /**
  * Slot label colour, on the Stake-style direction (see ui/DesignTokens.ts).
@@ -68,6 +82,16 @@ export class PlinkoScene extends Phaser.Scene {
   private dropBtn?: UIButton;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
+  private directQuickplay = false;
+  private rows = ROWS;
+  private rowSpacing = ROW_SPACING;
+  private pegSpacing = PEG_SPACING;
+  private boardTopY = BOARD_TOP_Y;
+  private boardCenterX = BOARD_CENTER_X;
+  private slotsY = SLOTS_Y;
+  private multipliers: readonly number[] = MULTIPLIERS;
+  private directDifficulty: DirectDifficulty = "high";
+  private difficultyMenu?: Phaser.GameObjects.Container;
 
   constructor() {
     super("PlinkoScene");
@@ -78,11 +102,18 @@ export class PlinkoScene extends Phaser.Scene {
     playMusic(this, "flowingRocks");
     this.dropping = false;
     this.slotTexts = [];
+    this.difficultyMenu = undefined;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.tweens.killTweensOf(this.ball);
     });
+
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) {
+      this.scale.once("resize", () => this.scene.restart());
+      this.createDirectQuickplayLayout();
+    } else {
 
     // Stake-style shell: left sidebar (title/balance/bet/message/Drop
     // Ball/Walk Away) + open right-side display area for the pegs board -
@@ -103,6 +134,7 @@ export class PlinkoScene extends Phaser.Scene {
     // family width used elsewhere (Slots/Dragon Tower/Dice) so the whole set
     // reads as one system rather than hugging the pegs tightly.
     drawCabinetFrame(this, BOARD_CENTER_X, BOARD_CY, BOARD_W, BOARD_H);
+    }
 
     this.drawPegs();
     this.drawSlots();
@@ -111,13 +143,175 @@ export class PlinkoScene extends Phaser.Scene {
     // has to read against every slot it can land on without claiming a
     // colour of its own.
     this.ball = this.add.circle(
-      BOARD_CENTER_X,
-      BOARD_TOP_Y - Tokens.space.lg,
+      this.boardCenterX,
+      this.boardTopY - Tokens.space.lg,
       BALL_RADIUS,
       Tokens.color.textPrimary
     );
 
     this.updateBalance();
+  }
+
+  private createDirectQuickplayLayout() {
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const portrait = height > width;
+    const controls = portrait
+      ? { x: 0, y: 600, w: width, h: height - 600 }
+      : { x: 0, y: 0, w: Math.max(236, Math.min(314, Math.round(width * 0.26))), h: height };
+    const board = portrait
+      ? { x: 0, y: 0, w: width, h: 600 }
+      : { x: controls.w, y: 0, w: width - controls.w, h: height };
+    const left = controls.x + Tokens.space.md;
+    const right = controls.x + controls.w - Tokens.space.md;
+    const contentW = right - left;
+    const top = controls.y;
+
+    const config = DIRECT_CONFIGS[this.directDifficulty];
+    this.rows = config.rows;
+    this.multipliers = config.multipliers;
+    this.boardCenterX = board.x + board.w / 2;
+    this.rowSpacing = 27;
+    this.pegSpacing = Math.min(29, (board.w - 58) / this.rows);
+    this.boardTopY = board.y + 48;
+    this.slotsY = this.boardTopY + this.rows * this.rowSpacing + 26;
+
+    const ground = this.add.graphics().setDepth(-1000).setScrollFactor(0);
+    ground.fillStyle(Tokens.color.bg, 1).fillRect(0, 0, width, height);
+    const boardSurface = this.add.graphics().setDepth(-20);
+    boardSurface.fillStyle(0x0d202d, 1).fillRect(board.x, board.y, board.w, board.h);
+    boardSurface.fillStyle(Tokens.color.surface, 0.42).fillRect(board.x, board.y, board.w, 16);
+    const controlSurface = this.add.graphics().setDepth(-10).setScrollFactor(0);
+    controlSurface.fillStyle(Tokens.color.surface, 1).fillRect(controls.x, controls.y, controls.w, controls.h);
+    if (portrait) controlSurface.lineStyle(2, Tokens.color.hairline, 1).lineBetween(0, controls.y, width, controls.y);
+
+    this.drawModeSwitch(controls.x + controls.w / 2, top + 30, contentW);
+    makeText(this, left, top + 61, "AMOUNT", {
+      size: Tokens.type.size.xs,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.secondary,
+      tracking: Tokens.type.tracking.label
+    }).setScrollFactor(0);
+    this.balanceText = makeText(this, right, top + 61, "", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      align: "right",
+      originX: 1
+    }).setScrollFactor(0);
+    this.betControl = this.makeDirectBetControl(controls.x + controls.w / 2, top + 89, contentW);
+
+    const difficultyLabel = this.directDifficulty[0].toUpperCase() + this.directDifficulty.slice(1);
+    this.drawSelect(left, right, top + 120, "DIFFICULTY", difficultyLabel, () => this.toggleDifficultyMenu(left, right, top + 151));
+    this.drawSelect(left, right, top + 191, "ROWS · AUTO", String(this.rows));
+
+    const playButton = makeButton(this, controls.x + controls.w / 2, top + 270, contentW, 44, "PLAY", Tokens.color.info, Tokens.color.infoHover, () => this.drop(), Tokens.text.primary, Tokens.radius.md);
+    playButton.container.setScrollFactor(0);
+    this.dropBtn = playButton;
+    this.messageText = makeText(this, left, top + 300, "Tap Difficulty to change the board, then Play.", {
+      size: Tokens.type.size.sm,
+      color: Tokens.text.muted,
+      wordWrapWidth: contentW,
+      originY: 0
+    }).setScrollFactor(0);
+    const back = makeButton(this, controls.x + controls.w / 2, controls.y + controls.h - 28, contentW, 34, "BACK TO GAMES", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => fadeToScene(this, "OverworldScene"), Tokens.text.secondary, Tokens.radius.sm);
+    back.container.setScrollFactor(0);
+  }
+
+  private drawModeSwitch(x: number, y: number, width: number) {
+    const bg = this.add.graphics().setScrollFactor(0);
+    bg.fillStyle(Tokens.color.inset, 1).fillRoundedRect(x - width / 2, y - 22, width, 44, 22);
+    bg.fillStyle(Tokens.color.surfaceHover, 1).fillRoundedRect(x - width / 2 + 3, y - 19, width / 2 - 3, 38, 19);
+    makeText(this, x - width / 4, y, "Manual", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, align: "center", originX: 0.5, originY: 0.5 }).setScrollFactor(0);
+    makeText(this, x + width / 4, y, "Auto", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.secondary, align: "center", originX: 0.5, originY: 0.5 }).setScrollFactor(0);
+  }
+
+  private drawSelect(left: number, right: number, labelY: number, label: string, value: string, onClick?: () => void) {
+    makeText(this, left, labelY, label, { size: Tokens.type.size.xs, weight: Tokens.type.weight.semibold, color: Tokens.text.secondary, tracking: Tokens.type.tracking.label }).setScrollFactor(0);
+    const y = labelY + 31;
+    const g = this.add.graphics().setScrollFactor(0);
+    g.fillStyle(Tokens.color.inset, 1).fillRoundedRect(left, y - 20, right - left, 40, Tokens.radius.md);
+    g.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(left, y - 20, right - left, 40, Tokens.radius.md);
+    makeText(this, left + Tokens.space.md, y, value, { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, originY: 0.5 }).setScrollFactor(0);
+    makeText(this, right - Tokens.space.md, y, onClick ? "⌄" : "AUTO", { size: onClick ? Tokens.type.size.lg : Tokens.type.size.xs, color: onClick ? Tokens.text.primary : Tokens.text.muted, align: "right", originX: 1, originY: 0.5 }).setScrollFactor(0);
+    if (onClick) {
+      this.add
+        .zone((left + right) / 2, y, right - left, 40)
+        .setScrollFactor(0)
+        .setInteractive({ useHandCursor: true })
+        .on("pointerup", onClick);
+    }
+  }
+
+  private toggleDifficultyMenu(left: number, right: number, anchorY: number) {
+    if (this.dropping) return;
+    if (this.difficultyMenu) {
+      this.difficultyMenu.destroy(true);
+      this.difficultyMenu = undefined;
+      return;
+    }
+
+    const width = right - left;
+    const itemH = 36;
+    const options: DirectDifficulty[] = ["low", "medium", "high"];
+    const menu = this.add.container(0, 0).setDepth(2000).setScrollFactor(0);
+    const panel = this.add.graphics();
+    panel.fillStyle(Tokens.color.surfaceRaised, 1).fillRoundedRect(left, anchorY + 23, width, itemH * options.length, Tokens.radius.md);
+    panel.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(left, anchorY + 23, width, itemH * options.length, Tokens.radius.md);
+    menu.add(panel);
+
+    options.forEach((difficulty, index) => {
+      const rowY = anchorY + 23 + index * itemH;
+      if (index > 0) panel.lineStyle(1, Tokens.color.hairline, 0.7).lineBetween(left, rowY, right, rowY);
+      const label = difficulty[0].toUpperCase() + difficulty.slice(1);
+      const rowCount = DIRECT_CONFIGS[difficulty].rows;
+      menu.add(makeText(this, left + Tokens.space.md, rowY + itemH / 2, label, {
+        size: Tokens.type.size.sm,
+        weight: difficulty === this.directDifficulty ? Tokens.type.weight.bold : Tokens.type.weight.semibold,
+        color: difficulty === this.directDifficulty ? Tokens.text.accent : Tokens.text.primary,
+        originY: 0.5
+      }));
+      menu.add(makeText(this, right - Tokens.space.md, rowY + itemH / 2, `${rowCount} rows`, {
+        size: Tokens.type.size.xs,
+        color: Tokens.text.secondary,
+        align: "right",
+        originX: 1,
+        originY: 0.5
+      }));
+      const hitArea = this.add.zone((left + right) / 2, rowY + itemH / 2, width, itemH).setInteractive({ useHandCursor: true });
+      hitArea.on("pointerup", () => {
+        this.directDifficulty = difficulty;
+        this.scene.restart();
+      });
+      menu.add(hitArea);
+    });
+    this.difficultyMenu = menu;
+  }
+
+  private makeDirectBetControl(x: number, y: number, width: number): BetControl {
+    const container = this.add.container(x, y).setScrollFactor(0);
+    const cellW = 44;
+    const gap = Tokens.space.xs;
+    const fieldW = width - cellW * 2 - gap * 2;
+    const left = -width / 2;
+    const fieldX = left + fieldW / 2;
+    const field = this.add.graphics();
+    field.fillStyle(Tokens.color.inset, 1).fillRoundedRect(fieldX - fieldW / 2, -20, fieldW, 40, Tokens.radius.md);
+    field.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(fieldX - fieldW / 2, -20, fieldW, 40, Tokens.radius.md);
+    const amount = makeText(this, fieldX - fieldW / 2 + Tokens.space.md, 0, "", { size: Tokens.type.size.lg, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, originY: 0.5 });
+    const coin = this.add.graphics();
+    coin.fillStyle(0xffc800, 1).fillCircle(fieldX + fieldW / 2 - 15, 0, 9);
+    const coinLabel = makeText(this, fieldX + fieldW / 2 - 15, 0, "G", { size: Tokens.type.size.xs, weight: Tokens.type.weight.bold, color: Tokens.text.onAccent, align: "center", originX: 0.5, originY: 0.5 });
+    const refresh = () => amount.setText(gameState.betAmount.toFixed(2));
+    const half = makeButton(this, left + fieldW + gap + cellW / 2, 0, cellW, 40, "½", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => { gameState.setBet(gameState.betAmount / 2); refresh(); }, Tokens.text.secondary, Tokens.radius.sm);
+    const twice = makeButton(this, left + fieldW + gap * 2 + cellW * 1.5, 0, cellW, 40, "2×", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => { gameState.setBet(gameState.betAmount * 2); refresh(); }, Tokens.text.secondary, Tokens.radius.sm);
+    container.add([field, amount, coin, coinLabel, half.container, twice.container]);
+    refresh();
+    return {
+      container,
+      refresh,
+      setEnabled: (enabled: boolean) => { half.setEnabled(enabled); twice.setEnabled(enabled); container.setAlpha(enabled ? 1 : Tokens.motion.disabledAlpha); },
+      destroy: () => container.destroy()
+    };
   }
 
   /**
@@ -127,25 +321,39 @@ export class PlinkoScene extends Phaser.Scene {
    * outlined boxes rather than as the quiet obstacle field it is.
    */
   private drawPegs() {
-    for (let r = 0; r < ROWS; r++) {
-      const y = BOARD_TOP_Y + r * ROW_SPACING;
+    for (let r = 0; r < this.rows; r++) {
+      const y = this.boardTopY + r * this.rowSpacing;
       for (let p = 0; p <= r; p++) {
-        const x = BOARD_CENTER_X + (2 * p - r) * (PEG_SPACING / 2);
-        this.add.circle(x, y, PEG_RADIUS, Tokens.color.textMuted);
+        const x = this.boardCenterX + (2 * p - r) * (this.pegSpacing / 2);
+        this.add.circle(x, y, this.directQuickplay ? 4 : PEG_RADIUS, this.directQuickplay ? Tokens.color.textPrimary : Tokens.color.textMuted);
       }
     }
   }
 
   /** Static row of multiplier buckets under the board, one per possible landing slot. */
   private drawSlots() {
-    const slotWidth = PEG_SPACING;
-    MULTIPLIERS.forEach((mult, i) => {
-      const x = BOARD_CENTER_X + (2 * i - ROWS) * (PEG_SPACING / 2);
-      makeInset(this, x, SLOTS_Y, slotWidth - Tokens.space.xxs, SLOT_H, Tokens.radius.xs);
-      const label = makeText(this, x, SLOTS_Y, `${mult}x`, {
+    const slotWidth = this.pegSpacing;
+    this.multipliers.forEach((mult, i) => {
+      const x = this.boardCenterX + (2 * i - this.rows) * (this.pegSpacing / 2);
+      if (this.directQuickplay) {
+        const distance = Math.abs(i - this.rows / 2) / (this.rows / 2);
+        const fill = Phaser.Display.Color.Interpolate.ColorWithColor(
+          Phaser.Display.Color.ValueToColor(0xa94be0),
+          Phaser.Display.Color.ValueToColor(0xf08af7),
+          100,
+          Math.round(distance * 100)
+        );
+        const color = Phaser.Display.Color.GetColor(fill.r, fill.g, fill.b);
+        const bucket = this.add.graphics();
+        bucket.fillStyle(color, 1).fillRoundedRect(x - slotWidth / 2 + 1, this.slotsY - SLOT_H / 2, slotWidth - 2, SLOT_H, Tokens.radius.xs);
+      } else {
+        makeInset(this, x, this.slotsY, slotWidth - Tokens.space.xxs, SLOT_H, Tokens.radius.xs);
+      }
+      const shown = mult >= 1000 ? "1K" : Number.isInteger(mult) && mult >= 10 ? String(mult) : mult.toFixed(1);
+      const label = makeText(this, x, this.slotsY, this.directQuickplay ? shown : `${mult}x`, {
         size: Tokens.type.size.xs,
         weight: Tokens.type.weight.semibold,
-        color: textColorForMultiplier(mult),
+        color: this.directQuickplay ? Tokens.text.onAccent : textColorForMultiplier(mult),
         align: "center",
         originX: 0.5,
         originY: 0.5
@@ -170,13 +378,17 @@ export class PlinkoScene extends Phaser.Scene {
     this.messageText.setText("Dropping...").setColor(Tokens.text.muted);
 
     api
-      .playPlinko(bet, "GC")
+      .playPlinko(
+        bet,
+        "GC",
+        this.directQuickplay ? { rows: DIRECT_CONFIGS[this.directDifficulty].rows, difficulty: this.directDifficulty } : {}
+      )
       .then((res) => {
         const waypoints = res.result.path.map((rightCount, step) => ({
-          x: BOARD_CENTER_X + (2 * rightCount - (step + 1)) * (PEG_SPACING / 2),
-          y: BOARD_TOP_Y + (step + 1) * ROW_SPACING
+          x: this.boardCenterX + (2 * rightCount - (step + 1)) * (this.pegSpacing / 2),
+          y: this.boardTopY + (step + 1) * this.rowSpacing
         }));
-        this.ball.setPosition(BOARD_CENTER_X, BOARD_TOP_Y - Tokens.space.lg);
+        this.ball.setPosition(this.boardCenterX, this.boardTopY - Tokens.space.lg);
         playSfx(this, "ballDrop");
         this.animateStep(waypoints, 0, () => this.resolveDrop(res));
       })

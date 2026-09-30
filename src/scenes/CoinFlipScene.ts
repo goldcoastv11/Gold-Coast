@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation, notifyLounge } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -24,6 +25,7 @@ import { track, EVENTS } from "../api/track";
 import type { CoinSide } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, drawQuickReadout, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 
 /**
  * COIN FLIP, on the Stake-style direction (see ui/DesignTokens.ts).
@@ -60,6 +62,9 @@ const SIDE_BTN_W = (BOARD_RIGHT - BOARD_LEFT - Tokens.space.sm) / 2;
 const TUTORIAL_HINT_Y = 134;
 
 export class CoinFlipScene extends Phaser.Scene {
+  private directQuickplay = false;
+  private history: CoinSide[] = [];
+  private historyText?: Phaser.GameObjects.Text;
   private coinText!: Phaser.GameObjects.Text;
   private messageText!: Phaser.GameObjects.Text;
   private balanceText!: Phaser.GameObjects.Text;
@@ -84,6 +89,9 @@ export class CoinFlipScene extends Phaser.Scene {
     this.flipping = false;
     this.flipTimer = undefined;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) this.scale.once("resize", () => this.scene.restart());
+    this.history = [];
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       if (this.flipTimer) {
@@ -92,6 +100,11 @@ export class CoinFlipScene extends Phaser.Scene {
       }
       this.tweens.killTweensOf(this.coinText);
     });
+
+    if (this.directQuickplay) {
+      this.createDirectQuickplay();
+      return;
+    }
 
     this.shell = makeGameShell(this, "COIN FLIP", "FLIP", {
       onStart: () => {},
@@ -113,7 +126,7 @@ export class CoinFlipScene extends Phaser.Scene {
     drawCabinetFrame(this, BOARD_CX, BOARD_CY, BOARD_W, BOARD_H);
 
     // --- Hero coin ------------------------------------------------------
-    makeText(this, BOARD_CX, HERO_LABEL_Y, "COIN", {
+    const coinLabel = makeText(this, BOARD_CX, HERO_LABEL_Y, "COIN", {
       size: Tokens.type.size.xs,
       color: Tokens.text.muted,
       tracking: Tokens.type.tracking.caps,
@@ -125,11 +138,12 @@ export class CoinFlipScene extends Phaser.Scene {
       align: "center",
       originX: 0.5
     });
+    if (loungePresentation()) { coinLabel.setVisible(false); this.coinText.setVisible(false); }
 
-    makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
+    const divider = makeDivider(this, BOARD_LEFT, DIVIDER_Y, BOARD_RIGHT);
 
     // --- Side picker ----------------------------------------------------
-    makeText(this, BOARD_LEFT, SECTION_LABEL_Y, "PICK A SIDE", {
+    const sideLabel = makeText(this, BOARD_LEFT, SECTION_LABEL_Y, "PICK A SIDE", {
       size: Tokens.type.size.xs,
       color: Tokens.text.muted,
       tracking: Tokens.type.tracking.caps
@@ -161,6 +175,26 @@ export class CoinFlipScene extends Phaser.Scene {
       Tokens.text.onAccent,
       Tokens.radius.md
     );
+
+    if (loungePresentation()) {
+      // During a social turn, controls sit on the near edge of the physical
+      // table. The shared Three.js coin remains the only result display, so
+      // every seat watches the same flip instead of the current player seeing
+      // a second private coin on top of the Lounge.
+      divider.setVisible(false);
+      const panel = this.add.graphics().setDepth(-0.5).setScrollFactor(0);
+      panel.fillStyle(0x102a34, .82).fillRoundedRect(355, 244, 310, 126, 16);
+      panel.lineStyle(2, 0xe5bb72, .72).strokeRoundedRect(355, 244, 310, 126, 16);
+      this.shell.balanceLabel.setPosition(375, 258).setScale(1.08).setColor(Tokens.text.secondary);
+      this.balanceText.setPosition(645, 258).setScale(1.08).setOrigin(1, 0);
+      this.shell.betLabel.setPosition(375, 282).setScale(1.08).setColor(Tokens.text.secondary);
+      this.betControl.setPosition?.(515, 307);
+      this.shell.multiplierText.setPosition(375, 334).setScale(1.08);
+      this.messageText.setPosition(485, 334).setScale(.94).setWordWrapWidth(160).setOrigin(0, 0);
+      sideLabel.setVisible(false);
+      this.headsBtn.container.setPosition(430, 356).setScale(1.04);
+      this.tailsBtn.container.setPosition(590, 356).setScale(1.04);
+    }
 
     // Onboarding tutorial's "Play a Game" hands-on step - per user
     // direction, WALK AWAY needs to be unclickable here: it exits back to
@@ -201,6 +235,37 @@ export class CoinFlipScene extends Phaser.Scene {
       this.tutorialHint.container.setDepth(600);
     }
 
+    this.updateBalance();
+  }
+
+  private createDirectQuickplay() {
+    const stage = createQuickplayStage(this);
+    drawManualAuto(this, stage, 32);
+    drawQuickLabel(this, stage, 78, "Amount");
+    this.betControl = makeQuickBetControl(this, stage, 120);
+
+    const buttonY = stage.top + 184;
+    const gap = 8;
+    const sideW = (stage.contentW - gap) / 2;
+    this.headsBtn = makeButton(this, stage.left + sideW / 2, buttonY, sideW, 44, "Heads  ●", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => this.flip("heads"), Tokens.text.primary, Tokens.radius.md);
+    this.tailsBtn = makeButton(this, stage.right - sideW / 2, buttonY, sideW, 44, "Tails  ◆", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => this.flip("tails"), Tokens.text.primary, Tokens.radius.md);
+    this.balanceText = makeText(this, -100, -100, "");
+    this.messageText = drawQuickReadout(this, stage, 220, "Result", "Pick Heads or Tails");
+    makeQuickBackButton(this, stage, () => notifyLounge("gc-game-exit"));
+
+    const cx = stage.board.x + stage.board.w / 2;
+    const cy = stage.board.y + stage.board.h * 0.43;
+    const coin = this.add.graphics();
+    coin.fillStyle(0xffa300, 1).fillCircle(cx, cy, Math.min(112, stage.board.w * 0.18));
+    coin.lineStyle(6, 0xff6b00, 1).strokeCircle(cx, cy, Math.min(112, stage.board.w * 0.18));
+    coin.fillStyle(0x0d202d, 1).fillCircle(cx, cy, Math.min(58, stage.board.w * 0.095));
+    this.coinText = makeText(this, cx, cy, "?", { size: "64px", weight: Tokens.type.weight.bold, color: "#ffffff", originX: 0.5, originY: 0.5 });
+
+    const historyY = stage.board.y + stage.board.h - 60;
+    drawQuickLabel(this, { ...stage, left: stage.board.x + 24, top: stage.board.y } as any, stage.board.h - 104, "History");
+    const historyBg = this.add.graphics();
+    historyBg.fillStyle(Tokens.color.surface, 1).fillRoundedRect(stage.board.x + 20, historyY - 20, stage.board.w - 40, 44, Tokens.radius.md);
+    this.historyText = makeText(this, stage.board.x + 36, historyY + 2, "No flips yet", { size: Tokens.type.size.sm, color: Tokens.text.secondary, originY: 0.5 });
     this.updateBalance();
   }
 
@@ -248,7 +313,7 @@ export class CoinFlipScene extends Phaser.Scene {
       loop: true,
       callback: () => {
         if (this.coinText.active) {
-          this.coinText.setText(ticks % 2 === 0 ? "🪙" : "🟡");
+          this.coinText.setText(this.directQuickplay ? (ticks % 2 === 0 ? "H" : "T") : (ticks % 2 === 0 ? "🪙" : "🟡"));
         }
         ticks++;
       }
@@ -279,10 +344,11 @@ export class CoinFlipScene extends Phaser.Scene {
     this.flipTween?.stop();
     this.flipTween = undefined;
 
-    gameState.hydrateFromServer(res.user);
-    this.coinText.setText("🪙").setScale(1);
-
     const { result, won, payout } = res.result;
+    gameState.hydrateFromServer(res.user);
+    this.coinText.setText(this.directQuickplay ? result.toUpperCase().slice(0, 1) : "🪙").setScale(1);
+    this.history.unshift(result);
+    this.historyText?.setText(this.history.slice(0, 12).map((side) => side === "heads" ? "●" : "◆").join("   "));
 
     // Retention Leg 1 (see src/api/track.ts). Recorded from the SERVER's
     // resolved result, not the local animation, and only once a round has
@@ -340,7 +406,7 @@ export class CoinFlipScene extends Phaser.Scene {
     this.flipTimer = undefined;
     this.flipTween?.stop();
     this.flipTween = undefined;
-    this.coinText.setText("🪙").setScale(1);
+    this.coinText.setText(this.directQuickplay ? "?" : "🪙").setScale(1);
 
     if (err instanceof ApiError && err.code === "INSUFFICIENT_BALANCE") {
       this.messageText.setText("Not enough Gold Coins.").setColor(Tokens.text.negative);

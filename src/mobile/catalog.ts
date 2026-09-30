@@ -1,4 +1,4 @@
-import { BLACKJACK_TABLES } from '../../server/src/multiplayer/room';
+import { SOCIAL_TABLES } from '../../server/src/multiplayer/room';
 
 export const GAMES = [
   { id: 'blackjack', name: 'Blackjack', scene: 'BlackjackScene', icon: '♠', description: 'Take a seat against the dealer', category: 'Cards' },
@@ -19,14 +19,7 @@ export const GAMES = [
 export type GameId = typeof GAMES[number]['id'];
 export type Station = { id: string; name: string; game: GameId; x: number; z: number; color: string };
 export const STATIONS: Station[] = [
-  ...BLACKJACK_TABLES.map(t => ({ ...t, game: 'blackjack' as const, color: '#1f706d' })),
-  { id: 'roulette', name: 'Sunset Roulette', game: 'roulette', x: -7, z: 5, color: '#773943' },
-  { id: 'baccarat', name: 'Pearl Baccarat', game: 'baccarat', x: 0, z: 6, color: '#514675' },
-  { id: 'slots', name: 'Golden Slots', game: 'slots', x: 7, z: 5, color: '#997333' },
-  ...GAMES.filter(g => !['blackjack', 'roulette', 'baccarat', 'slots'].includes(g.id)).map((g, i) => {
-    const positions = [[-15,-2],[15,-2],[-15,5],[15,5],[-14,13],[-7,13],[0,13],[7,13],[14,13],[0,20]];
-    return { id: g.id, name: g.name, game: g.id, x: positions[i][0], z: positions[i][1], color: '#225660' };
-  }),
+  ...SOCIAL_TABLES.map(t => ({ ...t, game: t.game as GameId, color: t.game === 'blackjack' ? '#1f706d' : t.game === 'roulette' ? '#773943' : t.game === 'baccarat' ? '#514675' : t.game === 'slots' ? '#997333' : '#225660' })),
 ];
 export function gameLaunchUrl(id: GameId, quick: boolean) {
   return `/index.html?mobileGame=1&game=${id}&view=${quick ? 'quickplay' : 'lounge'}`;

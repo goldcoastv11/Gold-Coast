@@ -3,8 +3,20 @@ import request from "supertest";
 import { app } from "../src/app";
 import { resetDb, signupUser, authed } from "./helpers";
 import { DRAGON_TOWER_MULTIPLIERS, DRAGON_TOWER_ROWS } from "../src/games/dragontower";
+import { applyHiLoGuess } from "../src/games/hilo";
 
 beforeEach(resetDb);
+
+describe("Hi-Lo tie rule", () => {
+  it("treats a matching rank as a push and preserves the run", () => {
+    const result = applyHiLoGuess({ deck: [9, 8], currentCard: 8, cumulativeFair: 2, correctGuesses: 1 }, "higher");
+    expect(result.push).toBe(true);
+    expect(result.won).toBe(false);
+    expect(result.state.currentCard).toBe(8);
+    expect(result.state.correctGuesses).toBe(1);
+    expect(result.state.cumulativeFair).toBe(2);
+  });
+});
 
 describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
   it("start debits the GC wager and creates a round without revealing badIndexPerRow", async () => {
@@ -15,7 +27,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
 
     expect(res.status).toBe(200);
     expect(res.body.roundId).toBeTruthy();
-    expect(res.body.state).toEqual({ currentRow: 0, multiplier: 1 });
+    expect(res.body.state).toEqual({ currentRow: 0, multiplier: 1, difficulty: "easy" });
     expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20);
     expect(JSON.stringify(res.body)).not.toContain("badIndexPerRow");
   });
@@ -74,7 +86,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     }
 
     expect(bust).not.toBeNull();
-    expect(bust!.body.badIndexPerRow).toHaveLength(DRAGON_TOWER_ROWS);
+    expect(bust!.body.badIndicesPerRow).toHaveLength(DRAGON_TOWER_ROWS);
     expect(bust!.body.payout).toBe(0);
     expect(bust!.body.user.goldCoins).toBe(goldBeforeBust - 10);
   });
@@ -134,7 +146,7 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     expect(top!.body.currentRow).toBe(DRAGON_TOWER_ROWS);
     expect(top!.body.multiplier).toBe(DRAGON_TOWER_MULTIPLIERS[DRAGON_TOWER_MULTIPLIERS.length - 1]);
     expect(top!.body.payout).toBe(Math.round(10 * DRAGON_TOWER_MULTIPLIERS[DRAGON_TOWER_MULTIPLIERS.length - 1]));
-    expect(top!.body.badIndexPerRow).toHaveLength(DRAGON_TOWER_ROWS);
+    expect(top!.body.badIndicesPerRow).toHaveLength(DRAGON_TOWER_ROWS);
     expect(top!.body.user.goldCoins).toBe(goldBefore - 10 + top!.body.payout);
     expect(top!.body.user.tickets).toBe(ticketsBefore);
   });
@@ -144,6 +156,22 @@ describe("POST /games/dragontower/* (stateful: start / pick / cashout)", () => {
     const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10 });
     const res = await request(app).post("/games/dragontower/cashout").set(authed(token)).send({ roundId: start.body.roundId });
     expect(res.status).toBe(400);
+  });
+
+  it("supports easy, medium, and hard difficulty without revealing traps at start", async () => {
+    for (const [difficulty, traps] of [["easy", 1], ["medium", 2], ["hard", 3]] as const) {
+      const { token } = await signupUser({ username: `tower_${difficulty}` });
+      const start = await request(app).post("/games/dragontower/start").set(authed(token)).send({ betAmount: 10, difficulty });
+      expect(start.status).toBe(200);
+      expect(start.body.state.difficulty).toBe(difficulty);
+      expect(JSON.stringify(start.body)).not.toContain("badIndicesPerRow");
+      const pick = await request(app).post("/games/dragontower/pick").set(authed(token)).send({ roundId: start.body.roundId, col: 0 });
+      if (pick.body.isBad) {
+        expect(pick.body.badIndicesPerRow.every((row: number[]) => row.length === traps)).toBe(true);
+      } else {
+        await request(app).post("/games/abandon").set(authed(token)).send({});
+      }
+    }
   });
 
   it("requires auth", async () => {
@@ -190,6 +218,9 @@ describe("POST /games/hilo/* (stateful: start / guess / cashout)", () => {
     if (res.body.won) {
       expect(res.body.state.correctGuesses).toBe(1);
       expect(res.body.state.multiplier).toBeGreaterThan(1);
+    } else if (res.body.push) {
+      expect(res.body.state.correctGuesses).toBe(0);
+      expect(res.body.state.currentCard).toBe(start.body.state.currentCard);
     } else {
       expect(res.body.payout).toBe(0);
     }

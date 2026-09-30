@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -20,6 +21,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, drawQuickReadout, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 
 const PRESET_TARGETS = [1.5, 2, 3, 5, 10, 25, 50, 100];
 const DEFAULT_TARGET = 2;
@@ -60,6 +62,7 @@ const CHIP_H = 32;
 const CHIP_ROW_Y = [372, 372 + CHIP_H + CHIP_GAP];
 
 export class LimboScene extends Phaser.Scene {
+  private directQuickplay = false;
   private target = DEFAULT_TARGET;
   private running = false;
   private presetButtons: UIButton[] = [];
@@ -84,10 +87,17 @@ export class LimboScene extends Phaser.Scene {
     this.running = false;
     this.presetButtons = [];
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) this.scale.once("resize", () => this.scene.restart());
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.tweens.killTweensOf(this);
     });
+
+    if (this.directQuickplay) {
+      this.createDirectQuickplay();
+      return;
+    }
 
     this.shell = makeGameShell(this, "Limbo", "BET", {
       onStart: () => this.play(),
@@ -144,6 +154,39 @@ export class LimboScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplay() {
+    const stage = createQuickplayStage(this);
+    drawManualAuto(this, stage, 32);
+    drawQuickLabel(this, stage, 78, "Amount");
+    this.betControl = makeQuickBetControl(this, stage, 120);
+    this.playBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 174, stage.contentW, 44, "Play", 0x1f7ae0, 0x2b8bf0, () => this.play(), Tokens.text.primary, Tokens.radius.md);
+    this.balanceText = makeText(this, -100, -100, "");
+    this.messageText = drawQuickReadout(this, stage, 214, "Net Gain on Win", `${this.target.toFixed(2)}×`);
+    this.targetText = makeText(this, -100, -100, "");
+    makeQuickBackButton(this, stage, () => fadeToScene(this, "StartMenuScene"));
+
+    const cx = stage.board.x + stage.board.w / 2;
+    const cy = stage.board.y + stage.board.h * 0.43;
+    this.multiplierText = makeText(this, cx, cy, "1.00×", { size: "92px", weight: Tokens.type.weight.bold, color: "#00e000", align: "center", originX: 0.5, originY: 0.5 });
+    this.heroCaption = makeText(this, cx, cy + 78, "", { size: Tokens.type.size.sm, color: Tokens.text.secondary, originX: 0.5 });
+    const panelY = stage.board.y + stage.board.h - 72;
+    const panel = this.add.graphics();
+    panel.fillStyle(Tokens.color.surface, 1).fillRoundedRect(stage.board.x + 18, panelY - 46, stage.board.w - 36, 92, Tokens.radius.md);
+    drawQuickLabel(this, { ...stage, left: stage.board.x + 34, top: stage.board.y } as any, stage.board.h - 108, "Target Multiplier");
+    const cols = 8;
+    const gap = 5;
+    const bw = Math.min(88, (stage.board.w - 68 - (cols - 1) * gap) / cols);
+    this.presetButtons = PRESET_TARGETS.map((value, i) => makeButton(this, cx - ((cols * bw + (cols - 1) * gap) / 2) + bw / 2 + i * (bw + gap), panelY + 12, bw, 38, `${value}×`, value === this.target ? Tokens.color.surfaceHover : Tokens.color.inset, Tokens.color.surfaceHover, () => { if (this.running) return; this.target = value; this.updateTargetText(); this.createDirectPresetRefresh(); }, value === this.target ? Tokens.text.primary : Tokens.text.secondary, Tokens.radius.sm));
+    this.updateTargetText();
+    this.updateBalance();
+  }
+
+  private createDirectPresetRefresh() {
+    if (!this.directQuickplay) { this.renderPresets(); return; }
+    this.presetButtons.forEach((button, i) => button.container.setAlpha(PRESET_TARGETS[i] === this.target ? 1 : 0.65));
+    this.messageText.setText(`${this.target.toFixed(2)}× target · ${(99 / this.target).toFixed(2)}% chance`);
+  }
+
   private renderPresets() {
     this.presetButtons.forEach((b) => b.destroy());
     this.presetButtons = [];
@@ -181,6 +224,7 @@ export class LimboScene extends Phaser.Scene {
 
   private updateTargetText() {
     this.targetText.setText(`Target ${this.target.toFixed(2)}x`);
+    if (this.directQuickplay) this.messageText.setText(`${this.target.toFixed(2)}× target · ${(99 / this.target).toFixed(2)}% chance`);
   }
 
   /** #36: the crash point is resolved server-side (POST /games/limbo/play) - the climbing-number animation here plays toward the server's real crashPoint once the response arrives, it doesn't determine the outcome. */

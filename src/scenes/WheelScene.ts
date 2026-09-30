@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation, notifyLounge } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -19,6 +20,7 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 
 const SEGMENT_COUNT = 20; // physical slices on the wheel - every risk level uses the same wheel
 const HOUSE_EDGE = 0.03; // 3%, folded into every tier's multiplier below
@@ -156,13 +158,19 @@ function buildSegmentValues(cfg: RiskConfig): number[] {
 
 /** Slice fill for a segment's multiplier - see Tokens.game.wheel for why these four steps. */
 function colorForMultiplier(m: number): number {
-  if (m <= 0) return Tokens.game.wheel.zero;
-  if (m >= 8) return Tokens.game.wheel.jackpot;
-  if (m >= 2) return Tokens.game.wheel.mid;
-  return Tokens.game.wheel.low;
+  if (m <= 0) return 0x314a5a;
+  if (m >= 8) return 0x7b43f4;
+  if (m >= 3) return 0xff9f1a;
+  if (m >= 1.7) return 0xffdf1a;
+  if (m >= 1) return 0x00dc22;
+  return 0x3f687e;
 }
 
 export class WheelScene extends Phaser.Scene {
+  private directQuickplay = false;
+  private wheelCenterX = WHEEL_CENTER_X;
+  private wheelCenterY = WHEEL_CENTER_Y;
+  private wheelRadius = WHEEL_RADIUS;
   private risk: RiskKey = "low";
   private segments: number[] = [];
   private spinning = false;
@@ -187,10 +195,17 @@ export class WheelScene extends Phaser.Scene {
     this.spinning = false;
     this.riskButtons = {};
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) this.scale.once("resize", () => this.scene.restart());
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.tweens.killTweensOf(this.wheelContainer);
     });
+
+    if (this.directQuickplay) {
+      this.createDirectQuickplay();
+      return;
+    }
 
     // Stake-style shell: left sidebar (title/balance/bet/message/Spin/
     // Walk Away) + open right-side display area for the wheel/risk
@@ -238,6 +253,42 @@ export class WheelScene extends Phaser.Scene {
 
     this.rebuildWheel();
     this.updateBalance();
+  }
+
+  private createDirectQuickplay() {
+    const stage = createQuickplayStage(this);
+    drawManualAuto(this, stage, 32);
+    drawQuickLabel(this, stage, 78, "Amount");
+    this.betControl = makeQuickBetControl(this, stage, 120);
+    drawQuickLabel(this, stage, 154, "Difficulty");
+    const keyY = stage.top + 196;
+    const gap = 5;
+    const bw = (stage.contentW - gap * 2) / 3;
+    (Object.keys(RISK_CONFIGS) as RiskKey[]).forEach((key, i) => {
+      const selected = key === this.risk;
+      this.riskButtons[key] = makeButton(this, stage.left + bw / 2 + i * (bw + gap), keyY, bw, 42, RISK_CONFIGS[key].label, selected ? Tokens.color.surfaceHover : Tokens.color.inset, Tokens.color.surfaceHover, () => { if (this.spinning) return; this.risk = key; this.refreshDirectRiskButtons(); this.rebuildWheel(); }, selected ? Tokens.text.primary : Tokens.text.secondary, Tokens.radius.md);
+    });
+    drawQuickLabel(this, stage, 226, "Segments");
+    const segmentBg = this.add.graphics().setScrollFactor(0);
+    segmentBg.fillStyle(Tokens.color.inset, 1).fillRoundedRect(stage.left, stage.top + 246, stage.contentW, 40, Tokens.radius.md);
+    makeText(this, stage.left + 12, stage.top + 266, `${SEGMENT_COUNT}`, { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, originY: 0.5 }).setScrollFactor(0);
+    this.spinBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 320, stage.contentW, 44, "Play", 0x1f7ae0, 0x2b8bf0, () => this.spin(), Tokens.text.primary, Tokens.radius.md);
+    this.balanceText = makeText(this, -100, -100, "");
+    this.messageText = makeText(this, stage.controls.x + stage.controls.w / 2, stage.top + (stage.portrait ? 352 : 378), "Pick a difficulty and spin", { size: Tokens.type.size.sm, color: Tokens.text.secondary, originX: 0.5 });
+    makeQuickBackButton(this, stage, () => notifyLounge("gc-game-exit"));
+
+    this.wheelCenterX = stage.board.x + stage.board.w / 2;
+    this.wheelCenterY = stage.board.y + stage.board.h * 0.47;
+    this.wheelRadius = Math.min(stage.portrait ? 150 : 205, stage.board.w * 0.34, stage.board.h * 0.36);
+    this.wheelContainer = this.add.container(this.wheelCenterX, this.wheelCenterY);
+    this.add.triangle(this.wheelCenterX, this.wheelCenterY - this.wheelRadius - POINTER_GAP, -10, -14, 10, -14, 0, 8, 0xf14b68).setDepth(10);
+    this.legendText = makeText(this, this.wheelCenterX, stage.board.y + stage.board.h - 38, "", { size: Tokens.type.size.sm, color: Tokens.text.primary, align: "center", originX: 0.5 });
+    this.rebuildWheel();
+    this.updateBalance();
+  }
+
+  private refreshDirectRiskButtons() {
+    (Object.keys(RISK_CONFIGS) as RiskKey[]).forEach((key) => this.riskButtons[key]?.container.setAlpha(key === this.risk ? 1 : 0.65));
   }
 
   private renderRiskButtons() {
@@ -293,7 +344,7 @@ export class WheelScene extends Phaser.Scene {
       g.fillStyle(color, 1);
       g.beginPath();
       g.moveTo(0, 0);
-      g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
+      g.arc(0, 0, this.wheelRadius, startRad, endRad, false);
       g.closePath();
       g.fillPath();
       // A 1px cut of the page ground between slices, so adjacent same-tier
@@ -302,7 +353,7 @@ export class WheelScene extends Phaser.Scene {
       g.lineStyle(1, Tokens.game.wheel.divider, 1);
       g.beginPath();
       g.moveTo(0, 0);
-      g.arc(0, 0, WHEEL_RADIUS, startRad, endRad, false);
+      g.arc(0, 0, this.wheelRadius, startRad, endRad, false);
       g.closePath();
       g.strokePath();
     }

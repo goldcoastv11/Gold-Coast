@@ -23,7 +23,7 @@ import { BetAmountSchema, settleSingleShotBet, placeWager, settlePayout } from "
 import { applyTransaction } from "../economy/ledger";
 import { DICE_TARGET_MIN, DICE_TARGET_MAX, playDice } from "../games/dice";
 import { playCoinFlip } from "../games/coinflip";
-import { playRoulette } from "../games/roulette";
+import { playRoulette, isRouletteBet } from "../games/roulette";
 import { LIMBO_TARGET_MIN, LIMBO_TARGET_MAX, playLimbo } from "../games/limbo";
 import { playPlinko } from "../games/plinko";
 import { playSlots } from "../games/slots";
@@ -51,10 +51,12 @@ import {
 } from "../games/roundStore";
 import {
   DRAGON_TOWER_TILES_PER_ROW,
-  DRAGON_TOWER_MULTIPLIERS,
+  DRAGON_TOWER_MULTIPLIERS_BY_DIFFICULTY,
   DragonTowerRoundState,
   newDragonTowerState,
   publicDragonTowerState,
+  dragonTowerBadIndices,
+  dragonTowerDifficulty,
   applyDragonTowerPick,
   InvalidDragonTowerPickError
 } from "../games/dragontower";
@@ -124,7 +126,8 @@ router.post(
 // ---------------------------------------------------------------------
 
 const MinesStartSchema = z.object({
-  betAmount: BetAmountSchema
+  betAmount: BetAmountSchema,
+  mineCount: z.number().int().min(1).max(MINES_TOTAL_TILES - 1).optional()
 });
 
 router.post(
@@ -136,12 +139,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid mines start payload", code: "INVALID_INPUT" });
     }
-    const { betAmount } = parsed.data;
+    const { betAmount, mineCount = 3 } = parsed.data;
 
     try {
       const [roundId, publicState, me] = await prisma.$transaction(async (tx) => {
         await placeWager(tx, userId, "mines", betAmount, {});
-        const state = newMinesState();
+        const state = newMinesState(mineCount);
         const id = await createRound(tx, userId, "mines", betAmount, "GC", state);
         const meResult = await serializeMe(tx, userId, username);
         return [id, publicMinesState(state), meResult] as const;
@@ -254,7 +257,7 @@ router.post(
           throw new InvalidMinesPickError("Cannot cash out before revealing at least one tile");
         }
 
-        const multiplier = minesMultiplier(picksMade);
+        const multiplier = minesMultiplier(picksMade, round.state.mineCount);
         const payout = Math.round(round.betAmount * multiplier);
         await settlePayout(tx, userId, "mines", payout, { roundId, picksMade });
         await closeRound(tx, roundId);
@@ -316,7 +319,7 @@ router.post(
 
 const RoulettePlaySchema = z.object({
   betAmount: BetAmountSchema,
-  bet: z.enum(["red", "black", "green"])
+  bet: z.string().refine(isRouletteBet)
 });
 
 router.post(
@@ -383,7 +386,9 @@ router.post(
 // ---------------------------------------------------------------------
 
 const PlinkoPlaySchema = z.object({
-  betAmount: BetAmountSchema
+  betAmount: BetAmountSchema,
+  rows: z.union([z.literal(8), z.literal(12), z.literal(16)]).optional(),
+  difficulty: z.enum(["low", "medium", "high"]).optional()
 });
 
 router.post(
@@ -395,9 +400,9 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid plinko play payload", code: "INVALID_INPUT" });
     }
-    const { betAmount } = parsed.data;
+    const { betAmount, rows, difficulty } = parsed.data;
 
-    const result = playPlinko(betAmount);
+    const result = playPlinko(betAmount, { rows, difficulty });
 
     const me = await prisma.$transaction(async (tx) => {
       await settleSingleShotBet(tx, userId, "plinko", betAmount, result.payout, {
@@ -553,7 +558,8 @@ router.post(
 // ---------------------------------------------------------------------
 
 const DragonTowerStartSchema = z.object({
-  betAmount: BetAmountSchema
+  betAmount: BetAmountSchema,
+  difficulty: z.enum(["easy", "medium", "hard"]).default("easy")
 });
 
 router.post(
@@ -565,12 +571,12 @@ router.post(
     if (!parsed.success) {
       return res.status(400).json({ error: "Invalid dragontower start payload", code: "INVALID_INPUT" });
     }
-    const { betAmount } = parsed.data;
+    const { betAmount, difficulty } = parsed.data;
 
     try {
       const [roundId, publicState, me] = await prisma.$transaction(async (tx) => {
-        await placeWager(tx, userId, "dragontower", betAmount, {});
-        const state = newDragonTowerState();
+        await placeWager(tx, userId, "dragontower", betAmount, { difficulty });
+        const state = newDragonTowerState(difficulty);
         const id = await createRound(tx, userId, "dragontower", betAmount, "GC", state);
         const meResult = await serializeMe(tx, userId, username);
         return [id, publicDragonTowerState(state), meResult] as const;
@@ -613,7 +619,7 @@ router.post(
           return {
             isBad: true,
             reachedTop: false,
-            badIndexPerRow: round.state.badIndexPerRow,
+            badIndicesPerRow: dragonTowerBadIndices(round.state),
             multiplier: 0,
             payout: 0,
             user: me
@@ -636,7 +642,7 @@ router.post(
             reachedTop: true,
             currentRow: publicState.currentRow,
             multiplier: publicState.multiplier,
-            badIndexPerRow: round.state.badIndexPerRow, // round is closed now - safe to reveal, matches the isBad/cashout responses
+            badIndicesPerRow: dragonTowerBadIndices(round.state),
             payout,
             user: me
           };
@@ -685,13 +691,13 @@ router.post(
           throw new InvalidDragonTowerPickError("Cannot cash out before clearing at least one row");
         }
 
-        const multiplier = DRAGON_TOWER_MULTIPLIERS[round.state.currentRow - 1];
+        const multiplier = DRAGON_TOWER_MULTIPLIERS_BY_DIFFICULTY[dragonTowerDifficulty(round.state)][round.state.currentRow - 1];
         const payout = Math.round(round.betAmount * multiplier);
         await settlePayout(tx, userId, "dragontower", payout, { roundId, currentRow: round.state.currentRow });
         await closeRound(tx, roundId);
 
         const me = await serializeMe(tx, userId, username);
-        return { multiplier, payout, badIndexPerRow: round.state.badIndexPerRow, user: me };
+        return { multiplier, payout, badIndicesPerRow: dragonTowerBadIndices(round.state), user: me };
       });
 
       return res.json(outcome);
@@ -767,10 +773,26 @@ router.post(
         const round = await loadActiveRound<HiLoRoundState>(tx, userId, "hilo", roundId);
         const result = applyHiLoGuess(round.state, guess);
 
+        if (result.push) {
+          const publicState = publicHiLoState(result.state);
+          if (result.deckExhausted) {
+            const payout = result.state.correctGuesses > 0
+              ? Math.round(round.betAmount * publicState.multiplier)
+              : round.betAmount;
+            await settlePayout(tx, userId, "hilo", payout, { roundId, push: true, deckExhausted: true });
+            await closeRound(tx, roundId);
+            const me = await serializeMe(tx, userId, username);
+            return { won: false, push: true, deckExhausted: true, state: publicState, payout, user: me };
+          }
+          await updateRoundState(tx, roundId, result.state);
+          const me = await serializeMe(tx, userId, username);
+          return { won: false, push: true, deckExhausted: result.deckExhausted, state: publicState, user: me };
+        }
+
         if (!result.won) {
           await closeRound(tx, roundId);
           const me = await serializeMe(tx, userId, username);
-          return { won: false, deckExhausted: false, nextCard: result.nextCard, multiplier: 0, payout: 0, user: me };
+          return { won: false, push: false, deckExhausted: false, nextCard: result.nextCard, multiplier: 0, payout: 0, user: me };
         }
 
         await updateRoundState(tx, roundId, result.state);
@@ -785,11 +807,11 @@ router.post(
           });
           await closeRound(tx, roundId);
           const me = await serializeMe(tx, userId, username);
-          return { won: true, deckExhausted: true, state: publicState, payout, user: me };
+          return { won: true, push: false, deckExhausted: true, state: publicState, payout, user: me };
         }
 
         const me = await serializeMe(tx, userId, username);
-        return { won: true, deckExhausted: false, state: publicState, user: me };
+        return { won: true, push: false, deckExhausted: false, state: publicState, user: me };
       });
 
       return res.json(outcome);

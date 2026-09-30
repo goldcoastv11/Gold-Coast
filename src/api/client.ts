@@ -160,7 +160,41 @@ async function request<T>(path: string, options: RequestOptions = {}): Promise<T
     throw new ApiError(res.status, errBody.code, errBody.error ?? `Request failed (${res.status})`, parsed);
   }
 
+  shareLoungeProgress(path, parsed);
+
   return parsed as T;
+}
+
+function shareLoungeProgress(path: string, parsed: unknown) {
+  if (typeof window === 'undefined' || window.parent === window || new URLSearchParams(window.location.search).get('view') !== 'lounge' || !path.startsWith('/games/')) return;
+  const parts = path.split('/').filter(Boolean), game = parts[1], action = parts[2];
+  if (!game || game === 'abandon') return;
+  const payload = (parsed ?? {}) as Record<string, any>, result = (payload.result ?? payload) as Record<string, any>;
+  const name = ({ coinflip: 'Coin Flip', dragontower: 'Dragon Tower', videopoker: 'Video Poker', hilo: 'Hi-Lo' } as Record<string, string>)[game] ?? game.charAt(0).toUpperCase() + game.slice(1);
+  let detail = action === 'start' ? 'started a round' : action === 'pick' ? 'made a pick' : action === 'cashout' ? 'cashed out' : action === 'draw' ? 'drew new cards' : action === 'guess' ? 'made a guess' : 'played';
+  if (game === 'coinflip' && typeof result.result === 'string') detail = `${result.result} · ${result.won ? 'won' : 'lost'}`;
+  else if (result.push) detail = 'matched the card · push';
+  else if (typeof result.won === 'boolean') detail = result.won ? 'won the round' : 'lost the round';
+  else if (result.hitMine) detail = 'hit a mine';
+  else if (result.isBad) detail = 'found the dragon';
+  else if (result.outcome) detail = `${String(result.outcome)} won`;
+  else if (result.rank) detail = String(result.rank).replace(/_/g, ' ');
+  else if (Array.isArray(result.reels)) detail = result.reels.join(' ');
+  else if (typeof result.hits === 'number') detail = `${result.hits} keno hit${result.hits === 1 ? '' : 's'}`;
+  else if (typeof result.number === 'number') detail = `wheel landed on ${result.number} ${result.color ?? ''}`.trim();
+  else if (typeof result.crashPoint === 'number') detail = `landed at ${result.crashPoint}×`;
+  else if (typeof result.multiplier === 'number' && result.multiplier > 0) detail = `${detail} · ${result.multiplier.toFixed(2)}×`;
+  const source = (payload.state && typeof payload.state === 'object' ? payload.state : result) as Record<string, any>;
+  const view: Record<string, string | number | boolean | number[] | string[] | null> = { action };
+  const fields = ['won', 'push', 'payout', 'multiplier', 'roll', 'target', 'guess', 'result', 'number', 'color', 'bet', 'crashPoint', 'slotIndex', 'rows', 'difficulty', 'hits', 'risk', 'landingIndex', 'outcome', 'playerTotal', 'bankerTotal', 'currentRow', 'currentCard', 'deckRemaining', 'correctGuesses', 'rank', 'hitMine', 'isBad'];
+  for (const key of fields) if (['string', 'number', 'boolean'].includes(typeof source[key]) || source[key] === null) view[key] = source[key];
+  for (const key of ['path', 'reels', 'picks', 'drawn', 'segments', 'revealed', 'playerCards', 'bankerCards']) {
+    const value = source[key];
+    if (Array.isArray(value) && value.length <= 80 && value.every(item => typeof item === 'number')) view[key] = value as number[];
+    else if (Array.isArray(value) && value.length <= 80 && value.every(item => typeof item === 'string')) view[key] = value as string[];
+  }
+  if (Array.isArray(source.hand)) view.hand = source.hand.slice(0, 5).map((card: any) => typeof card === 'object' ? `${card.value}:${card.suit}` : String(card));
+  window.parent.postMessage({ type: 'gc-game-progress', summary: `${name}: ${detail}`.slice(0, 80), view }, window.location.origin);
 }
 
 // ---- Auth ----
@@ -188,7 +222,7 @@ import type {
   MinesCashOutResponse,
   CoinSide,
   CoinFlipPlayResponse,
-  RouletteColor,
+  RouletteBet,
   RoulettePlayResponse,
   LimboPlayResponse,
   PlinkoPlayResponse,
@@ -201,6 +235,7 @@ import type {
   DragonTowerStartResponse,
   DragonTowerPickResponse,
   DragonTowerCashOutResponse,
+  DragonTowerDifficulty,
   HiLoStartResponse,
   HiLoGuess,
   HiLoGuessResponse,
@@ -318,8 +353,8 @@ export function playDice(betAmount: number, currency: Currency, target: number):
   return request<DicePlayResponse>("/games/dice/play", { method: "POST", body: { betAmount, currency, target } });
 }
 
-export function startMines(betAmount: number, currency: Currency): Promise<MinesStartResponse> {
-  return request<MinesStartResponse>("/games/mines/start", { method: "POST", body: { betAmount, currency } });
+export function startMines(betAmount: number, currency: Currency, mineCount = 3): Promise<MinesStartResponse> {
+  return request<MinesStartResponse>("/games/mines/start", { method: "POST", body: { betAmount, currency, mineCount } });
 }
 
 export function pickMinesTile(roundId: string, tileIndex: number): Promise<MinesPickResponse> {
@@ -334,7 +369,7 @@ export function playCoinFlip(betAmount: number, currency: Currency, guess: CoinS
   return request<CoinFlipPlayResponse>("/games/coinflip/play", { method: "POST", body: { betAmount, currency, guess } });
 }
 
-export function playRoulette(betAmount: number, currency: Currency, bet: RouletteColor): Promise<RoulettePlayResponse> {
+export function playRoulette(betAmount: number, currency: Currency, bet: RouletteBet): Promise<RoulettePlayResponse> {
   return request<RoulettePlayResponse>("/games/roulette/play", { method: "POST", body: { betAmount, currency, bet } });
 }
 
@@ -342,8 +377,12 @@ export function playLimbo(betAmount: number, currency: Currency, target: number)
   return request<LimboPlayResponse>("/games/limbo/play", { method: "POST", body: { betAmount, currency, target } });
 }
 
-export function playPlinko(betAmount: number, currency: Currency): Promise<PlinkoPlayResponse> {
-  return request<PlinkoPlayResponse>("/games/plinko/play", { method: "POST", body: { betAmount, currency } });
+export function playPlinko(
+  betAmount: number,
+  currency: Currency,
+  options: { rows?: 8 | 12 | 16; difficulty?: "low" | "medium" | "high" } = {}
+): Promise<PlinkoPlayResponse> {
+  return request<PlinkoPlayResponse>("/games/plinko/play", { method: "POST", body: { betAmount, currency, ...options } });
 }
 
 export function playSlots(betAmount: number, currency: Currency): Promise<SlotsPlayResponse> {
@@ -366,8 +405,8 @@ export function playBaccarat(
   return request<BaccaratPlayResponse>("/games/baccarat/play", { method: "POST", body: { betAmount, currency, betType } });
 }
 
-export function startDragonTower(betAmount: number, currency: Currency): Promise<DragonTowerStartResponse> {
-  return request<DragonTowerStartResponse>("/games/dragontower/start", { method: "POST", body: { betAmount, currency } });
+export function startDragonTower(betAmount: number, currency: Currency, difficulty: DragonTowerDifficulty = "easy"): Promise<DragonTowerStartResponse> {
+  return request<DragonTowerStartResponse>("/games/dragontower/start", { method: "POST", body: { betAmount, currency, difficulty } });
 }
 
 export function pickDragonTowerTile(roundId: string, col: number): Promise<DragonTowerPickResponse> {

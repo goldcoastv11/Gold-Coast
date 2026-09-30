@@ -2,8 +2,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 import { app } from "../src/app";
 import { resetDb, signupUser, authed } from "./helpers";
-import { ROULETTE_PAYOUTS, colorOf } from "../src/games/roulette";
-import { PLINKO_MULTIPLIERS, PLINKO_ROWS } from "../src/games/plinko";
+import { ROULETTE_PAYOUTS, colorOf, rouletteBetWins, roulettePayoutMultiplier } from "../src/games/roulette";
+import { PLINKO_HIGH_MULTIPLIERS, PLINKO_HIGH_ROWS, PLINKO_MEDIUM_MULTIPLIERS, PLINKO_MEDIUM_ROWS, PLINKO_MULTIPLIERS, PLINKO_ROWS } from "../src/games/plinko";
 import { SLOT_SYMBOLS, scoreSlotsSpin } from "../src/games/slots";
 import { kenoMultiplier, kenoMinPayHits, kenoHitProbability, KENO_HOUSE_EDGE, KENO_MAX_PICKS } from "../src/games/keno";
 import { PLAYER_WIN_MULT, BANKER_WIN_MULT, TIE_WIN_MULT } from "../src/games/baccarat";
@@ -100,6 +100,53 @@ describe("POST /games/plinko/play", () => {
     expect(res.body.result.payout).toBe(Math.round(10 * res.body.result.multiplier));
     expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 10 + res.body.result.payout);
     expect(res.body.user.tickets).toBe(before.body.tickets); // TICKETS is retired - never moves
+  });
+
+  it("accepts standard straight-up, dozen, column, parity, and range bets", async () => {
+    expect(rouletteBetWins("number:17", 17)).toBe(true);
+    expect(roulettePayoutMultiplier("number:17")).toBe(36);
+    expect(rouletteBetWins("dozen2", 19)).toBe(true);
+    expect(rouletteBetWins("column3", 36)).toBe(true);
+    expect(rouletteBetWins("even", 0)).toBe(false);
+    expect(rouletteBetWins("low", 18)).toBe(true);
+    expect(rouletteBetWins("high", 19)).toBe(true);
+
+    const { token } = await signupUser({ username: "roulette_groups" });
+    for (const bet of ["number:17", "dozen2", "column3", "even", "high"]) {
+      const res = await request(app).post("/games/roulette/play").set(authed(token)).send({ betAmount: 5, bet });
+      expect(res.status).toBe(200);
+      expect(res.body.result.bet).toBe(bet);
+    }
+  });
+
+  it("supports the 16-row high-risk Quickplay board with a matching authoritative path", async () => {
+    const { token } = await signupUser();
+    const res = await request(app)
+      .post("/games/plinko/play")
+      .set(authed(token))
+      .send({ betAmount: 10, rows: PLINKO_HIGH_ROWS, difficulty: "high" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.result.path).toHaveLength(PLINKO_HIGH_ROWS);
+    expect(res.body.result.path[PLINKO_HIGH_ROWS - 1]).toBe(res.body.result.slotIndex);
+    expect(res.body.result.multiplier).toBe(PLINKO_HIGH_MULTIPLIERS[res.body.result.slotIndex]);
+    expect(res.body.result.rows).toBe(PLINKO_HIGH_ROWS);
+    expect(res.body.result.difficulty).toBe("high");
+  });
+
+  it("supports the 12-row medium Quickplay board with a matching authoritative path", async () => {
+    const { token } = await signupUser();
+    const res = await request(app)
+      .post("/games/plinko/play")
+      .set(authed(token))
+      .send({ betAmount: 10, rows: PLINKO_MEDIUM_ROWS, difficulty: "medium" });
+
+    expect(res.status).toBe(200);
+    expect(res.body.result.path).toHaveLength(PLINKO_MEDIUM_ROWS);
+    expect(res.body.result.path[PLINKO_MEDIUM_ROWS - 1]).toBe(res.body.result.slotIndex);
+    expect(res.body.result.multiplier).toBe(PLINKO_MEDIUM_MULTIPLIERS[res.body.result.slotIndex]);
+    expect(res.body.result.rows).toBe(PLINKO_MEDIUM_ROWS);
+    expect(res.body.result.difficulty).toBe("medium");
   });
 });
 
@@ -289,6 +336,36 @@ describe("rebalanced games return 94-100% (analytic, no RNG)", () => {
     for (let slot = 0; slot < PLINKO_MULTIPLIERS.length; slot++) {
       rtp += (choose(PLINKO_ROWS, slot) / total) * PLINKO_MULTIPLIERS[slot];
     }
+    expect(rtp).toBeGreaterThanOrEqual(REBALANCE_MIN_RTP);
+    expect(rtp).toBeLessThanOrEqual(REBALANCE_MAX_RTP);
+  });
+
+  it("16-row high-risk plinko also returns 94-100% against its binomial distribution", () => {
+    const choose = (n: number, k: number) => {
+      let c = 1;
+      for (let i = 0; i < k; i++) c = (c * (n - i)) / (i + 1);
+      return c;
+    };
+    const total = 2 ** PLINKO_HIGH_ROWS;
+    const rtp = PLINKO_HIGH_MULTIPLIERS.reduce(
+      (sum, multiplier, slot) => sum + (choose(PLINKO_HIGH_ROWS, slot) / total) * multiplier,
+      0
+    );
+    expect(rtp).toBeGreaterThanOrEqual(REBALANCE_MIN_RTP);
+    expect(rtp).toBeLessThanOrEqual(REBALANCE_MAX_RTP);
+  });
+
+  it("12-row medium plinko also returns 94-100% against its binomial distribution", () => {
+    const choose = (n: number, k: number) => {
+      let c = 1;
+      for (let i = 0; i < k; i++) c = (c * (n - i)) / (i + 1);
+      return c;
+    };
+    const total = 2 ** PLINKO_MEDIUM_ROWS;
+    const rtp = PLINKO_MEDIUM_MULTIPLIERS.reduce(
+      (sum, multiplier, slot) => sum + (choose(PLINKO_MEDIUM_ROWS, slot) / total) * multiplier,
+      0
+    );
     expect(rtp).toBeGreaterThanOrEqual(REBALANCE_MIN_RTP);
     expect(rtp).toBeLessThanOrEqual(REBALANCE_MAX_RTP);
   });

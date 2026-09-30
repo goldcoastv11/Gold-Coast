@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -22,6 +23,7 @@ import { ApiError, NetworkError } from "../api/client";
 import type { BaccaratBetType } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, makeQuickBackButton, makeQuickBetControl, type QuickplayStage } from "../ui/quickplayGameUi";
 
 /**
  * Real published baccarat odds - no invented numbers. Standard 8-deck-shoe
@@ -73,6 +75,8 @@ interface CardSlot {
   label: Phaser.GameObjects.Text;
   x: number;
   y: number;
+  w?: number;
+  h?: number;
 }
 
 /**
@@ -124,6 +128,8 @@ export class BaccaratScene extends Phaser.Scene {
   private dealBtn?: UIButton;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
+  private directQuickplay = false;
+  private quickStage?: QuickplayStage;
 
   constructor() {
     super("BaccaratScene");
@@ -138,6 +144,14 @@ export class BaccaratScene extends Phaser.Scene {
     this.bankerSlots = [];
     this.betButtons = {};
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) {
+      this.scale.once("resize", () => this.scene.restart());
+      this.createDirectQuickplayLayout();
+      this.updateBalance();
+      return;
+    }
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. This game has no cash-out concept, so
@@ -203,6 +217,83 @@ export class BaccaratScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplayLayout() {
+    const stage = createQuickplayStage(this);
+    this.quickStage = stage;
+    drawManualAuto(this, stage);
+    drawQuickLabel(this, stage, 61, "AMOUNT");
+    this.balanceText = makeText(this, stage.right, stage.top + 61, "", { size: Tokens.type.size.xs, color: Tokens.text.muted, align: "right", originX: 1 }).setScrollFactor(0);
+    this.betControl = makeQuickBetControl(this, stage, 89);
+    this.dealBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 150, stage.contentW, 44, "PLAY", Tokens.color.info, Tokens.color.infoHover, () => this.deal(), Tokens.text.primary, Tokens.radius.md);
+    this.dealBtn.container.setScrollFactor(0);
+    this.messageText = makeText(this, stage.left, stage.top + 182, "Choose Player, Tie, or Banker, then Play.", { size: Tokens.type.size.sm, color: Tokens.text.muted, wordWrapWidth: stage.contentW, originY: 0 }).setScrollFactor(0);
+    makeQuickBackButton(this, stage, () => fadeToScene(this, "OverworldScene"));
+
+    const boardCx = stage.board.x + stage.board.w / 2;
+    const deckX = stage.board.x + stage.board.w - 46;
+    for (let i = 0; i < 3; i++) {
+      const g = this.add.graphics();
+      const y = stage.board.y + 32 + i * 4;
+      g.fillStyle(Tokens.card.face, 1).fillRoundedRect(deckX - 32, y - 43, 64, 86, Tokens.radius.md);
+      g.fillStyle(Tokens.color.info, 1).fillRoundedRect(deckX - 28, y - 39, 56, 78, Tokens.radius.sm);
+      g.lineStyle(1, Tokens.card.face, 0.9).strokeRoundedRect(deckX - 23, y - 34, 46, 68, Tokens.radius.xs);
+    }
+
+    const plaqueY = stage.board.y + stage.board.h * 0.5;
+    const plaque = this.add.graphics();
+    plaque.fillStyle(Tokens.color.surface, 1).fillRoundedRect(boardCx - 135, plaqueY - 20, 270, 40, Tokens.radius.sm);
+    makeText(this, boardCx, plaqueY, "TIE PAYS 8 TO 1", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.secondary, tracking: Tokens.type.tracking.caps, align: "center", originX: 0.5, originY: 0.5 });
+
+    const handY = stage.board.y + stage.board.h * 0.68;
+    const playerX = stage.board.x + stage.board.w * 0.30;
+    const bankerX = stage.board.x + stage.board.w * 0.70;
+    this.playerSlots = this.buildDirectCardSlots(playerX, handY);
+    this.bankerSlots = this.buildDirectCardSlots(bankerX, handY);
+    this.playerTotalText = makeText(this, playerX, handY - 70, "", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, align: "center", originX: 0.5 });
+    this.bankerTotalText = makeText(this, bankerX, handY - 70, "", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, align: "center", originX: 0.5 });
+    this.renderDirectBetButtons();
+  }
+
+  private buildDirectCardSlots(centerX: number, y: number): CardSlot[] {
+    const slots: CardSlot[] = [];
+    const w = 58;
+    const h = 82;
+    for (let i = 0; i < 3; i++) {
+      const x = centerX + (i - 1) * 62;
+      const bg = this.add.graphics();
+      const label = makeText(this, x, y, "", { size: Tokens.type.glyph.sm, weight: Tokens.type.weight.semibold, align: "center", originX: 0.5, originY: 0.5 });
+      const slot = { bg, label, x, y, w, h };
+      slots.push(slot);
+      this.paintSlot(slot, null);
+    }
+    return slots;
+  }
+
+  private renderDirectBetButtons() {
+    if (!this.quickStage) return;
+    Object.values(this.betButtons).forEach((b) => b?.destroy());
+    this.betButtons = {};
+    const stage = this.quickStage;
+    const gap = Tokens.space.md;
+    const width = Math.min(210, (stage.board.w - gap * 4) / 3);
+    const y = stage.board.y + stage.board.h - 54;
+    const options: Array<{ key: BetType; label: string }> = [
+      { key: "player", label: "PLAYER  2.00x" },
+      { key: "tie", label: "TIE  9.00x" },
+      { key: "banker", label: "BANKER  1.95x" }
+    ];
+    const total = width * 3 + gap * 2;
+    const start = stage.board.x + stage.board.w / 2 - total / 2 + width / 2;
+    options.forEach((option, index) => {
+      const selected = option.key === this.betType;
+      this.betButtons[option.key] = makeButton(this, start + index * (width + gap), y, width, 74, option.label, selected ? Tokens.color.surfaceHover : Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => {
+        if (this.dealing || this.betType === option.key) return;
+        this.betType = option.key;
+        this.renderDirectBetButtons();
+      }, selected ? Tokens.text.primary : Tokens.text.secondary, Tokens.radius.md);
+    });
+  }
+
   private renderBetButtons() {
     Object.values(this.betButtons).forEach((b) => b?.destroy());
     this.betButtons = {};
@@ -257,11 +348,11 @@ export class BaccaratScene extends Phaser.Scene {
   private paintSlot(slot: CardSlot, card: Card | null) {
     slot.bg.clear();
     if (!card) {
-      drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, "empty");
+    drawCardSurface(slot.bg, slot.x, slot.y, slot.w ?? CARD_W, slot.h ?? CARD_H, "empty");
       slot.label.setText("").setVisible(false);
       return;
     }
-    drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, "face");
+    drawCardSurface(slot.bg, slot.x, slot.y, slot.w ?? CARD_W, slot.h ?? CARD_H, "face");
     slot.label
       .setText(`${card.label}${card.suit}`)
       .setColor(card.isRed ? Tokens.card.inkRed : Tokens.card.ink)

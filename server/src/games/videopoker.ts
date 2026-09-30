@@ -43,13 +43,13 @@ interface HandInfo {
   pairValue: number;
 }
 
-interface Card {
+export interface VideoPokerCard {
   value: number; // 2-14, Ace high
   suit: number; // 0-3, needed here (unlike Hi-Lo/Blackjack) since Flush/Straight-Flush detection depends on suit
 }
 
-function buildDeck(): Card[] {
-  const deck: Card[] = [];
+function buildDeck(): VideoPokerCard[] {
+  const deck: VideoPokerCard[] = [];
   for (let value = 2; value <= 14; value++) {
     for (let suit = 0; suit < 4; suit++) deck.push({ value, suit });
   }
@@ -60,7 +60,7 @@ function buildDeck(): Card[] {
   return deck;
 }
 
-function evaluateHand(cards: Card[]): PaytableEntry {
+function evaluateHand(cards: VideoPokerCard[]): PaytableEntry {
   const values = cards.map((c) => c.value).sort((a, b) => a - b);
   const isFlush = cards.every((c) => c.suit === cards[0].suit);
 
@@ -92,8 +92,8 @@ function evaluateHand(cards: Card[]): PaytableEntry {
 export type VideoPokerStage = "holding" | "resolved";
 
 export interface VideoPokerRoundState {
-  deck: Card[]; // remaining undealt cards
-  hand: Card[]; // current 5-card hand
+  deck: VideoPokerCard[]; // remaining undealt cards
+  hand: VideoPokerCard[]; // current 5-card hand
   stage: VideoPokerStage;
 }
 
@@ -103,9 +103,9 @@ export function newVideoPokerState(): VideoPokerRoundState {
   return { deck, hand, stage: "holding" };
 }
 
-/** Client-safe hand view - just ranks, since suit only matters for server-side scoring (see evaluateHand). */
-export function publicHand(state: VideoPokerRoundState): number[] {
-  return state.hand.map((c) => c.value);
+/** Client-safe hand view. Suit is required so held cards keep the same identity after draw. */
+export function publicHand(state: VideoPokerRoundState): VideoPokerCard[] {
+  return state.hand.map((c) => ({ value: c.value, suit: c.suit }));
 }
 
 export class InvalidHoldsError extends Error {}

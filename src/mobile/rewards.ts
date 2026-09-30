@@ -7,7 +7,7 @@ export function installRewards(root: HTMLElement, signIn: () => void, notify: (t
   bar.innerHTML = '<span class="player-balance">Sign in to save your progress</span><button data-action="challenges">Challenges & XP</button><button data-action="coins">Coin kiosk · Shuffle cups</button>';
   document.querySelector('.catalog-content')!.prepend(bar);
   const lounge = bar.cloneNode(true) as HTMLElement; lounge.classList.add('lounge-tools');
-  document.getElementById('lobby')!.append(lounge);
+  root.append(lounge);
   const modal = document.createElement('dialog'); modal.className = 'rewards-dialog';
   modal.innerHTML = '<div class="rewards-top"><h2></h2><button aria-label="Close rewards">✕</button></div><div class="rewards-content"></div>';
   root.append(modal);

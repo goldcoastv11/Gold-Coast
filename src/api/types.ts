@@ -315,10 +315,11 @@ export interface CoinFlipPlayResponse {
 }
 
 export type RouletteColor = "red" | "black" | "green";
+export type RouletteBet = RouletteColor | `number:${number}` | "low" | "high" | "even" | "odd" | "dozen1" | "dozen2" | "dozen3" | "column1" | "column2" | "column3";
 
 /** POST /games/roulette/play */
 export interface RoulettePlayResponse {
-  result: { bet: RouletteColor; number: number; color: RouletteColor; won: boolean; payout: number };
+  result: { bet: RouletteBet; number: number; color: RouletteColor; won: boolean; payout: number };
   user: MeResponse;
 }
 
@@ -330,7 +331,7 @@ export interface LimboPlayResponse {
 
 /** POST /games/plinko/play */
 export interface PlinkoPlayResponse {
-  result: { slotIndex: number; multiplier: number; payout: number; path: number[] };
+  result: { slotIndex: number; multiplier: number; payout: number; path: number[]; rows: number; difficulty: "low" | "medium" | "high" };
   user: MeResponse;
 }
 
@@ -377,7 +378,9 @@ export interface BaccaratPlayResponse {
 export interface DragonTowerPublicState {
   currentRow: number;
   multiplier: number;
+  difficulty: DragonTowerDifficulty;
 }
+export type DragonTowerDifficulty = "easy" | "medium" | "hard";
 
 /** POST /games/dragontower/start */
 export interface DragonTowerStartResponse {
@@ -392,7 +395,7 @@ export interface DragonTowerPickResponse {
   reachedTop: boolean;
   currentRow?: number; // absent when isBad
   multiplier: number;
-  badIndexPerRow?: number[]; // present once the round has ended (hit the bad tile, or reached the top)
+  badIndicesPerRow?: number[][]; // present once the round has ended
   payout?: number; // present only when isBad, or reachedTop auto-resolved the round
   user: MeResponse;
 }
@@ -401,7 +404,7 @@ export interface DragonTowerPickResponse {
 export interface DragonTowerCashOutResponse {
   multiplier: number;
   payout: number;
-  badIndexPerRow: number[];
+  badIndicesPerRow: number[][];
   user: MeResponse;
 }
 
@@ -428,9 +431,10 @@ export type HiLoGuess = "higher" | "lower";
 /** POST /games/hilo/guess */
 export interface HiLoGuessResponse {
   won: boolean;
+  push: boolean;
   deckExhausted: boolean;
   nextCard?: number; // present only on a loss (a win's next card is state.currentCard)
-  state?: HiLoPublicState; // present only on a win
+  state?: HiLoPublicState; // present on a win or push
   multiplier?: number; // present only on a loss (always 0)
   payout?: number; // present on a loss (0), or a win that auto-cashed out (deck exhausted)
   user: MeResponse;
@@ -482,10 +486,15 @@ export interface BlackjackStandResponse {
 
 // ---- Video Poker (deal / draw) ----
 
+export interface VideoPokerCard {
+  value: number;
+  suit: number;
+}
+
 /** POST /games/videopoker/deal */
 export interface VideoPokerDealResponse {
   roundId: string;
-  hand: number[]; // rank only, 2-14 (Ace high) - client picks cosmetic suits for display
+  hand: VideoPokerCard[];
   user: MeResponse;
 }
 
@@ -499,7 +508,7 @@ export interface TripleChancePlayResponse {
 
 /** POST /games/videopoker/draw */
 export interface VideoPokerDrawResponse {
-  hand: number[];
+  hand: VideoPokerCard[];
   rank: string;
   multiplier: number;
   payout: number;

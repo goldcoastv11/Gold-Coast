@@ -44,6 +44,7 @@ export class ClubWorld {
   private stagePlayer: Figure;
   private stageTitle: T.Mesh | null = null;
   private stageTables = new Map<GameId, T.Group>();
+  private loungeTables = new Map<string, T.Group>();
   activeStation: Station = STATIONS[0];
   pose = { x: -2, z: 2, yaw: Math.PI };
   mode: 'welcome' | 'lobby' | 'table' | 'wardrobe' | 'quickplay' | 'arcade' = 'welcome';
@@ -58,24 +59,24 @@ export class ClubWorld {
     this.scene.add(new T.HemisphereLight('#d4eafa', '#474537', 2));
     const sun = new T.DirectionalLight('#ffe2ac', 2.5); sun.position.set(-8, 15, 8); this.scene.add(sun);
     const floor = material('#34464a'), navy = material('#193746'), gold = material('#c69c59', .65), green = material('#1f706d');
-    box(this.scene, 0, -.18, 7, 40, .3, 36, floor);
-    for (let x = -18; x <= 18; x += 2) box(this.scene, x, -.018, 7, .025, .01, 34, gold);
-    for (let z = -9; z <= 23; z += 2) box(this.scene, 0, -.018, z, 38, .01, .025, gold);
+    box(this.scene, 0, -.18, 14, 60, .3, 52, floor);
+    for (let x = -28; x <= 28; x += 2) box(this.scene, x, -.018, 14, .025, .01, 50, gold);
+    for (let z = -10; z <= 38; z += 2) box(this.scene, 0, -.018, z, 58, .01, .025, gold);
     box(this.scene, 0, .01, -1, 10, .035, 9, navy);
-    box(this.scene, 0, 2.4, -8.5, 40, 4.8, .3, navy);
-    for (let x = -19; x < 20; x += 1) box(this.scene, x, 2.4, -8.28, .035, 4.8, .08, gold);
-    const title = label('G O L D  C O A S T', 8, 2); title.position.set(0, 3.5, -8.05); this.scene.add(title);
-    const subtitle = label('THE SOCIAL CLUB', 3.5, .8); subtitle.position.set(0, 2.55, -8.04); this.scene.add(subtitle);
-    for (const x of [-19, 19]) { box(this.scene, x, .5, 7, .25, 1, 34, navy); for (const z of [-7, 7, 21]) box(this.scene, x, 2.3, z, .28, 4.6, .28, gold); }
+    box(this.scene, 0, 2.4, -11.5, 60, 4.8, .3, navy);
+    for (let x = -29; x < 30; x += 1) box(this.scene, x, 2.4, -11.28, .035, 4.8, .08, gold);
+    const title = label('G O L D  C O A S T', 8, 2); title.position.set(0, 3.5, -11.05); this.scene.add(title);
+    const subtitle = label('THE SOCIAL CLUB', 3.5, .8); subtitle.position.set(0, 2.55, -11.04); this.scene.add(subtitle);
+    for (const x of [-29, 29]) { box(this.scene, x, .5, 14, .25, 1, 50, navy); for (const z of [-9, 7, 23, 37]) box(this.scene, x, 2.3, z, .28, 4.6, .28, gold); }
     for (let i = 0; i < 24; i++) { const h = 1 + (i * 7 % 11) * .6; box(this.scene, (i - 12) * 3, h / 2 - 1, -28, 1.9, h, 2, material(i % 2 ? '#536d7c' : '#3f5669')); }
     for (const station of STATIONS) {
       const { x, z } = station;
-      blackjackTable(this.scene, x, z, station.game);
+      const table = blackjackTable(this.scene, x, z, station.game); this.loungeTables.set(station.id, table);
       const sign = label(station.name.toUpperCase(), 2.8, .48); sign.position.set(x, 2.9, z - 1.6); this.scene.add(sign); this.stationSigns.push(sign);
       const dealer = figure({ shirt: '#f3e6cd', skin: '#c68b60', hair: '#302922' }, true); dealer.group.position.set(x, 0, z - 1.8); this.scene.add(dealer.group); this.dealers.push(dealer);
     }
-    for (const x of [-18, 18]) {
-      for (const z of [-5, 19]) {
+    for (const x of [-27, 27]) {
+      for (const z of [-7, 14, 35]) {
         cylinder(this.scene, x, .45, z, .65, .9, navy); cylinder(this.scene, x, 1.8, z, .12, 2.8, gold);
         for (let i = 0; i < 7; i++) { const leaf = new T.Mesh(new T.SphereGeometry(1, 8, 5), green); leaf.scale.set(.24, .10, 1.6); leaf.rotation.set(.3, i * Math.PI * 2 / 7, .15); leaf.position.set(x + Math.sin(i) * .35, 3.2, z); this.scene.add(leaf); }
       }
@@ -112,20 +113,56 @@ export class ClubWorld {
     this.stageTitle.position.set(-2, 3.4, -4.6); this.gameStage.add(this.stageTitle);
     this.camera.position.set(40, 2.7, 5.8); this.camera.lookAt(40, .65, -.8);
   }
+  setCoinFlipSeats(tableId: string, states: { occupied: boolean; side?: string; flipping?: boolean }[]) {
+    const table = this.loungeTables.get(tableId);
+    if (!table) return;
+    states.forEach((state, seat) => {
+      const rig = table.getObjectByName(`coinflip-seat-${seat}`);
+      if (!rig) return;
+      rig.visible = state.occupied; rig.userData.flipping = !!state.flipping;
+      const value = state.side?.toLowerCase() === 'heads' ? 'H' : state.side?.toLowerCase() === 'tails' ? 'T' : state.flipping ? '?' : 'G';
+      if (rig.userData.face === value) return;
+      rig.userData.face = value;
+      const face = rig.getObjectByName(`coinflip-face-${seat}`) as T.Mesh<T.PlaneGeometry, T.MeshBasicMaterial> | undefined;
+      const map = face?.material.map, canvas = map?.image as HTMLCanvasElement | undefined, ctx = canvas?.getContext('2d');
+      if (!canvas || !ctx || !map) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = '#a07b39'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#d8b477'; ctx.lineWidth = 8; ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 150px Georgia'; ctx.fillStyle = '#fff0c8'; ctx.fillText(value, canvas.width / 2, canvas.height / 2);
+      map.needsUpdate = true;
+    });
+  }
   private resize() { const w = innerWidth, h = innerHeight; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.renderer.setSize(w, h); }
   resetInput() { this.keys.clear(); this.stick.x = this.stick.y = 0; }
   controls(stick: HTMLElement, nub: HTMLElement, lookArea: HTMLElement) {
-    let joystickId: number | null = null, cameraId: number | null = null, lastX = 0, lastY = 0;
+    let joystickId: number | null = null, cameraId: number | null = null, lastX = 0, lastY = 0, mouseOverLookArea = false;
     const move = (e: PointerEvent) => { const r = stick.getBoundingClientRect(); let x = (e.clientX - r.left - r.width / 2) / 38, y = (e.clientY - r.top - r.height / 2) / 38; const n = Math.max(1, Math.hypot(x, y)); x /= n; y /= n; this.stick = { x, y }; nub.style.transform = `translate(${x * 32}px, ${y * 32}px)`; };
     stick.onpointerdown = e => { if (joystickId !== null) return; joystickId = e.pointerId; stick.setPointerCapture(e.pointerId); move(e); };
     stick.onpointermove = e => { if (e.pointerId === joystickId) move(e); };
     const stop = () => { joystickId = null; this.stick = { x: 0, y: 0 }; nub.style.transform = ''; };
     stick.onpointerup = stick.onpointercancel = stick.onlostpointercapture = stop;
-    lookArea.onpointerdown = e => { if (cameraId !== null) return; cameraId = e.pointerId; lastX = e.clientX; lastY = e.clientY; lookArea.setPointerCapture(e.pointerId); };
+    const rotate = (dx: number, dy: number) => { this.yaw -= T.MathUtils.clamp(dx, -80, 80) * .006; this.pitch = T.MathUtils.clamp(this.pitch + T.MathUtils.clamp(dy, -80, 80) * .004, .12, .7); };
+    lookArea.onmouseenter = () => { mouseOverLookArea = true; };
+    lookArea.onmouseleave = () => { mouseOverLookArea = false; };
+    lookArea.onpointerdown = e => {
+      if (e.pointerType === 'mouse') {
+        if (document.pointerLockElement !== lookArea && lookArea.requestPointerLock) try { void lookArea.requestPointerLock(); } catch { /* Hover movement remains available. */ }
+        return;
+      }
+      if (cameraId !== null) return; cameraId = e.pointerId; lastX = e.clientX; lastY = e.clientY; lookArea.setPointerCapture(e.pointerId);
+    };
     lookArea.onpointermove = e => { if (e.pointerId !== cameraId) return; this.yaw -= (e.clientX - lastX) * .006; this.pitch = T.MathUtils.clamp(this.pitch + (e.clientY - lastY) * .004, .12, .7); lastX = e.clientX; lastY = e.clientY; };
     lookArea.onpointerup = lookArea.onpointercancel = lookArea.onlostpointercapture = () => { cameraId = null; };
+    document.addEventListener('mousemove', e => { if (this.mode === 'lobby' && (document.pointerLockElement === lookArea || mouseOverLookArea)) rotate(e.movementX, e.movementY); });
+    document.addEventListener('pointerlockchange', () => { lookArea.classList.toggle('mouse-look-active', document.pointerLockElement === lookArea); });
   }
   setLook(look: Look) { for (const f of [this.self, this.stagePlayer]) f.setLook(look); }
+  placeTableOverlay(element: HTMLElement, localX: number, y: number, localZ: number) {
+    const station = this.activeStation;
+    const point = new T.Vector3(station.x + localX, y, station.z + localZ).project(this.camera);
+    element.style.left = `${(point.x * .5 + .5) * innerWidth}px`;
+    element.style.top = `${(-point.y * .5 + .5) * innerHeight}px`;
+  }
   updatePlayers(players: Person[], self: string) {
     for (const [id, remote] of this.people) if (!players.some(p => p.id === id && id !== self)) { this.scene.remove(remote.figure.group); remote.figure.dispose(); this.people.delete(id); }
     for (const p of players) {
@@ -170,7 +207,7 @@ export class ClubWorld {
     if (this.mode === 'arcade') this.stagePlayer.update(dt, false, true);
     const target = new T.Vector3(), aim = new T.Vector3();
     if (this.mode === 'welcome') { target.set(10, 7, 12); aim.set(0, 1, -2); }
-    else if (this.mode === 'table') { const t = this.activeStation; target.set(this.pose.x + 2.8, 3.2, this.pose.z + 3.8); aim.set(t.x, 1.1, t.z); }
+    else if (this.mode === 'table') { const t = this.activeStation; target.set(this.pose.x, 3.25, this.pose.z + 3.45); aim.set(t.x, 1.02, t.z - .15); }
     else if (this.mode === 'arcade') { target.set(40, 2.7, 5.8); aim.set(40, .65, -.8); }
     else if (this.mode === 'wardrobe') { target.set(41.1, 1.9, 6.1); aim.set(40, 1.05, 2.3); this.self.group.rotation.y = .2; }
     else { target.set(T.MathUtils.clamp(this.pose.x + Math.sin(this.yaw) * 4.8, LOUNGE_BOUNDS.minX - .5, LOUNGE_BOUNDS.maxX + .5), 1.6 + this.pitch * 5, T.MathUtils.clamp(this.pose.z + Math.cos(this.yaw) * 4.8, LOUNGE_BOUNDS.minZ - .5, LOUNGE_BOUNDS.maxZ + .5)); aim.set(this.pose.x, 1.35, this.pose.z); }
@@ -180,6 +217,19 @@ export class ClubWorld {
       const inStage = dealer.group.parent === this.gameStage;
       if (inStage) dealer.group.visible = this.mode === 'arcade';
       if (inStage ? this.mode === 'arcade' : this.mode !== 'arcade' && dealer.group.position.distanceTo(this.camera.position) < 18) dealer.update(dt);
+    }
+    for (const table of this.loungeTables.values()) {
+      for (let seat = 0; seat < 4; seat++) {
+        const coin = table.getObjectByName(`coinflip-seat-${seat}`);
+        if (!coin) continue;
+        const baseY = Number(coin.userData.baseY ?? 1.31);
+        if (coin.userData.flipping) {
+          coin.rotation.x += dt * 11; coin.position.y = baseY + Math.abs(Math.sin(now * .008)) * .45;
+        } else {
+          coin.rotation.x = T.MathUtils.lerp(coin.rotation.x, 0, 1 - Math.exp(-dt * 9));
+          coin.position.y = T.MathUtils.lerp(coin.position.y, baseY, 1 - Math.exp(-dt * 9));
+        }
+      }
     }
     this.onFrame(); this.renderer.render(this.scene, this.camera);
   }

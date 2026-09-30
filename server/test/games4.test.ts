@@ -167,8 +167,10 @@ describe("POST /games/videopoker/* (deal / draw)", () => {
     expect(res.body.roundId).toBeTruthy();
     expect(res.body.hand).toHaveLength(5);
     for (const card of res.body.hand) {
-      expect(card).toBeGreaterThanOrEqual(2);
-      expect(card).toBeLessThanOrEqual(14);
+      expect(card.value).toBeGreaterThanOrEqual(2);
+      expect(card.value).toBeLessThanOrEqual(14);
+      expect(card.suit).toBeGreaterThanOrEqual(0);
+      expect(card.suit).toBeLessThanOrEqual(3);
     }
     expect(res.body.user.goldCoins).toBe(before.body.goldCoins - 20);
   });

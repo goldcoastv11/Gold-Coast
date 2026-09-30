@@ -20,31 +20,33 @@ const HOUSE_EDGE = 0.02; // 2%, folded into the fair multiplier below - identica
  * of MINES_TOTAL_TILES with MINES_COUNT mines, then shaved by HOUSE_EDGE.
  * Byte-for-byte the same formula as the client's multiplierForPicks.
  */
-export function minesMultiplier(picks: number): number {
+export function minesMultiplier(picks: number, mineCount = MINES_COUNT): number {
+  const safeTiles = MINES_TOTAL_TILES - mineCount;
   let m = 1;
   for (let k = 0; k < picks; k++) {
-    m *= (MINES_TOTAL_TILES - k) / (MINES_SAFE_TILES - k);
+    m *= (MINES_TOTAL_TILES - k) / (safeTiles - k);
   }
   return Math.round(m * (1 - HOUSE_EDGE) * 100) / 100;
 }
 
 /** MINES_COUNT distinct tile indices, chosen via a CSPRNG-backed Fisher-Yates (not Math.random()). */
-export function generateMinePositions(): number[] {
+export function generateMinePositions(mineCount = MINES_COUNT): number[] {
   const indices = Array.from({ length: MINES_TOTAL_TILES }, (_, i) => i);
   for (let i = indices.length - 1; i > 0; i--) {
     const j = randInt(0, i);
     [indices[i], indices[j]] = [indices[j], indices[i]];
   }
-  return indices.slice(0, MINES_COUNT).sort((a, b) => a - b);
+  return indices.slice(0, mineCount).sort((a, b) => a - b);
 }
 
 export interface MinesRoundState {
   minePositions: number[];
   revealed: number[];
+  mineCount: number;
 }
 
-export function newMinesState(): MinesRoundState {
-  return { minePositions: generateMinePositions(), revealed: [] };
+export function newMinesState(mineCount = MINES_COUNT): MinesRoundState {
+  return { minePositions: generateMinePositions(mineCount), revealed: [], mineCount };
 }
 
 /** The slice of round state that's safe to ever send to the client - never minePositions while active. */
@@ -58,7 +60,7 @@ export function publicMinesState(state: MinesRoundState): MinesPublicState {
   return {
     revealed: state.revealed,
     picksMade: state.revealed.length,
-    multiplier: minesMultiplier(state.revealed.length)
+    multiplier: minesMultiplier(state.revealed.length, state.mineCount)
   };
 }
 
@@ -84,6 +86,6 @@ export function applyMinesPick(state: MinesRoundState, tileIndex: number): Mines
   }
 
   const revealed = [...state.revealed, tileIndex].sort((a, b) => a - b);
-  const boardCleared = revealed.length >= MINES_SAFE_TILES;
+  const boardCleared = revealed.length >= MINES_TOTAL_TILES - state.mineCount;
   return { state: { ...state, revealed }, hitMine: false, boardCleared };
 }

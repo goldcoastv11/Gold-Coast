@@ -396,6 +396,7 @@ export function makeTextChip(
 export interface BetControl {
   container: Phaser.GameObjects.Container;
   refresh: () => void;
+  setPosition?: (x: number, y: number) => void;
   setEnabled: (enabled: boolean) => void;
   destroy: () => void;
 }
@@ -579,6 +580,7 @@ export function makeBetControl(
   return {
     container,
     refresh,
+    setPosition: (nextX: number, nextY: number) => { container.setPosition(nextX, nextY); input.setPosition(nextX + fieldCx + Tokens.space.xs, nextY); },
     setEnabled: (enabled: boolean) => {
       controlEnabled = enabled;
       el.disabled = !enabled;
@@ -626,7 +628,9 @@ export function makeBetControl(
  */
 
 export interface GameShellHandle {
+  balanceLabel: Phaser.GameObjects.Text;
   balanceText: Phaser.GameObjects.Text;
+  betLabel: Phaser.GameObjects.Text;
   multiplierText: Phaser.GameObjects.Text;
   messageText: Phaser.GameObjects.Text;
   betControl: BetControl;
@@ -726,7 +730,8 @@ export function makeGameShell(
     onBetChange?: () => void;
   }
 ): GameShellHandle {
-  if (loungePresentation()) {
+  const lounge = loungePresentation();
+  if (lounge) {
     scene.cameras.main.setBackgroundColor('rgba(0,0,0,0)');
   }
   // Page ground. Drawn as a real full-canvas rect behind everything rather
@@ -747,7 +752,7 @@ export function makeGameShell(
   // full-canvas backdrop and must stay at 0,0 covering the whole viewport,
   // not be nudged with the rest of the shell.
   const ground = scene.add.graphics().setDepth(-1000).setScrollFactor(0);
-  ground.fillStyle(Tokens.color.bg, loungePresentation() ? .38 : 1);
+  ground.fillStyle(Tokens.color.bg, lounge ? 0 : 1);
   ground.fillRect(0, 0, scene.scale.width, scene.scale.height);
 
   // Everything this function creates from here on is sidebar chrome that
@@ -763,7 +768,7 @@ export function makeGameShell(
   // element below breathing room inside the band.
   const panelTop = SAFE_ZONE_TOP - Tokens.space.md;
   const panelBottom = SAFE_ZONE_BOTTOM + Tokens.space.md + Tokens.space.xxs;
-  makePanel(scene, SIDEBAR_CX, (panelTop + panelBottom) / 2, SIDEBAR_W, panelBottom - panelTop).setScrollFactor(0);
+  if (!lounge) makePanel(scene, SIDEBAR_CX, (panelTop + panelBottom) / 2, SIDEBAR_W, panelBottom - panelTop).setScrollFactor(0);
 
   // --- Title row -----------------------------------------------------
   makeText(scene, COL_LEFT, 140, title.toUpperCase(), {
@@ -771,11 +776,11 @@ export function makeGameShell(
     weight: Tokens.type.weight.semibold,
     color: Tokens.text.secondary,
     tracking: Tokens.type.tracking.caps
-  }).setScrollFactor(0);
-  makeDivider(scene, COL_LEFT, 158, COL_RIGHT).setScrollFactor(0);
+  }).setScrollFactor(0).setVisible(!lounge);
+  makeDivider(scene, COL_LEFT, 158, COL_RIGHT).setScrollFactor(0).setVisible(!lounge);
 
   // --- Balance row: muted label left, live value right ---------------
-  makeText(scene, COL_LEFT, 180, "Balance", {
+  const balanceLabel = makeText(scene, COL_LEFT, 180, "Balance", {
     size: Tokens.type.size.sm,
     color: Tokens.text.muted,
     tracking: Tokens.type.tracking.label
@@ -792,7 +797,7 @@ export function makeGameShell(
   // "Gold Coins" spelled out: GC is the play currency, spent on every bet
   // win or lose (see CLAUDE.md's economy rules), and naming it here is part
   // of the outstanding display-copy pass.
-  makeText(scene, COL_LEFT, 208, "Bet Amount (Gold Coins)", {
+  const betLabel = makeText(scene, COL_LEFT, 208, "Bet Amount (Gold Coins)", {
     size: Tokens.type.size.sm,
     color: Tokens.text.muted,
     tracking: Tokens.type.tracking.label
@@ -870,6 +875,7 @@ export function makeGameShell(
     Tokens.radius.sm
   );
   walkAwayBtn.container.setScrollFactor(0);
+  if (lounge) walkAwayBtn.container.setVisible(false);
 
   // See this function's "CENTERING ON WIDE CANVASES" doc comment above, and
   // `centerDesignBlock`'s own doc comment in Layout.ts (the shared home for
@@ -895,7 +901,7 @@ export function makeGameShell(
     scene.events.once('shutdown', () => scene.scale.off('resize', layout));
   } else centerDesignBlock(scene, screenFixed);
 
-  return { balanceText, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
+  return { balanceLabel, balanceText, betLabel, multiplierText, messageText, betControl, startBtn, cashOutBtn, walkAwayBtn };
 }
 
 /**
@@ -926,15 +932,9 @@ export function drawCabinetFrame(
 ): Phaser.GameObjects.Graphics {
   const g = scene.add.graphics().setDepth(-1);
   if (loungePresentation()) {
-    // Every embedded game uses the same dark felt playing surface, including
-    // games with no physical table. Content and hit targets keep their bounds.
-    const rail = Tokens.space.sm;
-    g.fillStyle(0x101e29, .97);
-    g.fillRoundedRect(cx - w / 2 - rail, cy - h / 2 - rail, w + rail * 2, h + rail * 2, Tokens.radius.lg * 2);
-    g.fillStyle(0x163d43, .96);
-    g.fillRoundedRect(cx - w / 2, cy - h / 2, w, h, Tokens.radius.lg * 2);
-    g.lineStyle(1, 0x55817f, .55);
-    g.strokeRoundedRect(cx - w / 2 + rail, cy - h / 2 + rail, w - rail * 2, h - rail * 2, Tokens.radius.lg);
+    // Lounge games draw directly over the physical 3D table. The game keeps
+    // its cards, wheel, tiles and controls, while the table, dealer and seated
+    // friends remain the surface and frame behind them.
     return g;
   }
   g.fillStyle(0x07151e, .45);

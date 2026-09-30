@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { embeddedGame } from '../mobile/arcadeBridge';
+import { embeddedGame, loungePresentation } from '../mobile/arcadeBridge';
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -118,6 +118,17 @@ export class BlackjackScene extends Phaser.Scene {
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
+  private directQuickplay = false;
+  private handCenterX = DX;
+  private dealerHandY = DEALER_CARDS_Y;
+  private playerHandY = PLAYER_CARDS_Y;
+  private cardWidth = CARD_W;
+  private cardHeight = CARD_H;
+  private cardStep = CARD_W + CARD_GAP;
+  private dealerScoreBg?: Phaser.GameObjects.Graphics;
+  private playerScoreBg?: Phaser.GameObjects.Graphics;
+  private splitBtn?: UIButton;
+  private doubleBtn?: UIButton;
 
   constructor() {
     super("BlackjackScene");
@@ -133,6 +144,20 @@ export class BlackjackScene extends Phaser.Scene {
     this.busy = false;
     this.roundId = null;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) {
+      // The iframe can boot at 800x600 a fraction of a second before the
+      // mobile shell applies its 500x1000 portrait game size. Recreate this
+      // one scene after that real resize so the table and controls are laid
+      // out from the final dimensions rather than retaining landscape
+      // coordinates on a portrait canvas.
+      this.scale.once("resize", () => this.scene.restart());
+      this.createDirectQuickplayLayout();
+      this.renderHands();
+      this.updateBalance();
+      return;
+    }
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. This game has no cash-out concept, so
@@ -232,6 +257,206 @@ export class BlackjackScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  /**
+   * Direct Quickplay uses the open-table composition from the supplied
+   * reference: a compact betting rail at the left in landscape (or below
+   * the table in portrait), dealer cards high, player cards low, and the
+   * rules plaque floating between them. Lounge Blackjack deliberately keeps
+   * the existing dealer/table presentation above.
+   */
+  private createDirectQuickplayLayout() {
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const portrait = height > width;
+    const controls = portrait
+      ? { x: 0, y: 600, w: width, h: height - 600 }
+      : { x: 0, y: 0, w: Math.max(236, Math.min(300, Math.round(width * 0.25))), h: height };
+    const table = portrait
+      ? { x: 0, y: 0, w: width, h: 600 }
+      : { x: controls.w, y: 0, w: width - controls.w, h: height };
+    const panelLeft = controls.x + Tokens.space.md;
+    const panelRight = controls.x + controls.w - Tokens.space.md;
+    const panelWidth = panelRight - panelLeft;
+    const top = controls.y;
+
+    this.handCenterX = table.x + table.w / 2;
+    this.dealerHandY = table.y + (portrait ? 132 : 122);
+    this.playerHandY = table.y + (portrait ? 466 : 458);
+    this.cardWidth = portrait ? 70 : 72;
+    this.cardHeight = portrait ? 102 : 106;
+    this.cardStep = portrait ? 48 : 50;
+
+    const ground = this.add.graphics().setDepth(-1000).setScrollFactor(0);
+    ground.fillStyle(Tokens.color.bg, 1).fillRect(0, 0, width, height);
+
+    const tableSurface = this.add.graphics().setDepth(-20);
+    tableSurface.fillStyle(0x0d202d, 1).fillRect(table.x, table.y, table.w, table.h);
+    tableSurface.fillStyle(Tokens.color.surface, 0.42).fillRect(table.x, table.y, table.w, 16);
+
+    const controlSurface = this.add.graphics().setDepth(-10).setScrollFactor(0);
+    controlSurface.fillStyle(Tokens.color.surface, 1).fillRect(controls.x, controls.y, controls.w, controls.h);
+    if (portrait) {
+      controlSurface.lineStyle(2, Tokens.color.hairline, 1).lineBetween(0, controls.y, width, controls.y);
+    }
+
+    makeText(this, panelLeft, top + 18, "BLACKJACK", {
+      size: Tokens.type.size.sm,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.secondary,
+      tracking: Tokens.type.tracking.caps
+    }).setScrollFactor(0);
+    makeText(this, panelLeft, top + 42, "AMOUNT", {
+      size: Tokens.type.size.xs,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.secondary,
+      tracking: Tokens.type.tracking.label
+    }).setScrollFactor(0);
+    this.balanceText = makeText(this, panelRight, top + 18, "", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      align: "right",
+      originX: 1
+    }).setScrollFactor(0);
+
+    this.betControl = this.makeDirectBetControl(controls.x + controls.w / 2, top + 72, panelWidth);
+
+    const gap = Tokens.space.sm;
+    const buttonW = (panelWidth - gap) / 2;
+    const leftX = panelLeft + buttonW / 2;
+    const rightX = panelRight - buttonW / 2;
+    this.hitBtn = makeButton(this, leftX, top + 126, buttonW, 44, "HIT  ↘", Tokens.color.surfaceHover, Tokens.color.info, () => this.hit(), Tokens.text.primary, Tokens.radius.md);
+    this.standBtn = makeButton(this, rightX, top + 126, buttonW, 44, "STAND  ✋", Tokens.color.surfaceHover, Tokens.color.info, () => this.stand(), Tokens.text.primary, Tokens.radius.md);
+    this.splitBtn = makeButton(this, leftX, top + 178, buttonW, 44, "SPLIT", Tokens.color.surfaceRaised, Tokens.color.surfaceRaised, () => {}, Tokens.text.secondary, Tokens.radius.md);
+    this.doubleBtn = makeButton(this, rightX, top + 178, buttonW, 44, "DOUBLE  ×2", Tokens.color.surfaceRaised, Tokens.color.surfaceRaised, () => {}, Tokens.text.secondary, Tokens.radius.md);
+    this.splitBtn.setEnabled(false);
+    this.doubleBtn.setEnabled(false);
+
+    this.newHandBtn = makeButton(this, controls.x + controls.w / 2, top + 232, panelWidth, 44, "PLAY", Tokens.color.info, Tokens.color.infoHover, () => this.startNewHand(), Tokens.text.primary, Tokens.radius.md);
+    this.messageText = makeText(this, panelLeft, top + 264, "Place your bet and play a hand.", {
+      size: Tokens.type.size.sm,
+      color: Tokens.text.muted,
+      wordWrapWidth: panelWidth,
+      originY: 0
+    }).setScrollFactor(0);
+    this.walkAwayBtn = makeButton(this, controls.x + controls.w / 2, controls.y + controls.h - 28, panelWidth, 34, "BACK TO GAMES", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => this.leaveGame(), Tokens.text.secondary, Tokens.radius.sm);
+
+    for (const button of [this.hitBtn, this.standBtn, this.splitBtn, this.doubleBtn, this.newHandBtn, this.walkAwayBtn]) {
+      button.container.setScrollFactor(0);
+    }
+    this.setActionButtonsVisible(false);
+
+    const dealerLabelY = table.y + 38;
+    makeText(this, this.handCenterX, dealerLabelY, "DEALER", {
+      size: Tokens.type.size.xs,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5
+    });
+
+    const rulesY = table.y + 300;
+    const plaque = this.add.graphics();
+    plaque.fillStyle(Tokens.color.surface, 1);
+    plaque.fillTriangle(this.handCenterX - 170, rulesY - 18, this.handCenterX - 150, rulesY, this.handCenterX - 170, rulesY + 18);
+    plaque.fillTriangle(this.handCenterX + 170, rulesY - 18, this.handCenterX + 150, rulesY, this.handCenterX + 170, rulesY + 18);
+    plaque.fillRoundedRect(this.handCenterX - 145, rulesY - 22, 290, 44, Tokens.radius.sm);
+    makeText(this, this.handCenterX, rulesY - 1, "BLACKJACK PAYS 3 TO 2", {
+      size: Tokens.type.size.sm,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.secondary,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+    makeText(this, this.handCenterX, rulesY + 34, "INSURANCE PAYS 2 TO 1", {
+      size: Tokens.type.size.xs,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.muted,
+      tracking: Tokens.type.tracking.caps,
+      align: "center",
+      originX: 0.5
+    });
+
+    this.drawDeck(table.x + table.w - 48, table.y + 38);
+    this.dealerScoreBg = this.add.graphics();
+    this.playerScoreBg = this.add.graphics();
+    this.dealerTotalText = makeText(this, this.handCenterX, this.dealerHandY - this.cardHeight / 2 - 14, "", {
+      size: Tokens.type.size.sm,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+    this.playerTotalText = makeText(this, this.handCenterX, this.playerHandY - this.cardHeight / 2 - 14, "", {
+      size: Tokens.type.size.sm,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+  }
+
+  private makeDirectBetControl(x: number, y: number, width: number): BetControl {
+    const container = this.add.container(x, y).setScrollFactor(0);
+    const cellW = 44;
+    const gap = Tokens.space.xs;
+    const fieldW = width - cellW * 2 - gap * 2;
+    const left = -width / 2;
+    const fieldX = left + fieldW / 2;
+    const field = this.add.graphics();
+    field.fillStyle(Tokens.color.inset, 1).fillRoundedRect(fieldX - fieldW / 2, -20, fieldW, 40, Tokens.radius.md);
+    const amount = makeText(this, fieldX - fieldW / 2 + Tokens.space.md, 0, "", {
+      size: Tokens.type.size.lg,
+      weight: Tokens.type.weight.semibold,
+      color: Tokens.text.primary,
+      originY: 0.5
+    });
+    const coin = this.add.graphics();
+    coin.fillStyle(0xffc800, 1).fillCircle(fieldX + fieldW / 2 - 15, 0, 9);
+    const coinLabel = makeText(this, fieldX + fieldW / 2 - 15, 0, "G", {
+      size: Tokens.type.size.xs,
+      weight: Tokens.type.weight.bold,
+      color: Tokens.text.onAccent,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+    const half = makeButton(this, left + fieldW + gap + cellW / 2, 0, cellW, 40, "½", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => {
+      gameState.setBet(gameState.betAmount / 2);
+      refresh();
+    }, Tokens.text.secondary, Tokens.radius.sm);
+    const twice = makeButton(this, left + fieldW + gap * 2 + cellW * 1.5, 0, cellW, 40, "2×", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => {
+      gameState.setBet(gameState.betAmount * 2);
+      refresh();
+    }, Tokens.text.secondary, Tokens.radius.sm);
+    container.add([field, amount, coin, coinLabel, half.container, twice.container]);
+    const refresh = () => amount.setText(gameState.betAmount.toFixed(2));
+    refresh();
+    return {
+      container,
+      refresh,
+      setEnabled: (value: boolean) => {
+        half.setEnabled(value);
+        twice.setEnabled(value);
+        container.setAlpha(value ? 1 : Tokens.motion.disabledAlpha);
+      },
+      destroy: () => container.destroy()
+    };
+  }
+
+  private drawDeck(x: number, y: number) {
+    for (let i = 0; i < 3; i++) {
+      const g = this.add.graphics();
+      const cy = y + i * 4;
+      g.fillStyle(Tokens.card.face, 1).fillRoundedRect(x - this.cardWidth / 2, cy - this.cardHeight / 2, this.cardWidth, this.cardHeight, Tokens.radius.md);
+      g.fillStyle(Tokens.color.info, 1).fillRoundedRect(x - this.cardWidth / 2 + 4, cy - this.cardHeight / 2 + 4, this.cardWidth - 8, this.cardHeight - 8, Tokens.radius.sm);
+      g.lineStyle(1, Tokens.card.face, 0.85).strokeRoundedRect(x - this.cardWidth / 2 + 8, cy - this.cardHeight / 2 + 8, this.cardWidth - 16, this.cardHeight - 16, Tokens.radius.xs);
+    }
+  }
+
   private startNewHand() {
     if (this.active || this.busy) return;
 
@@ -275,12 +500,13 @@ export class BlackjackScene extends Phaser.Scene {
           this.active = true;
           this.messageText.setText("");
           this.setActionButtonsVisible(true);
-          this.newHandBtn?.container.setVisible(false);
+          if (this.directQuickplay) this.newHandBtn?.setLabel("HAND IN PLAY");
+          else this.newHandBtn?.container.setVisible(false);
           this.newHandBtn?.setEnabled(false);
         }
 
         this.updateBalance();
-        this.renderHands();
+        this.animateInitialDeal();
       })
       .catch((err) => {
         if (allowRecovery && err instanceof ApiError && err.code === "ROUND_ALREADY_ACTIVE") {
@@ -430,18 +656,125 @@ export class BlackjackScene extends Phaser.Scene {
   }
 
   private setActionButtonsVisible(visible: boolean) {
-    this.hitBtn?.container.setVisible(visible);
+    this.hitBtn?.container.setVisible(this.directQuickplay || visible);
     this.hitBtn?.setEnabled(visible);
-    this.standBtn?.container.setVisible(visible);
+    this.standBtn?.container.setVisible(this.directQuickplay || visible);
     this.standBtn?.setEnabled(visible);
   }
 
   private renderHands() {
+    if (this.directQuickplay) {
+      this.drawDirectHand(this.dealerCardObjects, this.dealerHand, this.handCenterX, this.dealerHandY, this.dealerHoleHidden);
+      this.drawDirectHand(this.playerCardObjects, this.playerHand, this.handCenterX, this.playerHandY, false);
+      const dealerScore = this.dealerHand.length > 0 ? String(this.dealerTotal()) : "";
+      const playerScore = this.playerHand.length > 0 ? String(this.playerTotal()) : "";
+      this.dealerTotalText.setText(dealerScore);
+      this.playerTotalText.setText(playerScore);
+      this.drawScoreBadge(this.dealerScoreBg, this.dealerTotalText.x, this.dealerTotalText.y, dealerScore !== "");
+      this.drawScoreBadge(this.playerScoreBg, this.playerTotalText.x, this.playerTotalText.y, playerScore !== "");
+      return;
+    }
+
     this.drawHand(this.dealerCardObjects, this.dealerHand, DX, DEALER_CARDS_Y, this.dealerHoleHidden);
     this.drawHand(this.playerCardObjects, this.playerHand, DX, PLAYER_CARDS_Y, false);
-
     this.dealerTotalText.setText(this.dealerHoleHidden ? "DEALER" : `DEALER  ${this.dealerTotal()}`);
     this.playerTotalText.setText(this.playerHand.length > 0 ? `You  ${this.playerTotal()}` : "");
+  }
+
+  private animateInitialDeal() {
+    this.renderHands();
+    const objects = [...this.dealerCardObjects, ...this.playerCardObjects];
+    objects.forEach((gameObject, index) => {
+      const target = gameObject as Phaser.GameObjects.GameObject & {
+        setAlpha: (alpha: number) => unknown;
+        setScale: (scale: number) => unknown;
+      };
+      target.setAlpha(0);
+      target.setScale(0.82);
+      this.tweens.add({
+        targets: target,
+        alpha: 1,
+        scaleX: 1,
+        scaleY: 1,
+        delay: Math.floor(index / (this.directQuickplay ? 4 : 2)) * 130,
+        duration: 240,
+        ease: Tokens.motion.ease.out
+      });
+    });
+  }
+
+  private drawScoreBadge(bg: Phaser.GameObjects.Graphics | undefined, x: number, y: number, visible: boolean) {
+    if (!bg) return;
+    bg.clear();
+    if (!visible) return;
+    bg.fillStyle(Tokens.color.surfaceHover, 1).fillRoundedRect(x - 31, y - 11, 62, 22, 11);
+  }
+
+  private drawDirectHand(
+    existing: Phaser.GameObjects.GameObject[],
+    hand: Card[],
+    centerX: number,
+    y: number,
+    hideHoleCard: boolean
+  ) {
+    existing.forEach((obj) => obj.destroy());
+    existing.length = 0;
+    if (hand.length === 0) return;
+
+    const cards: Array<Card | null> = [...hand];
+    if (hideHoleCard) cards.splice(1, 0, null);
+    const totalWidth = this.cardWidth + (cards.length - 1) * this.cardStep;
+    const startX = centerX - totalWidth / 2 + this.cardWidth / 2;
+    cards.forEach((card, index) => {
+      const objects = this.drawDirectCard(startX + index * this.cardStep, y, card);
+      objects.forEach(obj => (obj as Phaser.GameObjects.GameObject & { setDepth: (depth: number) => unknown }).setDepth(index + 1));
+      existing.push(...objects);
+    });
+  }
+
+  private drawDirectCard(x: number, y: number, card: Card | null): Phaser.GameObjects.GameObject[] {
+    const g = this.add.graphics();
+    g.fillStyle(0x07131b, 0.42).fillRoundedRect(x - this.cardWidth / 2 + 3, y - this.cardHeight / 2 + 4, this.cardWidth, this.cardHeight, Tokens.radius.md);
+    g.fillStyle(Tokens.card.face, 1).fillRoundedRect(x - this.cardWidth / 2, y - this.cardHeight / 2, this.cardWidth, this.cardHeight, Tokens.radius.md);
+    g.lineStyle(1, Tokens.color.textMuted, 0.38).strokeRoundedRect(x - this.cardWidth / 2, y - this.cardHeight / 2, this.cardWidth, this.cardHeight, Tokens.radius.md);
+
+    if (!card) {
+      g.fillStyle(Tokens.color.info, 1).fillRoundedRect(x - this.cardWidth / 2 + 4, y - this.cardHeight / 2 + 4, this.cardWidth - 8, this.cardHeight - 8, Tokens.radius.sm);
+      g.lineStyle(1, Tokens.card.face, 0.9).strokeRoundedRect(x - this.cardWidth / 2 + 8, y - this.cardHeight / 2 + 8, this.cardWidth - 16, this.cardHeight - 16, Tokens.radius.xs);
+      const mark = makeText(this, x, y, "G", {
+        size: Tokens.type.size.xl,
+        weight: Tokens.type.weight.bold,
+        color: Tokens.text.primary,
+        align: "center",
+        originX: 0.5,
+        originY: 0.5
+      });
+      return [g, mark];
+    }
+
+    const color = isRed(card) ? Tokens.card.inkRed : Tokens.card.ink;
+    const rank = makeText(this, x - this.cardWidth / 2 + 11, y - this.cardHeight / 2 + 9, card.rank, {
+      size: Tokens.type.size.xxl,
+      weight: Tokens.type.weight.bold,
+      color,
+      originX: 0.5,
+      originY: 0
+    });
+    const cornerSuit = makeText(this, x - this.cardWidth / 2 + 11, y - this.cardHeight / 2 + 36, card.suit, {
+      size: Tokens.type.size.md,
+      color,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+    const suit = makeText(this, x, y + 17, card.suit, {
+      size: Tokens.type.glyph.lg,
+      color,
+      align: "center",
+      originX: 0.5,
+      originY: 0.5
+    });
+    return [g, rank, cornerSuit, suit];
   }
 
   /** Client-side display-only total (server always computes the authoritative one for payout) - fine here since suit never affects value and rank labels round-trip cleanly. */

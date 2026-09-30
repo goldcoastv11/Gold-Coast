@@ -127,6 +127,25 @@ describe("POST /games/mines/* (stateful reference: start / pick / cashout)", () 
     expect(JSON.stringify(res.body)).not.toContain("minePositions");
   });
 
+  it("supports a selected mine count and uses it for both payouts and mine placement", async () => {
+    const { token } = await signupUser();
+    const mineCount = 5;
+    const start = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10, mineCount });
+    expect(start.status).toBe(200);
+
+    let hit: request.Response | null = null;
+    for (let tile = 0; tile < MINES_TOTAL_TILES; tile++) {
+      const pick = await request(app).post("/games/mines/pick").set(authed(token)).send({ roundId: start.body.roundId, tileIndex: tile });
+      if (pick.body.hitMine) {
+        hit = pick;
+        break;
+      }
+      expect(pick.body.multiplier).toBe(minesMultiplier(pick.body.revealed.length, mineCount));
+    }
+    expect(hit).not.toBeNull();
+    expect(hit!.body.minePositions).toHaveLength(mineCount);
+  });
+
   it("rejects starting a second round while one is already active", async () => {
     const { token } = await signupUser();
     const first = await request(app).post("/games/mines/start").set(authed(token)).send({ betAmount: 10 });

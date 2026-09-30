@@ -89,6 +89,7 @@ export class InvalidHiLoGuessError extends Error {}
 export interface HiLoGuessResult {
   state: HiLoRoundState;
   won: boolean;
+  push: boolean;
   nextCard: number;
   deckExhausted: boolean;
 }
@@ -105,10 +106,19 @@ export function applyHiLoGuess(state: HiLoRoundState, guess: HiLoGuess): HiLoGue
 
   const deck = [...state.deck];
   const nextCard = deck.pop()!;
+  if (nextCard === state.currentCard) {
+    return {
+      state: { ...state, deck, currentCard: nextCard },
+      won: false,
+      push: true,
+      nextCard,
+      deckExhausted: deck.length === 0
+    };
+  }
   const won = guess === "higher" ? nextCard > state.currentCard : nextCard < state.currentCard;
 
   if (!won) {
-    return { state: { ...state, deck, currentCard: nextCard }, won: false, nextCard, deckExhausted: false };
+    return { state: { ...state, deck, currentCard: nextCard }, won: false, push: false, nextCard, deckExhausted: false };
   }
 
   const newState: HiLoRoundState = {
@@ -117,5 +127,5 @@ export function applyHiLoGuess(state: HiLoRoundState, guess: HiLoGuess): HiLoGue
     cumulativeFair: state.cumulativeFair * fairFactor,
     correctGuesses: state.correctGuesses + 1
   };
-  return { state: newState, won: true, nextCard, deckExhausted: deck.length === 0 };
+  return { state: newState, won: true, push: false, nextCard, deckExhausted: deck.length === 0 };
 }

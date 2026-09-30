@@ -1,8 +1,10 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
 import {
+  makeButton,
   makeText,
   makeGameShell,
   formatBalance,
@@ -15,9 +17,11 @@ import {
   UIButton
 } from "../ui/uiHelpers";
 import * as api from "../api/client";
+import type { DragonTowerDifficulty } from "../api/types";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawManualAuto, drawQuickLabel, drawQuickReadout, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 
 const ROWS = 6;
 const TILES_PER_ROW = 4;
@@ -51,13 +55,16 @@ type TileState = "locked" | "active" | "safe" | "bad";
  * outcome is spoken by the glyph, not by a coloured border.
  */
 const TILE_FILL: Record<TileState, number> = {
-  locked: Tokens.color.inset,
+  locked: Tokens.color.surfaceRaised,
   active: Tokens.color.surfaceRaised,
   safe: Tokens.color.positiveMuted,
   bad: Tokens.color.negativeMuted
 };
 
 export class DragonTowerScene extends Phaser.Scene {
+  private directQuickplay = false;
+  private towerCenterX = TOWER_CENTER_X;
+  private bottomRowY = BOTTOM_ROW_Y;
   private currentRow = 0;
   private active = false;
   /** True while a start/pick/cash-out request is in flight - blocks further input without ending the run. */
@@ -66,6 +73,8 @@ export class DragonTowerScene extends Phaser.Scene {
   /** Column picked at each cleared row so far - remembered client-side purely to redraw a "safe" mark on those tiles once the round ends and badIndexPerRow is revealed (the server never needs this back). */
   private pickedColPerRow: number[] = [];
   private tiles: TileVisual[][] = [];
+  private difficulty: DragonTowerDifficulty = "easy";
+  private difficultyButtons: UIButton[] = [];
 
   private messageText!: Phaser.GameObjects.Text;
   private multiplierText!: Phaser.GameObjects.Text;
@@ -89,7 +98,16 @@ export class DragonTowerScene extends Phaser.Scene {
     this.roundId = null;
     this.pickedColPerRow = [];
     this.tiles = [];
+    this.difficulty = "easy";
+    this.difficultyButtons = [];
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) this.scale.once("resize", () => this.scene.restart());
+
+    if (this.directQuickplay) {
+      this.createDirectQuickplay();
+      return;
+    }
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment.
@@ -126,6 +144,55 @@ export class DragonTowerScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplay() {
+    const stage = createQuickplayStage(this);
+    drawManualAuto(this, stage, 32);
+    drawQuickLabel(this, stage, 78, "Amount");
+    this.betControl = makeQuickBetControl(this, stage, 120);
+    drawQuickLabel(this, stage, 154, "Difficulty");
+    const diffGap = 6;
+    const diffW = (stage.contentW - diffGap * 2) / 3;
+    const diffOptions: Array<{ value: DragonTowerDifficulty; label: string }> = [
+      { value: "easy", label: "Easy · 1" },
+      { value: "medium", label: "Medium · 2" },
+      { value: "hard", label: "Hard · 3" }
+    ];
+    this.difficultyButtons = diffOptions.map((option, index) => makeButton(
+      this,
+      stage.left + diffW / 2 + index * (diffW + diffGap),
+      stage.top + 195,
+      diffW,
+      42,
+      option.label,
+      Tokens.color.surfaceRaised,
+      Tokens.color.surfaceHover,
+      () => this.setDifficulty(option.value),
+      Tokens.text.primary,
+      Tokens.radius.md
+    ));
+    this.refreshDifficultyButtons();
+    this.startBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 246, stage.contentW, 44, "Play", 0x1f7ae0, 0x2b8bf0, () => this.startRun(), Tokens.text.primary, Tokens.radius.md);
+    this.cashOutBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 298, stage.contentW, 42, "Cash Out", Tokens.color.surfaceRaised, Tokens.color.surfaceHover, () => this.cashOut(), Tokens.text.primary, Tokens.radius.md);
+    this.cashOutBtn.setEnabled(false);
+    this.balanceText = makeText(this, -100, -100, "");
+    this.multiplierText = makeText(this, -100, -100, "1.00×");
+    this.messageText = drawQuickReadout(this, stage, stage.portrait ? 300 : 334, "Total Net Gain", "Start at 1.00×");
+    this.walkAwayBtn = makeQuickBackButton(this, stage, () => this.leaveGame());
+
+    const cx = stage.board.x + stage.board.w / 2;
+    this.towerCenterX = cx;
+    this.bottomRowY = stage.board.y + stage.board.h - 74;
+    const dragonY = stage.board.y + 68;
+    const dragon = this.add.graphics();
+    dragon.fillStyle(0x71879a, 1).fillCircle(cx, dragonY, 38);
+    dragon.fillTriangle(cx - 28, dragonY - 8, cx - 112, dragonY - 48, cx - 82, dragonY + 28);
+    dragon.fillTriangle(cx + 28, dragonY - 8, cx + 112, dragonY - 48, cx + 82, dragonY + 28);
+    dragon.fillStyle(0xb2c3d0, 1).fillTriangle(cx - 14, dragonY - 34, cx, dragonY - 66, cx + 14, dragonY - 34);
+    makeText(this, cx, dragonY + 6, "◆", { size: "26px", color: "#e3edf4", originX: 0.5, originY: 0.5 });
+    this.buildEmptyTowerVisuals();
+    this.updateBalance();
+  }
+
   /** Draws the tower grid in its "no active run" locked state. */
   private buildEmptyTowerVisuals() {
     this.tiles.forEach((row) => row.forEach((t) => t.container.destroy()));
@@ -133,9 +200,9 @@ export class DragonTowerScene extends Phaser.Scene {
 
     for (let row = 0; row < ROWS; row++) {
       const rowTiles: TileVisual[] = [];
-      const y = BOTTOM_ROW_Y - row * ROW_SPACING;
+      const y = this.bottomRowY - row * ROW_SPACING;
       const totalWidth = TILES_PER_ROW * TILE_SIZE + (TILES_PER_ROW - 1) * TILE_GAP;
-      const startX = TOWER_CENTER_X - totalWidth / 2 + TILE_SIZE / 2;
+      const startX = this.towerCenterX - totalWidth / 2 + TILE_SIZE / 2;
 
       for (let col = 0; col < TILES_PER_ROW; col++) {
         const x = startX + col * (TILE_SIZE + TILE_GAP);
@@ -200,7 +267,7 @@ export class DragonTowerScene extends Phaser.Scene {
   /** Task #43: see MinesScene.attemptStart's doc comment - same one-retry ROUND_ALREADY_ACTIVE recovery pattern. */
   private attemptStart(bet: number, allowRecovery: boolean) {
     api
-      .startDragonTower(bet, "GC")
+      .startDragonTower(bet, "GC", this.difficulty)
       .then((res) => {
         gameState.hydrateFromServer(res.user);
         this.roundId = res.roundId;
@@ -208,6 +275,8 @@ export class DragonTowerScene extends Phaser.Scene {
         this.busy = false;
         this.currentRow = 0;
         this.pickedColPerRow = [];
+        this.difficulty = res.state.difficulty;
+        this.refreshDifficultyButtons();
 
         this.messageText.setText("Pick a tile in the glowing row").setColor(Tokens.text.muted);
         this.multiplierText.setText("Multiplier: 1.0x");
@@ -216,6 +285,7 @@ export class DragonTowerScene extends Phaser.Scene {
         this.startBtn?.setEnabled(false);
         this.cashOutBtn?.container.setVisible(false);
         this.cashOutBtn?.setEnabled(false);
+        this.difficultyButtons.forEach((button) => button.setEnabled(false));
 
         this.updateBalance();
         this.renderTowerState();
@@ -291,7 +361,7 @@ export class DragonTowerScene extends Phaser.Scene {
   }
 
   /** Reveals the full tower once a run has ended (bust, cash-out, or reached the top) - marks each row's true bad column, and "safe" on whichever column was actually picked for rows successfully cleared. */
-  private revealTower(badIndexPerRow: number[], bustedRow: number | null) {
+  private revealTower(badIndicesPerRow: number[][], bustedRow: number | null) {
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < TILES_PER_ROW; col++) {
         const tile = this.tiles[row][col];
@@ -302,7 +372,7 @@ export class DragonTowerScene extends Phaser.Scene {
         const isBustRow = bustedRow !== null && row === bustedRow;
 
         if (clearedThisRow || isBustRow) {
-          this.paintTile(tile.bg, tile.label, col === badIndexPerRow[row] ? "bad" : "safe");
+          this.paintTile(tile.bg, tile.label, badIndicesPerRow[row]?.includes(col) ? "bad" : "safe");
         } else {
           this.paintTile(tile.bg, tile.label, "locked");
         }
@@ -324,7 +394,7 @@ export class DragonTowerScene extends Phaser.Scene {
 
         if (res.isBad) {
           this.active = false;
-          this.revealTower(res.badIndexPerRow ?? [], this.currentRow);
+          this.revealTower(res.badIndicesPerRow ?? [], this.currentRow);
           this.messageText.setText("Bust! You lose your bet.").setColor(Tokens.text.negative);
           playSfx(this, "bust");
           playSfx(this, "lose");
@@ -348,7 +418,7 @@ export class DragonTowerScene extends Phaser.Scene {
 
         if (res.reachedTop) {
           this.active = false;
-          this.revealTower(res.badIndexPerRow ?? [], null);
+          this.revealTower(res.badIndicesPerRow ?? [], null);
           this.messageText.setText(`Reached the top! +${res.payout ?? 0} Gold Coins`).setColor(Tokens.text.accent);
           this.updateBalance();
           showWinCelebration(this, res.payout ?? 0);
@@ -381,7 +451,7 @@ export class DragonTowerScene extends Phaser.Scene {
         gameState.hydrateFromServer(res.user);
         this.busy = false;
         this.active = false;
-        this.revealTower(res.badIndexPerRow, null);
+        this.revealTower(res.badIndicesPerRow, null);
         this.messageText.setText(`Cashed out! +${res.payout} Gold Coins`).setColor(Tokens.text.accent);
         this.updateBalance();
         showWinCelebration(this, res.payout);
@@ -413,6 +483,8 @@ export class DragonTowerScene extends Phaser.Scene {
     this.startBtn?.setEnabled(true);
     this.startBtn?.setLabel("NEW RUN");
     this.betControl?.setEnabled(true);
+    this.difficultyButtons.forEach((button) => button.setEnabled(true));
+    this.refreshDifficultyButtons();
 
     this.tiles.forEach((row) =>
       row.forEach((t) => {
@@ -424,5 +496,18 @@ export class DragonTowerScene extends Phaser.Scene {
 
   private updateBalance() {
     this.balanceText.setText(formatBalance(gameState.goldCoins));
+  }
+
+  private setDifficulty(difficulty: DragonTowerDifficulty) {
+    if (this.active || this.busy) return;
+    this.difficulty = difficulty;
+    this.refreshDifficultyButtons();
+    const traps = difficulty === "easy" ? 1 : difficulty === "medium" ? 2 : 3;
+    this.messageText.setText(`${difficulty[0].toUpperCase()}${difficulty.slice(1)}: ${traps} trap${traps === 1 ? "" : "s"} per row`).setColor(Tokens.text.muted);
+  }
+
+  private refreshDifficultyButtons() {
+    const values: DragonTowerDifficulty[] = ["easy", "medium", "hard"];
+    this.difficultyButtons.forEach((button, index) => button.container.setAlpha(values[index] === this.difficulty ? 1 : 0.62));
   }
 }

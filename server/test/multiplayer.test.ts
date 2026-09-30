@@ -8,10 +8,11 @@ const look: Look = { shirt: '#27c6b5', skin: '#c68b60', hair: '#302922' };
 describe('mobile multiplayer practice rooms', () => {
   let now: number, rooms: RoomService, code: string;
   beforeEach(() => { now = 100000; rooms = new RoomService(() => now, max => max - 1); code = rooms.join('a', 'Alice', undefined, look).code; });
-  const pose = { x: -4, z: 1, yaw: 0, look };
+  const pose = { x: -6, z: -1, yaw: 0, look };
   function approach(id: string) { for (let i = 0; i < 6; i++) { now += 200; rooms.sync(id, code, pose); } }
   function seat(id: string) { approach(id); const s = rooms.sync(id, code); return rooms.action(id, code, 'sit', s.table.revision); }
-  function twoPlayers() { rooms.join('b', 'Bob', code, look); seat('a'); return seat('b'); }
+  function placeBet(id: string, state: ReturnType<RoomService['join']>, tableId: 'palm' | 'coast' = 'palm') { return rooms.action(id, code, 'bet', state.table.revision, tableId, false, undefined, 25); }
+  function twoPlayers() { rooms.join('b', 'Bob', code, look); seat('a'); let state = seat('b'); state = placeBet('a', state); return placeBet('b', state); }
   it('shares only authenticated identities, and caps room size at eight', () => {
     for (let i = 1; i < 8; i++) rooms.join(String(i), `Player${i}`, code, look);
     expect(rooms.sync('a', code).players).toHaveLength(8);
@@ -43,6 +44,7 @@ describe('mobile multiplayer practice rooms', () => {
     while (s.table.turn) s = rooms.action(s.table.turn, code, 'stand', s.table.revision);
     expect(s.table.phase).toBe('resolved'); expect(s.table.dealer).not.toContain(0);
     expect(s.table.hands.every(h => h.result)).toBe(true);
+    s = placeBet('a', s); s = placeBet('b', s);
     expect(rooms.action('a', code, 'deal', s.table.revision).table.hands).toHaveLength(2);
   });
   it('auto-stands a timed-out turn while connected players remain', () => {
@@ -57,7 +59,7 @@ describe('mobile multiplayer practice rooms', () => {
     expect(() => rooms.join('c', 'Carol', code, look)).toThrow('not found');
   });
   it('rejects joining the table in the middle of a hand', () => {
-    const s = seat('a'); rooms.join('b', 'Bob', code, look); approach('b');
+    let s = seat('a'); rooms.join('b', 'Bob', code, look); approach('b'); s = placeBet('a', s);
     const game = rooms.action('a', code, 'deal', s.table.revision);
     expect(() => rooms.action('b', code, 'sit', game.table.revision)).toThrow('finish');
   });
@@ -76,6 +78,7 @@ describe('mobile multiplayer practice rooms', () => {
     rooms.join('b', 'Bob', code, look);
     let a = rooms.action('a', code, 'sit', 0, 'palm', true);
     let b = rooms.action('b', code, 'sit', 0, 'coast', true);
+    a = placeBet('a', a, 'palm'); b = placeBet('b', b, 'coast');
     a = rooms.action('a', code, 'deal', a.table.revision);
     b = rooms.action('b', code, 'deal', b.table.revision);
     expect(a.table.hands.map(h => h.id)).toEqual(['a']);
@@ -92,6 +95,50 @@ describe('mobile multiplayer practice rooms', () => {
     expect(() => rooms.action('4', code, 'sit', s.table.revision, 'palm', true)).toThrow('four seats');
     expect(rooms.action('4', code, 'sit', 0, 'coast', true).table.id).toBe('coast');
   });
+  it('seats friends at every lounge game and passes shared-game turns around the table', () => {
+    rooms.join('b', 'Bob', code, look);
+    let state = rooms.action('a', code, 'sit', 0, 'dice', true);
+    state = rooms.action('b', code, 'sit', state.table.revision, 'dice', true);
+    expect(state.players.filter(p => p.tableId === 'dice').map(p => p.seat)).toEqual([0, 1]);
+    expect(state.table).toMatchObject({ id: 'dice', game: 'dice', phase: 'waiting', turn: 'a' });
+    state = rooms.action('a', code, 'begin', state.table.revision, 'dice');
+    expect(state.table.phase).toBe('playing');
+    expect(() => rooms.action('b', code, 'finish', state.table.revision, 'dice')).toThrow("isn't your turn");
+    state = rooms.action('a', code, 'share', state.table.revision, 'dice', false, 'Dice: rolled 42 · won');
+    expect(rooms.sync('b', code).table.lastPlay).toMatchObject({ playerName: 'Alice', result: 'Dice: rolled 42 · won' });
+    state = rooms.action('a', code, 'finish', state.table.revision, 'dice', false, 'Rolled 42 · won');
+    expect(state.table).toMatchObject({ phase: 'waiting', turn: 'b', lastPlay: { playerName: 'Alice', result: 'Rolled 42 · won' } });
+    state = rooms.action('b', code, 'begin', state.table.revision, 'dice');
+    expect(state.table.lastPlay).toBeNull();
+    state = rooms.action('b', code, 'finish', state.table.revision, 'dice');
+    expect(state.table.turn).toBe('a');
+  });
+  it('lets seated friends play independent games simultaneously and shares compact live views', () => {
+    rooms.join('b', 'Bob', code, look);
+    let state = rooms.action('a', code, 'sit', 0, 'mines', true);
+    state = rooms.action('b', code, 'sit', state.table.revision, 'mines', true);
+    state = rooms.action('a', code, 'begin', state.table.revision, 'mines');
+    state = rooms.action('b', code, 'begin', state.table.revision, 'mines');
+    state = rooms.action('a', code, 'share', state.table.revision, 'mines', false, 'Mines: made a pick', 0, { action: 'pick', revealed: [2, 8], multiplier: 1.4 });
+    const seen = rooms.sync('b', code).table;
+    expect(seen.activities.a).toMatchObject({ phase: 'playing', result: 'Mines: made a pick', view: { revealed: [2, 8], multiplier: 1.4 } });
+    expect(seen.activities.b.phase).toBe('playing');
+    state = rooms.action('a', code, 'finish', state.table.revision, 'mines', false, 'Mines: cashed out', 0, { payout: 35 });
+    expect(state.table.activities).toMatchObject({ a: { phase: 'resolved', view: { payout: 35 } }, b: { phase: 'playing' } });
+  });
+  it('lists every lounge game as a four-seat social table', () => {
+    const state = rooms.sync('a', code);
+    expect(state.tables).toHaveLength(15);
+    expect(new Set(state.tables.map(t => t.game)).size).toBe(14);
+  });
+  it('requires a Blackjack bet before dealing the shared hand', () => {
+    let state = rooms.action('a', code, 'sit', 0, 'palm', true);
+    expect(() => rooms.action('a', code, 'deal', state.table.revision, 'palm')).toThrow('place a bet');
+    state = placeBet('a', state);
+    expect(state.table.bets).toEqual({ a: 25 });
+    state = rooms.action('a', code, 'deal', state.table.revision, 'palm');
+    expect(state.table).toMatchObject({ game: 'blackjack', phase: 'playing', hands: [{ id: 'a', bet: 25 }] });
+  });
   it('protects the HTTP endpoints and validates coordinates and customization', async () => {
     expect((await request(app).post('/multiplayer/join').send({ look })).status).toBe(401);
     const token = signToken({ sub: 'practice-test', username: 'Test' });
@@ -99,7 +146,7 @@ describe('mobile multiplayer practice rooms', () => {
     expect(join.status).toBe(200);
     const farStation = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, x: 14, z: 22.2 } });
     expect(farStation.status).toBe(200);
-    const outsideLounge = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, z: 24 } });
+    const outsideLounge = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, z: 39 } });
     expect(outsideLounge.status).toBe(400);
     const bad = await request(app).post('/multiplayer/sync').auth(token, { type: 'bearer' }).send({ code: join.body.code, pose: { ...pose, x: 99999 } });
     expect(bad.status).toBe(400);

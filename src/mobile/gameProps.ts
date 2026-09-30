@@ -59,9 +59,14 @@ export function addGameProps(parent: T.Group, game: GameId) {
     }
     text('ROLL', .7, 1.28, -.5, .8, .24).rotation.x = -Math.PI / 3;
   } else if (game === 'coinflip') {
-    const coin = add(new T.CylinderGeometry(.5, .5, .08, 48), gold, -.8, 1.32, -.2); coin.rotation.x = .18;
-    text('G', -.8, 1.375, -.2, .65, .65, '#a07b39').rotation.x = -Math.PI / 2;
-    for (let i = 0; i < 6; i++) add(new T.CylinderGeometry(.18, .18, .035, 24), gold, .4, 1.2 + i * .04, -.4);
+    // A physical coin belongs to each seat. Keep it toward the centre of the
+    // felt so the player's projected betting screen cannot cover it.
+    for (const [seat, x] of [-1.78, -.6, .6, 1.78].entries()) {
+      const coinRig = new T.Group(); coinRig.name = `coinflip-seat-${seat}`; coinRig.position.set(x, 1.25, -.58); coinRig.visible = false; parent.add(coinRig);
+      const coin = new T.Mesh(new T.CylinderGeometry(.38, .38, .085, 40), gold); coin.name = `coinflip-disc-${seat}`; coinRig.add(coin);
+      const face = text('G', 0, .049, 0, .5, .5, '#a07b39'); face.name = `coinflip-face-${seat}`; face.rotation.x = -Math.PI / 2; coinRig.add(face);
+      coinRig.userData.baseY = coinRig.position.y; coinRig.userData.flipping = false; coinRig.userData.face = 'G';
+    }
   } else if (game === 'limbo') {
     box(-.8, 1.68, -.2, 1.4, .95, .18); text('2.00×', -.8, 1.7, -.1, 1.25, .75);
     for (let i = 0; i < 5; i++) box(-1.3 + i * .24, 1.27 + i * .06, .3, .13, .15 + i * .12, .14, gold);

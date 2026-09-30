@@ -1,0 +1,106 @@
+/* Every Lounge game uses the approved Blackjack composition: the 3D room is
+   the screen, and the game UI is anchored to the physical table. */
+body.lounge-game-room>#app>header,
+body.lounge-game-room .table-heading,
+body.lounge-game-room .dealer-label,
+body.lounge-game-room .lounge-tools,
+body.lounge-game-room .controls-hint { display:none!important; }
+
+body.lounge-game-room #table-screen { position:fixed; inset:0; z-index:3; pointer-events:none; }
+body.lounge-game-room .dealer-cards,
+body.lounge-game-room .social-seat,
+body.lounge-game-room .table-footer,
+body.lounge-game-room .leave-table,
+body.lounge-game-room #table-sound { position:fixed; transform:translate(-50%,-50%); margin:0; }
+
+body.lounge-game-room .dealer-cards { z-index:7; }
+body.lounge-game-room .social-game-symbol {
+  width:78px; height:64px; border-radius:12px; background:#092c27e8;
+  border:1px solid #d7b66a88; box-shadow:0 8px 24px #00191580;
+  font-size:28px; color:#f1d497;
+}
+body.lounge-game-room .social-game-symbol small {
+  display:block; font:800 8px 'DM Sans',sans-serif; letter-spacing:1.2px;
+  text-transform:uppercase; color:#d8e5dd;
+}
+body.lounge-game-room .shared-table-view {
+  min-width:180px; max-width:240px; padding:9px 13px; text-align:center;
+  border:1px solid #d7b66a88; border-radius:10px; background:#092c27ed;
+  box-shadow:0 8px 24px #00191580;
+}
+body.lounge-game-room .shared-table-view>b { color:#f6deb0; font-size:9px; letter-spacing:1px; text-transform:uppercase; }
+body.lounge-game-room .shared-table-view .mini-game-view { margin-top:6px; }
+body.lounge-game-room .shared-table-view .mini-game-view small { max-width:165px; }
+body.lounge-game-room .hands { position:fixed; inset:0; width:auto; transform:none; display:block; pointer-events:none; z-index:7; }
+body.lounge-game-room .social-seat {
+  width:150px; min-height:78px; padding:7px 9px; text-align:center;
+  border:1px solid #d7b66a66; border-top:3px solid #668078;
+  border-radius:9px; background:#092c27e5; box-shadow:0 6px 18px #00191570;
+}
+body.lounge-game-room .social-seat.active { border-color:#f0c96c; box-shadow:0 0 22px #e6bd6055; }
+body.lounge-game-room .social-seat.mine { background:#10453cf0; }
+body.lounge-game-room .social-seat .seat-number { margin-bottom:4px; color:#b8cfc7; font-size:7px; }
+body.lounge-game-room .social-seat .hand-name { margin:0; justify-content:center; color:#f6deb0; font-size:9px; }
+body.lounge-game-room .social-seat .hand-name b { margin-left:5px; color:#77f0c7; font-size:8px; }
+body.lounge-game-room .mini-game-view { display:flex; align-items:center; justify-content:center; gap:7px; margin-top:5px; }
+body.lounge-game-room .mini-game-view>span { color:#e8c77f; font-size:18px; line-height:1; }
+body.lounge-game-room .mini-game-view small { overflow:hidden; max-width:106px; color:#d8e5dd; font-size:8px; line-height:1.2; text-overflow:ellipsis; white-space:nowrap; }
+
+body.lounge-game-room .table-footer {
+  left:0; right:auto; bottom:auto; width:auto; min-height:0; padding:7px 9px; gap:9px;
+  border:1px solid #d7b66a88; border-radius:10px; background:#092c27ed; z-index:10; pointer-events:auto;
+}
+body.lounge-game-room .table-footer .row { min-width:0; gap:6px; }
+body.lounge-game-room .table-footer button { min-height:38px; padding:8px 20px; border-radius:7px; }
+body.lounge-game-room #turn-status { max-width:260px; text-align:center; color:#f1ddb2; font-size:9px; font-weight:800; letter-spacing:.7px; }
+body.lounge-game-room .leave-table,
+body.lounge-game-room #table-sound {
+  right:18px; left:auto; transform:none; min-height:40px; padding:8px 14px; z-index:20; pointer-events:auto;
+  background:#092c27ed; border-color:#d7b66a88; color:#f1ddb2;
+}
+body.lounge-game-room .leave-table { top:18px; }
+body.lounge-game-room #table-sound { top:68px; }
+
+/* The running game is a tabletop surface. The room, dealer and all four
+   players remain visible around it instead of being replaced by a new page. */
+body.lounge-game-room #arcade-host.social-turn {
+  position:fixed; inset:auto; width:min(650px,58vw); height:min(370px,50vh);
+  transform:translate(-50%,-50%); z-index:9; overflow:hidden; pointer-events:none;
+  border:1px solid #e2c47b99; border-radius:14px; background:#0b2029e8;
+  box-shadow:0 14px 38px #00110dcc,0 0 0 5px #09231caa;
+}
+body.lounge-game-room #arcade-host.social-turn iframe { width:100%; height:100%; border:0; border-radius:12px; pointer-events:auto; }
+body.lounge-game-room #arcade-host.social-turn #arcade-loading { top:8px; right:8px; padding:8px 10px; pointer-events:auto; }
+body.lounge-game-room.social-playing .dealer-cards { display:none!important; }
+body.lounge-game-room.social-playing .table-footer { z-index:12; }
+
+/* Coin Flip is built directly into each seat: one physical coin plus the
+   player's compact betting screen. It never opens the generic game window. */
+body.coinflip-room .dealer-cards,
+body.coinflip-room .table-footer { display:none!important; }
+body.coinflip-room .coinflip-seat.mine { width:205px; min-height:154px; padding:8px 10px; }
+body.coinflip-room .coinflip-seat-controls { margin-top:6px; pointer-events:auto; }
+body.coinflip-room .coinflip-seat-controls label { display:flex; align-items:center; gap:7px; margin:0 0 5px; color:#f1ddb2; font-size:8px; font-weight:800; }
+body.coinflip-room .coinflip-seat-controls input { min-height:28px; height:28px; margin:0; padding:4px 7px; font-size:11px; }
+body.coinflip-room .coinflip-bet-row,
+body.coinflip-room .coinflip-side-row { display:flex; gap:4px; margin-top:4px; }
+body.coinflip-room .coinflip-seat-controls button { flex:1; min-height:27px; padding:4px 5px; border-radius:5px; font-size:8px; }
+body.coinflip-room .coinflip-side-row button { min-height:31px; font-size:9px; }
+body.coinflip-room .coinflip-table-coin {
+  position:fixed; width:74px; height:74px; transform:translate(-50%,-50%); z-index:6;
+  display:grid; place-items:center; border:7px solid #e0b54e; border-radius:50%;
+  background:radial-gradient(circle at 38% 32%,#fff0a6 0 8%,#f4c851 9% 48%,#b97713 72%,#70400a 100%);
+  box-shadow:0 7px 15px #00150fb0,inset 0 0 0 3px #7d4b12,inset 0 0 0 7px #f8db72;
+  color:#70400a; font:900 30px Georgia,serif; text-shadow:0 1px #ffe997; pointer-events:none;
+}
+body.coinflip-room .coinflip-table-coin span { display:grid; place-items:center; width:42px; height:42px; border:2px solid #9d6518; border-radius:50%; }
+body.coinflip-room .coinflip-table-coin.flipping { animation:seat-coin-flip .55s linear infinite; }
+@keyframes seat-coin-flip { 0%{transform:translate(-50%,-50%) rotateY(0) translateY(0)} 50%{transform:translate(-50%,-50%) rotateY(180deg) translateY(-18px)} 100%{transform:translate(-50%,-50%) rotateY(360deg) translateY(0)} }
+
+@media(max-height:650px) and (orientation:landscape) {
+  body.lounge-game-room .social-seat { width:125px; min-height:62px; padding:5px 7px; }
+  body.lounge-game-room .mini-game-view { margin-top:3px; }
+  body.lounge-game-room #arcade-host.social-turn { width:min(600px,56vw); height:min(315px,49vh); }
+  body.lounge-game-room .table-footer { transform:translate(-50%,-50%) scale(.88); }
+  body.coinflip-room .coinflip-seat.mine { width:185px; min-height:138px; }
+}

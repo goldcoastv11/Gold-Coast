@@ -1,4 +1,5 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
@@ -22,6 +23,7 @@ import { ApiError, NetworkError } from "../api/client";
 import type { HiLoGuess } from "../api/types";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawQuickLabel, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
 
 // Stake-style layout: card/history/buttons centered in the shell's
 // right-side display area (see ui/uiHelpers.ts's makeGameShell) - the
@@ -115,6 +117,14 @@ export class HiLoScene extends Phaser.Scene {
   private walkAwayBtn?: UIButton;
   private betControl?: BetControl;
   private shell!: GameShellHandle;
+  private directQuickplay = false;
+  private cardX = DX;
+  private cardY = CARD_Y;
+  private cardW = CARD_W;
+  private cardH = CARD_H;
+  private historyY = HISTORY_Y;
+  private historyCardW = HISTORY_CARD_W;
+  private historyCardH = HISTORY_CARD_H;
 
   constructor() {
     super("HiLoScene");
@@ -133,6 +143,14 @@ export class HiLoScene extends Phaser.Scene {
     this.busy = false;
     this.roundId = null;
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) {
+      this.scale.once("resize", () => this.scene.restart());
+      this.createDirectQuickplayLayout();
+      this.updateBalance();
+      return;
+    }
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. Higher/Lower/card/history live in the
@@ -209,6 +227,62 @@ export class HiLoScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplayLayout() {
+    const stage = createQuickplayStage(this);
+    drawQuickLabel(this, stage, 18, "AMOUNT");
+    this.balanceText = makeText(this, stage.right, stage.top + 18, "", { size: Tokens.type.size.xs, color: Tokens.text.muted, align: "right", originX: 1 }).setScrollFactor(0);
+    this.betControl = makeQuickBetControl(this, stage, 48);
+    this.startBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 102, stage.contentW, 44, "PLAY", Tokens.color.info, Tokens.color.infoHover, () => this.startRun(), Tokens.text.primary, Tokens.radius.md);
+    this.cashOutBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 154, stage.contentW, 44, "CASH OUT", Tokens.color.accent, Tokens.color.accentHover, () => this.cashOut(), Tokens.text.onAccent, Tokens.radius.md);
+    const gap = Tokens.space.sm;
+    this.higherBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 214, stage.contentW, 44, "HIGHER OR SAME  ▲", Tokens.color.surfaceHover, Tokens.color.info, () => this.guess("higher"), Tokens.text.primary, Tokens.radius.md);
+    this.lowerBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 266, stage.contentW, 44, "LOWER OR SAME  ▼", Tokens.color.surfaceHover, Tokens.color.info, () => this.guess("lower"), Tokens.text.primary, Tokens.radius.md);
+    void gap;
+    drawQuickLabel(this, stage, 304, "TOTAL NET GAIN");
+    const multBg = this.add.graphics().setScrollFactor(0);
+    multBg.fillStyle(Tokens.color.inset, 1).fillRoundedRect(stage.left, stage.top + 320, stage.contentW, 40, Tokens.radius.md);
+    multBg.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(stage.left, stage.top + 320, stage.contentW, 40, Tokens.radius.md);
+    this.multiplierText = makeText(this, stage.left + Tokens.space.md, stage.top + 340, "Multiplier: 1.00x", { size: Tokens.type.size.sm, weight: Tokens.type.weight.semibold, color: Tokens.text.primary, originY: 0.5 }).setScrollFactor(0);
+    this.messageText = makeText(this, stage.left, stage.top + 374, "Start a run to deal the first card.", { size: Tokens.type.size.xs, color: Tokens.text.muted, wordWrapWidth: stage.contentW, originY: 0 }).setScrollFactor(0);
+    this.walkAwayBtn = makeQuickBackButton(this, stage, () => this.leaveGame());
+    for (const button of [this.startBtn, this.cashOutBtn, this.higherBtn, this.lowerBtn]) button.container.setScrollFactor(0);
+    this.cashOutBtn.container.setVisible(false);
+    this.cashOutBtn.setEnabled(false);
+
+    const boardCx = stage.board.x + stage.board.w / 2;
+    this.cardX = boardCx;
+    this.cardY = stage.board.y + 142;
+    this.cardW = 82;
+    this.cardH = 120;
+    this.historyY = stage.board.y + stage.board.h - 70;
+    this.historyCardW = 44;
+    this.historyCardH = 62;
+    this.cardBg = this.add.graphics();
+    this.cardLabel = makeText(this, this.cardX, this.cardY, "", { size: Tokens.type.glyph.lg, weight: Tokens.type.weight.bold, align: "center", originX: 0.5, originY: 0.5 });
+    this.paintCard(null);
+    this.historyContainer = this.add.container(0, 0);
+
+    const hintY = this.cardY;
+    const hintOffset = Math.min(250, stage.board.w * 0.33);
+    this.drawRankHint(boardCx - hintOffset, hintY, "A", "ACE IS HIGHEST", true);
+    this.drawRankHint(boardCx + hintOffset, hintY, "2", "TWO IS LOWEST", false);
+
+    const gainY = stage.board.y + 318;
+    const gainPanel = this.add.graphics();
+    gainPanel.fillStyle(Tokens.color.surface, 1).fillRoundedRect(stage.board.x + 14, gainY - 48, stage.board.w - 28, 96, Tokens.radius.md);
+    this.readoutText = makeText(this, boardCx, gainY, "", { size: Tokens.type.size.sm, color: Tokens.text.secondary, align: "center", originX: 0.5, originY: 0.5 });
+    this.setGuessButtonsVisible(false);
+  }
+
+  private drawRankHint(x: number, y: number, rank: string, caption: string, higher: boolean) {
+    const g = this.add.graphics();
+    g.fillStyle(Tokens.color.inset, 1).fillRoundedRect(x - 42, y - 62, 84, 124, Tokens.radius.md);
+    g.lineStyle(1, Tokens.color.hairline, 1).strokeRoundedRect(x - 42, y - 62, 84, 124, Tokens.radius.md);
+    makeText(this, x, y - 30, rank, { size: Tokens.type.glyph.sm, weight: Tokens.type.weight.bold, color: Tokens.text.muted, align: "center", originX: 0.5, originY: 0.5 });
+    makeText(this, x, y + 13, higher ? "▲" : "▼", { size: Tokens.type.size.xl, color: Tokens.text.muted, align: "center", originX: 0.5, originY: 0.5 });
+    makeText(this, x, y + 79, caption, { size: Tokens.type.size.xs, color: Tokens.text.muted, align: "center", originX: 0.5, originY: 0.5 });
+  }
+
   private setGuessButtonsVisible(visible: boolean) {
     this.higherBtn?.container.setVisible(visible);
     this.lowerBtn?.container.setVisible(visible);
@@ -217,11 +291,11 @@ export class HiLoScene extends Phaser.Scene {
   private paintCard(card: DisplayCard | null) {
     this.cardBg.clear();
     if (!card) {
-      drawCardSurface(this.cardBg, DX, CARD_Y, CARD_W, CARD_H, "empty", Tokens.radius.md);
+      drawCardSurface(this.cardBg, this.cardX, this.cardY, this.cardW, this.cardH, "empty", Tokens.radius.md);
       this.cardLabel.setText("?").setColor(Tokens.text.muted);
       return;
     }
-    drawCardSurface(this.cardBg, DX, CARD_Y, CARD_W, CARD_H, "face", Tokens.radius.md);
+    drawCardSurface(this.cardBg, this.cardX, this.cardY, this.cardW, this.cardH, "face", Tokens.radius.md);
     this.cardLabel
       .setText(`${card.label}${card.suit}`)
       .setColor(card.isRed ? Tokens.card.inkRed : Tokens.card.ink);
@@ -231,13 +305,13 @@ export class HiLoScene extends Phaser.Scene {
     this.historyContainer.removeAll(true);
     const recent = this.history.slice(-HISTORY_MAX);
     const gap = Tokens.space.xs;
-    const totalWidth = recent.length * HISTORY_CARD_W + (recent.length - 1) * gap;
-    const startX = DX - totalWidth / 2 + HISTORY_CARD_W / 2;
+    const totalWidth = recent.length * this.historyCardW + (recent.length - 1) * gap;
+    const startX = this.cardX - totalWidth / 2 + this.historyCardW / 2;
     recent.forEach((card, i) => {
-      const x = startX + i * (HISTORY_CARD_W + gap);
+      const x = startX + i * (this.historyCardW + gap);
       const bg = this.add.graphics();
-      drawCardSurface(bg, x, HISTORY_Y, HISTORY_CARD_W, HISTORY_CARD_H, "face", Tokens.radius.xs);
-      const label = makeText(this, x, HISTORY_Y, `${card.label}${card.suit}`, {
+      drawCardSurface(bg, x, this.historyY, this.historyCardW, this.historyCardH, "face", Tokens.radius.xs);
+      const label = makeText(this, x, this.historyY, `${card.label}${card.suit}`, {
         size: Tokens.type.size.xs,
         weight: Tokens.type.weight.semibold,
         color: card.isRed ? Tokens.card.inkRed : Tokens.card.ink,
@@ -391,6 +465,29 @@ export class HiLoScene extends Phaser.Scene {
       .then((res) => {
         gameState.hydrateFromServer(res.user);
         this.busy = false;
+
+        if (res.push) {
+          const state = res.state!;
+          this.higherCount = state.higherCount;
+          this.lowerCount = state.lowerCount;
+          const nextCard = displayCard(state.currentCard);
+          this.currentCard = nextCard;
+          this.history.push(nextCard);
+          this.paintCard(nextCard);
+          this.renderHistory();
+          if (res.deckExhausted) {
+            this.active = false;
+            this.messageText.setText(`Final card matched - push and cash out +${res.payout ?? 0} Gold Coins`).setColor(Tokens.text.secondary);
+            this.updateBalance();
+            this.endRun();
+            return;
+          }
+          this.messageText.setText(`${nextCard.label}${nextCard.suit} - push. Keep going.`).setColor(Tokens.text.secondary);
+          this.cashOutBtn?.setEnabled(this.correctGuesses >= 1);
+          this.setGuessButtonsVisible(true);
+          this.updateReadout();
+          return;
+        }
 
         if (!res.won) {
           this.active = false;

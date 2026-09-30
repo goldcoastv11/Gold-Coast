@@ -1,8 +1,10 @@
 import Phaser from "phaser";
+import { embeddedGame, loungePresentation } from "../mobile/arcadeBridge";
 import { fadeToScene, fadeInOnCreate } from "../ui/sceneTransition";
 import { gameState } from "../GameState";
 import { Tokens } from "../ui/DesignTokens";
 import {
+  makeButton,
   makeText,
   makeDivider,
   makeGameShell,
@@ -20,6 +22,8 @@ import * as api from "../api/client";
 import { ApiError, NetworkError } from "../api/client";
 import { showWinCelebration } from "../ui/WinCelebration";
 import { playSfx, playMusic } from "../ui/SoundManager";
+import { createQuickplayStage, drawQuickLabel, drawQuickReadout, makeQuickBackButton, makeQuickBetControl } from "../ui/quickplayGameUi";
+import type { VideoPokerCard } from "../api/types";
 
 /**
  * Standard "9/6 Jacks or Better" paytable - the classic full-pay video
@@ -71,10 +75,10 @@ interface Card {
   isRed: boolean;
 }
 
-/** Wraps a server-given rank in a randomly-chosen cosmetic suit for display - never affects scoring. */
-function displayCard(value: number): Card {
-  const suit = SUITS[Phaser.Math.Between(0, SUITS.length - 1)];
-  return { value, label: RANK_LABELS[value - 2], suit: suit.symbol, isRed: suit.isRed };
+/** Converts the server's stable card identity into its display glyph. */
+function displayCard(card: VideoPokerCard): Card {
+  const suit = SUITS[card.suit];
+  return { value: card.value, label: RANK_LABELS[card.value - 2], suit: suit.symbol, isRed: suit.isRed };
 }
 
 interface CardSlot {
@@ -119,6 +123,11 @@ const CARD_Y = 296;
 const HOLD_LABEL_Y = CARD_Y + CARD_H / 2 + Tokens.space.md;
 
 export class VideoPokerScene extends Phaser.Scene {
+  private directQuickplay = false;
+  private cardCenterX = DX;
+  private cardY = CARD_Y;
+  private cardW = CARD_W;
+  private cardH = CARD_H;
   private hand: Card[] = [];
   private held: boolean[] = [false, false, false, false, false];
   private stage: Stage = "idle";
@@ -149,6 +158,13 @@ export class VideoPokerScene extends Phaser.Scene {
     this.roundId = null;
     this.slots = [];
     this.cameras.main.setBackgroundColor(Tokens.color.bg);
+    this.directQuickplay = !!embeddedGame() && !loungePresentation();
+    if (this.directQuickplay) this.scale.once("resize", () => this.scene.restart());
+
+    if (this.directQuickplay) {
+      this.createDirectQuickplay();
+      return;
+    }
 
     // Stake-style shell - see MinesScene.create()/ui/uiHelpers.ts's
     // makeGameShell doc comment. This game has no cash-out concept, so
@@ -193,6 +209,40 @@ export class VideoPokerScene extends Phaser.Scene {
     this.updateBalance();
   }
 
+  private createDirectQuickplay() {
+    const stage = createQuickplayStage(this);
+    drawQuickLabel(this, stage, 26, "Amount");
+    this.betControl = makeQuickBetControl(this, stage, 68);
+    this.actionBtn = makeButton(this, stage.controls.x + stage.controls.w / 2, stage.top + 122, stage.contentW, 44, "Play", 0x1f7ae0, 0x2b8bf0, () => this.onActionButton(), Tokens.text.primary, Tokens.radius.md);
+    this.balanceText = makeText(this, -100, -100, "");
+    this.messageText = drawQuickReadout(this, stage, 162, "Hand", "Deal to start");
+    this.walkAwayBtn = makeQuickBackButton(this, stage, () => this.leaveGame());
+    this.paytableText = makeText(this, -100, -100, "");
+
+    const tableX = stage.board.x + 34;
+    const tableY = stage.board.y + 28;
+    const tableW = stage.board.w - 68;
+    const rowH = Math.min(35, (stage.board.h * 0.46) / PAYTABLE.length);
+    const payBg = this.add.graphics();
+    payBg.fillStyle(Tokens.color.surface, 1).fillRoundedRect(tableX - 12, tableY - 10, tableW + 24, rowH * PAYTABLE.length + 20, Tokens.radius.md);
+    PAYTABLE.filter((p) => p.mult > 0).forEach((p, i) => {
+      const y = tableY + i * rowH + rowH / 2;
+      this.add.rectangle(tableX, y, tableW * 0.5, rowH - 4, Tokens.color.inset).setOrigin(0, 0.5);
+      this.add.rectangle(tableX + tableW * 0.5 + 4, y, tableW * 0.22, rowH - 4, Tokens.color.surfaceRaised).setOrigin(0, 0.5);
+      makeText(this, tableX + 14, y, p.rank.toUpperCase(), { size: "13px", weight: Tokens.type.weight.bold, color: Tokens.text.primary, originY: 0.5 });
+      makeText(this, tableX + tableW * 0.61, y, `${p.mult.toFixed(p.mult < 10 ? 2 : 0)}×`, { size: "13px", weight: Tokens.type.weight.bold, color: Tokens.text.primary, originX: 0.5, originY: 0.5 });
+    });
+    const dealY = tableY + rowH * PAYTABLE.length + 42;
+    makeText(this, stage.board.x + stage.board.w / 2, dealY, "DEAL", { size: Tokens.type.size.sm, weight: Tokens.type.weight.bold, color: Tokens.text.secondary, originX: 0.5 });
+    this.cardCenterX = stage.board.x + stage.board.w / 2;
+    this.cardY = stage.board.y + stage.board.h - 92;
+    this.cardW = Math.min(92, (stage.board.w - 100) / 5);
+    this.cardH = Math.min(126, this.cardW * 1.38);
+    this.slots = this.buildCardSlots();
+    this.messageText.setText("Deal to start a hand.").setColor(Tokens.text.muted);
+    this.updateBalance();
+  }
+
   private renderPaytable() {
     const parts = PAYTABLE.filter((p) => p.mult > 0).map((p) => `${p.rank} ${p.mult}x`);
     this.paytableText.setText(parts.join("   "));
@@ -200,20 +250,20 @@ export class VideoPokerScene extends Phaser.Scene {
 
   private buildCardSlots(): CardSlot[] {
     const slots: CardSlot[] = [];
-    const totalWidth = 5 * CARD_W + 4 * CARD_GAP;
-    const startX = DX - totalWidth / 2 + CARD_W / 2;
+    const totalWidth = 5 * this.cardW + 4 * CARD_GAP;
+    const startX = this.cardCenterX - totalWidth / 2 + this.cardW / 2;
 
     for (let i = 0; i < 5; i++) {
-      const x = startX + i * (CARD_W + CARD_GAP);
+      const x = startX + i * (this.cardW + CARD_GAP);
       const bg = this.add.graphics();
-      const label = makeText(this, x, CARD_Y, "", {
+      const label = makeText(this, x, this.cardY, "", {
         size: Tokens.type.glyph.md,
         weight: Tokens.type.weight.semibold,
         align: "center",
         originX: 0.5,
         originY: 0.5
       });
-      const holdLabel = makeText(this, x, HOLD_LABEL_Y, "", {
+      const holdLabel = makeText(this, x, this.cardY + this.cardH / 2 + Tokens.space.md, "", {
         size: Tokens.type.size.xs,
         weight: Tokens.type.weight.semibold,
         color: Tokens.text.accent,
@@ -221,10 +271,10 @@ export class VideoPokerScene extends Phaser.Scene {
         align: "center",
         originX: 0.5
       });
-      const hitZone = this.add.zone(x, CARD_Y, CARD_W, CARD_H).setInteractive({ useHandCursor: true });
+      const hitZone = this.add.zone(x, this.cardY, this.cardW, this.cardH).setInteractive({ useHandCursor: true });
       const index = i;
       hitZone.on("pointerdown", () => this.toggleHold(index));
-      const slot: CardSlot = { bg, label, holdLabel, hitZone, x, y: CARD_Y };
+      const slot: CardSlot = { bg, label, holdLabel, hitZone, x, y: this.cardY };
       slots.push(slot);
       this.paintSlot(slot, null, false);
     }
@@ -234,12 +284,12 @@ export class VideoPokerScene extends Phaser.Scene {
   private paintSlot(slot: CardSlot, card: Card | null, held: boolean) {
     slot.bg.clear();
     if (!card) {
-      drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, "empty", Tokens.radius.md);
-      slot.label.setText("").setVisible(false);
+      drawCardSurface(slot.bg, slot.x, slot.y, this.cardW, this.cardH, this.directQuickplay ? "back" : "empty", Tokens.radius.md);
+      slot.label.setText(this.directQuickplay ? "G" : "").setColor(Tokens.text.primary).setVisible(this.directQuickplay);
       slot.holdLabel.setText("");
       return;
     }
-    drawCardSurface(slot.bg, slot.x, slot.y, CARD_W, CARD_H, held ? "held" : "face", Tokens.radius.md);
+    drawCardSurface(slot.bg, slot.x, slot.y, this.cardW, this.cardH, held ? "held" : "face", Tokens.radius.md);
     slot.label
       .setText(`${card.label}${card.suit}`)
       .setColor(card.isRed ? Tokens.card.inkRed : Tokens.card.ink)
