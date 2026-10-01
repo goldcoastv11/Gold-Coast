@@ -224,11 +224,6 @@ function renderTable() {
       }).join('');
     }
     if (coinflip) {
-      const seats = [0, 1, 2, 3].map(seat => {
-        const player = seated.find(p => p.seat === seat), activity = player ? t.activities?.[player.id] : undefined;
-        return { occupied: !!player, side: typeof activity?.view?.result === 'string' ? activity.view.result : undefined, flipping: activity?.phase === 'playing' };
-      });
-      world.setCoinFlipSeats(t.id, seats);
       if (renderSeats) {
         document.querySelectorAll<HTMLInputElement>('.coinflip-bet').forEach(input => input.onchange = () => { const amount = Number(input.value); if (Number.isInteger(amount) && amount >= 1 && amount <= 10000) coinFlipBet = amount; else { input.value = String(coinFlipBet); notify('Choose a whole-number bet from 1 to 10,000 Gold Coins.'); } });
         document.querySelectorAll<HTMLButtonElement>('[data-coin-bet]').forEach(button => button.onclick = () => { coinFlipBet = Number(button.dataset.coinBet); renderTable(); });

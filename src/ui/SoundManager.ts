@@ -110,6 +110,13 @@ const MUSIC_FADE_MS = 400;
  */
 export function playMusic(scene: Phaser.Scene, key: MusicKey): void {
   try {
+    // Lounge games run inside the social table iframe. Keep those tables
+    // free of background music so room voice chat stays clear; sound effects
+    // still use playSfx below. Quickplay keeps each game's music.
+    if (typeof document !== "undefined" && document.documentElement.classList.contains("lounge-game")) {
+      stopMusic(scene);
+      return;
+    }
     if (currentMusicKey === key && currentMusic?.isPlaying) return;
 
     const previous = currentMusic;

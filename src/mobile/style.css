@@ -6,6 +6,7 @@
 @media(max-height:600px) and (orientation:landscape){.wardrobe .swatch-row{display:flex;align-items:center;min-height:45px}.wardrobe .swatch-row h3{width:64px;flex-shrink:0;margin:0;font-size:10px}.wardrobe .swatch{width:31px;height:31px;min-height:31px;margin-right:7px}.wardrobe #swatches{margin-top:10px}}
 @media(max-width:740px) and (orientation:landscape){.welcome h1{font-size:31px}.entry-card{width:280px;right:3vw}.welcome{padding-left:4vw}.entry-foot{max-width:230px;line-height:1.8}.header-right{font-size:8px}.table-heading{left:16px}.table-heading .eyebrow{font-size:8px}.hand-name{font-size:9px}.hands{width:96vw}.hand{padding:6px}.card{width:23px;height:34px;font-size:12px}.nearby{left:58%;font-size:10px;width:220px;text-align:center}}
 .touch-hint{display:none}.controls-hint b{padding:0 8px;color:var(--gold)}#look-area.mouse-look-active{cursor:none}@media(pointer:coarse){.desktop-hint{display:none}.touch-hint{display:inline}}
+@media(hover:hover) and (pointer:fine){#joystick{display:none}}
 .social-seat{min-height:82px;border-top:3px solid #4b6571}.social-seat.active{border-top-color:var(--gold);background:#173a43f2}.social-seat .seat-number{font-size:8px;letter-spacing:1.5px;color:#91aab1;margin-bottom:8px}.social-seat.active .seat-number{color:var(--gold)}.social-game-symbol{display:grid;place-items:center;width:86px;height:86px;border-radius:50%;background:#102a34dd;border:2px solid var(--gold);box-shadow:0 0 35px #e5bb7230;color:var(--gold);font:700 34px 'Outfit',sans-serif}
 #arcade-host.social-turn{display:block;inset:0;border:0;border-radius:0;overflow:visible;background:transparent;box-shadow:none;z-index:18;pointer-events:none}#arcade-host.social-turn iframe{border-radius:0;background:transparent;pointer-events:auto}#arcade-host.social-turn #arcade-loading{top:72px;right:24px;pointer-events:auto}.social-turn~#toast{z-index:35}body.social-playing .dealer-label,body.social-playing .dealer-cards{display:none}.table-heading,.leave-table,.hands,.table-footer,#table-sound{z-index:20}.leave-table,.table-footer button,#table-sound{pointer-events:auto}
 @media(max-height:600px) and (orientation:landscape){.social-seat{min-height:62px}.social-game-symbol{width:58px;height:58px;font-size:25px}}
@@ -17,3 +18,11 @@
 body[data-mode=table] #voice-controls{top:118px;right:18px}
 body[data-mode=arcade] #voice-controls{top:18px;right:auto;left:18px}
 @media(max-height:650px) and (orientation:landscape){#voice-controls{top:124px}body[data-mode=table] #voice-controls{top:112px}}
+@media(max-width:900px) and (orientation:landscape){
+  .lobby-actions{top:64px;right:max(10px,env(safe-area-inset-right));width:min(250px,52vw);display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;padding:6px;border:1px solid #ffffff1c;border-radius:10px;background:#0b2231d9}
+  .lobby-actions button{min-height:34px;padding:6px 8px;font-size:9px;border-radius:6px}
+  .room-card{top:64px;left:max(10px,env(safe-area-inset-left));min-width:150px;padding:9px 11px}
+  .room-card .eyebrow{display:none}.room-card>div{margin-top:0;gap:12px;font-size:10px}.room-card #invite{min-height:27px;padding:3px 0;font-size:8px}
+  body[data-mode=lobby] #voice-controls{top:126px;left:max(10px,env(safe-area-inset-left));right:auto;max-width:250px}
+  #voice-controls span{min-width:82px}
+}

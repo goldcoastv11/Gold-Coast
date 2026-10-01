@@ -74,8 +74,8 @@ body.lounge-game-room #arcade-host.social-turn #arcade-loading { top:8px; right:
 body.lounge-game-room.social-playing .dealer-cards { display:none!important; }
 body.lounge-game-room.social-playing .table-footer { z-index:12; }
 
-/* Coin Flip is built directly into each seat: one physical coin plus the
-   player's compact betting screen. It never opens the generic game window. */
+/* Coin Flip stays inside each player's compact betting screen. The small
+   result coin floats just above that screen for everyone at the table. */
 body.coinflip-room .dealer-cards,
 body.coinflip-room .table-footer { display:none!important; }
 body.coinflip-room .coinflip-seat.mine { width:205px; min-height:154px; padding:8px 10px; }
@@ -103,4 +103,15 @@ body.coinflip-room .coinflip-table-coin.flipping { animation:seat-coin-flip .55s
   body.lounge-game-room #arcade-host.social-turn { width:min(600px,56vw); height:min(315px,49vh); }
   body.lounge-game-room .table-footer { transform:translate(-50%,-50%) scale(.88); }
   body.coinflip-room .coinflip-seat.mine { width:185px; min-height:138px; }
+}
+
+@media(max-width:900px) and (orientation:landscape) {
+  body.coinflip-room .coinflip-seat.mine { width:235px; min-height:162px; padding:10px 12px; }
+  body.coinflip-room .coinflip-seat-controls { margin-top:8px; }
+  body.coinflip-room .coinflip-seat-controls label { display:grid; grid-template-columns:30px minmax(0,1fr); gap:8px; align-items:center; }
+  body.coinflip-room .coinflip-seat-controls input { min-height:32px; height:32px; margin:0; font-size:12px; }
+  body.coinflip-room .coinflip-bet-row { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:5px; }
+  body.coinflip-room .coinflip-side-row { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:6px; margin-top:6px; }
+  body.coinflip-room .coinflip-seat-controls button { min-width:0; min-height:31px; padding:5px 4px; font-size:9px; }
+  body.coinflip-room .coinflip-side-row button { min-height:36px; font-size:10px; }
 }

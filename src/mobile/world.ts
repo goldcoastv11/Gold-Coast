@@ -113,25 +113,6 @@ export class ClubWorld {
     this.stageTitle.position.set(-2, 3.4, -4.6); this.gameStage.add(this.stageTitle);
     this.camera.position.set(40, 2.7, 5.8); this.camera.lookAt(40, .65, -.8);
   }
-  setCoinFlipSeats(tableId: string, states: { occupied: boolean; side?: string; flipping?: boolean }[]) {
-    const table = this.loungeTables.get(tableId);
-    if (!table) return;
-    states.forEach((state, seat) => {
-      const rig = table.getObjectByName(`coinflip-seat-${seat}`);
-      if (!rig) return;
-      rig.visible = state.occupied; rig.userData.flipping = !!state.flipping;
-      const value = state.side?.toLowerCase() === 'heads' ? 'H' : state.side?.toLowerCase() === 'tails' ? 'T' : state.flipping ? '?' : 'G';
-      if (rig.userData.face === value) return;
-      rig.userData.face = value;
-      const face = rig.getObjectByName(`coinflip-face-${seat}`) as T.Mesh<T.PlaneGeometry, T.MeshBasicMaterial> | undefined;
-      const map = face?.material.map, canvas = map?.image as HTMLCanvasElement | undefined, ctx = canvas?.getContext('2d');
-      if (!canvas || !ctx || !map) return;
-      ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.fillStyle = '#a07b39'; ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#d8b477'; ctx.lineWidth = 8; ctx.strokeRect(12, 12, canvas.width - 24, canvas.height - 24);
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.font = 'bold 150px Georgia'; ctx.fillStyle = '#fff0c8'; ctx.fillText(value, canvas.width / 2, canvas.height / 2);
-      map.needsUpdate = true;
-    });
-  }
   private resize() { const w = innerWidth, h = innerHeight; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); this.renderer.setSize(w, h); }
   resetInput() { this.keys.clear(); this.stick.x = this.stick.y = 0; }
   controls(stick: HTMLElement, nub: HTMLElement, lookArea: HTMLElement) {
@@ -217,19 +198,6 @@ export class ClubWorld {
       const inStage = dealer.group.parent === this.gameStage;
       if (inStage) dealer.group.visible = this.mode === 'arcade';
       if (inStage ? this.mode === 'arcade' : this.mode !== 'arcade' && dealer.group.position.distanceTo(this.camera.position) < 18) dealer.update(dt);
-    }
-    for (const table of this.loungeTables.values()) {
-      for (let seat = 0; seat < 4; seat++) {
-        const coin = table.getObjectByName(`coinflip-seat-${seat}`);
-        if (!coin) continue;
-        const baseY = Number(coin.userData.baseY ?? 1.31);
-        if (coin.userData.flipping) {
-          coin.rotation.x += dt * 11; coin.position.y = baseY + Math.abs(Math.sin(now * .008)) * .45;
-        } else {
-          coin.rotation.x = T.MathUtils.lerp(coin.rotation.x, 0, 1 - Math.exp(-dt * 9));
-          coin.position.y = T.MathUtils.lerp(coin.position.y, baseY, 1 - Math.exp(-dt * 9));
-        }
-      }
     }
     this.onFrame(); this.renderer.render(this.scene, this.camera);
   }
